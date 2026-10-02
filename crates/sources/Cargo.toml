@@ -1,8 +1,45 @@
 [package]
 name = "fp-sources"
+description = "FramePlayer media sources: local fs, HTTP/HLS/DASH, WebDAV, SMB, SFTP, DLNA, DeoVR feeds."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+# Pure-Rust SMB2/3 client (smb2 crate). Off by default; the SMB source type
+# still exists and reports a clear "built without SMB support" error.
+smb = ["dep:smb2"]
+# Pure-Rust SFTP (russh + russh-sftp, ring crypto backend).
+sftp = ["dep:russh", "dep:russh-sftp"]
+
 [dependencies]
 fp-core.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+futures.workspace = true
+hex.workspace = true
+parking_lot.workspace = true
+quick-xml.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+url.workspace = true
+chacha20poly1305 = "0.10"
+md-5 = "0.10"
+percent-encoding = "2"
+zeroize = { version = "1", features = ["derive"] }
+
+smb2 = { version = "0.27", optional = true }
+russh = { version = "0.63", optional = true, default-features = false, features = ["ring", "flate2"] }
+russh-sftp = { version = "3", optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
