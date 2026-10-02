@@ -198,7 +198,7 @@ frameplayer/
 └── .github/workflows build (aarch64 cross), lint, unit tests, release
 ```
 
-- **Build**: `cargo build --release --target aarch64-unknown-linux-gnu` inside the Docker image; static-link ffmpeg/dav1d/libsmb2/libass; bundle Vulkan loader? No: use the system loader and Turnip. **[verify]** that the system Vulkan loader is present outside the SLR container.
+- **Build**: `tools/build-frame.sh`, which cross-compiles with `cargo zigbuild` against a glibc 2.28 baseline. No ARM64 sysroot, Docker image or emulation is needed, and binaries run inside or outside the Steam Linux Runtime container. Static-link ffmpeg/dav1d/libsmb2/libass; use the system Vulkan loader and Turnip. OpenXR runtimes are loaded directly from the active manifest rather than through the Khronos C++ loader (see `crates/frame-probe/src/xr_loader.rs`). **[verify]** that the system Vulkan loader is present outside the SLR container.
 - **CI**: GitHub Actions on ARM64 runners; unit tests for parsers (funscript, filename detection, DeoVR feed), projection math, and the seek engine; QEMU can't run SteamVR, so XR tests run against a recorded-session simulator (the raylib quickstart's record/replay idea).
 - **Device lab**: a `make frame-go` style command that pushes, launches, and tails logs on a paired headset. Nightly perf run on a real Frame with the synthetic video set, reporting frame time and dropped frames.
 - **Release**: tag → CI builds tarball → signs manifest → publishes GitHub Release → updates website manifests → in-app updater picks it up.
@@ -209,7 +209,7 @@ frameplayer/
 
 | # | Milestone | Deliverable | Exit criteria |
 |---|---|---|---|
-| 0 | **Spike / de-risk** (2–3 wk) | Native ARM64 OpenXR app on Frame rendering a 4K HEVC equirect via HW decode + DMA-BUF import; raw controller input | 72 Hz sustained; every **[verify]** item in §1 answered and written to `docs/platform-notes.md` |
+| 0 | **Spike / de-risk** (2–3 wk). Platform probe built (`crates/frame-probe`); device run pending, results go in [platform-notes.md](platform-notes.md) | Native ARM64 OpenXR app on Frame rendering a 4K HEVC equirect via HW decode + DMA-BUF import; raw controller input | 72 Hz sustained; every **[verify]** item in §1 answered and written to `docs/platform-notes.md` |
 | 1 | **Playable MVP** | Local-file browser, flat/180/360 SBS/OU, auto-detect, seek/speed, subtitles, basic settings, Frame Control + FrameDrop manifests | A DeoVR user can watch their local library end to end |
 | 2 | **Library & network** | SQLite index, thumbnails, tags, resume, SMB/WebDAV/DLNA/HTTP, DeoVR JSON feed, web remote | XBVR/Stash libraries appear and play |
 | 3 | **Interactive** | Funscript + Handy/buttplug/TCode, DeoVR-compatible remote API, timeline script strip | Existing ohdoki / script tools work with zero config |

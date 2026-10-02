@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Unit tests
+        run: cargo test
+      - name: Install cross toolchain (zig + cargo-zigbuild)
+        run: |
+          pip install ziglang
+          cargo install --locked cargo-zigbuild
+      - name: Build for Steam Frame (aarch64, glibc 2.28)
+        run: tools/build-frame.sh -p frame-probe
+      - name: Check glibc baseline
+        run: |
+          v=$(readelf -V target/aarch64-unknown-linux-gnu/release/frame-probe | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1)
+          echo "highest glibc symbol: $v"
+          test "$(printf '%s\nGLIBC_2.28\n' "$v" | sort -V | tail -1)" = "GLIBC_2.28"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frame-probe-aarch64
+          path: target/aarch64-unknown-linux-gnu/release/frame-probe

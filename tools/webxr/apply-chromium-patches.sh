@@ -10,9 +10,8 @@ src="${1:?path to chromium/src required}"
 here="$(cd "$(dirname "$0")/../.." && pwd)"
 patches="$here/docs/webxr/patches"
 cd "$src"
-if ! git log --oneline -1 --grep="run the XR device service in the sandbox on Linux" >/dev/null 2>&1 \
-   || [ -z "$(git log --oneline --grep="run the XR device service in the sandbox on Linux" | head -1)" ]; then
-  echo "warning: XR sandbox CL (e0f937bba4ff) not found in history; patches 2 and 3 will not apply." >&2
+if [ ! -f content/services/isolated_xr_device/xr_sandbox_hook_linux.cc ]; then
+  echo "warning: XR sandbox CL (e0f937bba4ff) is not in this checkout; patches 2 and 3 will not apply." >&2
 fi
 for p in "$patches"/000*.patch; do
   echo "==> $(basename "$p")"
