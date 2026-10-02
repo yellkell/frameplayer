@@ -1,0 +1,164 @@
+From 0f9b79b1e685399b18ed16b66656e8b6734494c2 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Fri, 2 Oct 2026 23:11:45 +0000
+Subject: [PATCH 1/3] Linux sandbox: broker answers for the bare /proc/self
+ link
+
+The syscall broker rewrites "/proc/self/<entry>" to the sandboxed
+process's "/proc/<pid>/<entry>", but a request for the bare "/proc/self"
+link was passed through unchanged, so the broker answered for itself:
+readlink() returned the broker's pid, and open()/stat() reached the
+broker's own /proc directory.
+
+Callers hit the bare form whenever they canonicalize a /proc/self path
+with realpath(3), which readlink()s every component. SteamVR's OpenXR
+runtime, running in the sandboxed XR device service on Steam Frame,
+ended up registering the broker's pid with its compositor, which then
+refused the session (utzcoz/chromium-webxr-linux#7): with the prefixed
+form already rewritten, only the bare link can produce that.
+
+Treat the bare link like the prefixed form: open() and stat() resolve to
+the sandboxed process's directory, and readlink() synthesizes the pid
+the kernel would have returned in that process, since the rewritten
+target is a directory. A permission for "/proc/self" is still required,
+and still only ever reaches the sandboxed process's own entries.
+
+Bug: none
+Test: sandbox_linux_unittests --gtest_filter='BrokerProcess.RewriteProcSelf*'
+---
+ sandbox/linux/syscall_broker/broker_host.cc   | 23 +++++++
+ .../syscall_broker/broker_process_unittest.cc | 66 +++++++++++++++++++
+ 2 files changed, 89 insertions(+)
+
+diff --git a/sandbox/linux/syscall_broker/broker_host.cc b/sandbox/linux/syscall_broker/broker_host.cc
+index cc3a072..1093e9a 100644
+--- a/sandbox/linux/syscall_broker/broker_host.cc
++++ b/sandbox/linux/syscall_broker/broker_host.cc
+@@ -42,6 +42,9 @@ namespace {
+ 
+ const char kProcSelf[] = "/proc/self/";
+ const size_t kProcSelfNumChars = sizeof(kProcSelf) - 1;
++// The /proc/self symlink itself, as requested by callers that resolve it
++// explicitly, most commonly realpath(3) walking a /proc/self/... path.
++constexpr std::string_view kProcSelfLink = "/proc/self";
+ 
+ // A little open(2) wrapper to handle some oddities for us. In the general case
+ // make a direct system call since we want to keep in control of the broker
+@@ -62,6 +65,14 @@ std::optional<std::string> BrokerHost::RewritePathname(const char* pathname) {
+                               UNSAFE_TODO(pathname + kProcSelfNumChars));
+   }
+ 
++  // The bare symlink: resolve it to the sandboxed process's directory, as the
++  // kernel would have done in that process. Left alone, it would name the
++  // broker itself. readlink() on this path is special-cased by its handler,
++  // because the rewritten path is a directory rather than a link.
++  if (kProcSelfLink == pathname) {
++    return base::StringPrintf("/proc/%d", sandboxed_process_pid_);
++  }
++
+   return std::nullopt;
+ }
+ 
+@@ -212,6 +223,18 @@ void BrokerHost::ReadlinkFileForIPC(const char* requested_filename,
+     return;
+   }
+ 
++  // readlink("/proc/self") answers with the pid of the calling process. The
++  // broker's own answer would be its pid, not the sandboxed process's, and
++  // RewritePathname() maps the link to a directory, on which readlink() fails
++  // with EINVAL. Synthesize what the kernel would have returned in the
++  // sandboxed process instead.
++  if (kProcSelfLink == file_to_access) {
++    const std::string pid = base::StringPrintf("%d", sandboxed_process_pid_);
++    RAW_CHECK(reply->AddIntToMessage(static_cast<int>(pid.size())));
++    RAW_CHECK(reply->AddDataToMessage(base::as_byte_span(pid)));
++    return;
++  }
++
+   std::optional<std::string> rewritten_filename =
+       RewritePathname(file_to_access);
+   if (rewritten_filename.has_value()) {
+diff --git a/sandbox/linux/syscall_broker/broker_process_unittest.cc b/sandbox/linux/syscall_broker/broker_process_unittest.cc
+index a62f8f9..69e20d2 100644
+--- a/sandbox/linux/syscall_broker/broker_process_unittest.cc
++++ b/sandbox/linux/syscall_broker/broker_process_unittest.cc
+@@ -6,6 +6,7 @@
+ 
+ #include <errno.h>
+ #include <fcntl.h>
++#include <limits.h>
+ #include <poll.h>
+ #include <stddef.h>
+ #include <sys/inotify.h>
+@@ -854,6 +855,71 @@ TEST(BrokerProcess, RewriteProcSelfHost) {
+   TestRewriteProcSelfHelper(false);
+ }
+ 
++// The bare /proc/self link (no trailing slash), as resolved by realpath(3)
++// on any /proc/self/... path, must also answer for the sandboxed process.
++void TestRewriteProcSelfLinkHelper(bool fast_check_in_client) {
++  std::vector<BrokerFilePermission> permissions = {
++      BrokerFilePermission::ReadOnly("/proc/self")};
++  BrokerCommandSet command_set =
++      MakeBrokerCommandSet({COMMAND_OPEN, COMMAND_READLINK, COMMAND_STAT});
++
++  auto policy = std::make_optional<BrokerSandboxConfig>(
++      command_set, permissions, kFakeErrnoSentinel);
++  BrokerProcess open_broker(std::move(policy), BrokerType::SIGNAL_BASED,
++                            fast_check_in_client);
++  ASSERT_TRUE(open_broker.Fork(base::BindOnce(&NoOpCallback)));
++
++  const std::string expected_pid = base::NumberToString(getpid());
++  const std::string own_proc_dir = "/proc/" + expected_pid;
++  struct stat direct;
++  ASSERT_EQ(0, stat(own_proc_dir.c_str(), &direct));
++
++  {
++    // readlink() reports this process's pid, not the broker's.
++    char buf[PATH_MAX];
++    ssize_t retlen = open_broker.GetBrokerClientSignalBased()->Readlink(
++        "/proc/self", buf, sizeof(buf));
++    ASSERT_EQ(static_cast<ssize_t>(expected_pid.size()), retlen);
++    EXPECT_EQ(expected_pid,
++              std::string_view(buf, static_cast<size_t>(retlen)));
++  }
++  {
++    // A buffer that is too small truncates, as readlink(2) does.
++    char buf[1];
++    EXPECT_EQ(1, open_broker.GetBrokerClientSignalBased()->Readlink(
++                     "/proc/self", buf, sizeof(buf)));
++    EXPECT_EQ(expected_pid[0], buf[0]);
++  }
++  {
++    // stat() follows the link into this process's /proc directory.
++    default_stat_struct sb;
++    UNSAFE_TODO(memset(&sb, 0, sizeof(sb)));
++    ASSERT_EQ(0, open_broker.GetBrokerClientSignalBased()->DefaultStatForTesting(
++                     "/proc/self", /*follow_links=*/true, &sb));
++    EXPECT_EQ(static_cast<uint64_t>(direct.st_ino),
++              static_cast<uint64_t>(sb.st_ino));
++  }
++  {
++    // open() yields a directory fd for this process's /proc directory.
++    int fd = open_broker.GetBrokerClientSignalBased()->Open(
++        "/proc/self", O_RDONLY | O_DIRECTORY);
++    ASSERT_GE(fd, 0);
++    struct stat via_fd;
++    ASSERT_EQ(0, fstat(fd, &via_fd));
++    EXPECT_EQ(direct.st_ino, via_fd.st_ino);
++    EXPECT_EQ(direct.st_dev, via_fd.st_dev);
++    ASSERT_GE(IGNORE_EINTR(close(fd)), 0);
++  }
++}
++
++TEST(BrokerProcess, RewriteProcSelfLinkClient) {
++  TestRewriteProcSelfLinkHelper(true);
++}
++
++TEST(BrokerProcess, RewriteProcSelfLinkHost) {
++  TestRewriteProcSelfLinkHelper(false);
++}
++
+ TEST(BrokerProcess, CreateFile) {
+   // Create two temporary files, grab their file names, and then delete the
+   // files themselves.

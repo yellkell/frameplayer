@@ -1,0 +1,62 @@
+From 6fcb1c62d7ac37438a00b2487af998465d201645 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Fri, 2 Oct 2026 23:11:45 +0000
+Subject: [PATCH 3/3] sandbox: allow getsockopt(SO_PEERCRED) in the XR process
+ policy
+
+SteamVR's IPC client calls getsockopt(fd, SOL_SOCKET, SO_PEERCRED, ...)
+on its compositor connection to check who is on the other end. The
+baseline policy only allows SO_PEEK_OFF and crashes on anything else,
+so the XR device service died inside xrCreateInstance on Steam Frame
+(syscall 0xd1 on arm64; utzcoz/chromium-webxr-linux#7).
+
+Allow exactly that level/optname pair in XrProcessPolicy and leave
+every other getsockopt to the GPU/baseline policy, so unexpected uses
+still surface as crashes.
+
+Bug: none
+---
+ sandbox/policy/linux/bpf_xr_policy_linux.cc | 16 ++++++++++++++--
+ 1 file changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/sandbox/policy/linux/bpf_xr_policy_linux.cc b/sandbox/policy/linux/bpf_xr_policy_linux.cc
+index 435e13d..3ac3a84 100644
+--- a/sandbox/policy/linux/bpf_xr_policy_linux.cc
++++ b/sandbox/policy/linux/bpf_xr_policy_linux.cc
+@@ -11,6 +11,7 @@
+ #include "sandbox/linux/system_headers/linux_syscalls.h"
+ #include "sandbox/policy/linux/sandbox_linux.h"
+ 
++using sandbox::bpf_dsl::AllOf;
+ using sandbox::bpf_dsl::Allow;
+ using sandbox::bpf_dsl::Arg;
+ using sandbox::bpf_dsl::Error;
+@@ -27,8 +28,8 @@ XrProcessPolicy::~XrProcessPolicy() = default;
+ ResultExpr XrProcessPolicy::EvaluateSyscall(int system_call_number) const {
+   switch (system_call_number) {
+     // The runtime reaches its compositor over an AF_UNIX socket and passes fds
+-    // with SCM_RIGHTS, neither of which the GPU policy allows. get/setsockopt
+-    // stay disallowed; add a narrow level/optname restriction if ever needed.
++    // with SCM_RIGHTS, neither of which the GPU policy allows. setsockopt
++    // stays disallowed; getsockopt is limited to SO_PEERCRED below.
+ #if defined(__NR_getpeername)
+     case __NR_getpeername:
+ #endif
+@@ -49,6 +50,17 @@ ResultExpr XrProcessPolicy::EvaluateSyscall(int system_call_number) const {
+     case __NR_get_robust_list:
+ #endif
+       return Allow();
++#if defined(__NR_getsockopt)
++    case __NR_getsockopt: {
++      // SteamVR's IPC client authenticates the compositor on the other end of
++      // its AF_UNIX socket with SO_PEERCRED before trusting it. Every other
++      // option keeps the baseline treatment (SO_PEEK_OFF for Mojo; crash).
++      const Arg<int> level(1);
++      const Arg<int> optname(2);
++      return If(AllOf(level == SOL_SOCKET, optname == SO_PEERCRED), Allow())
++          .Else(GpuProcessPolicy::EvaluateSyscall(system_call_number));
++    }
++#endif
+ #if defined(__NR_kill)
+     case __NR_kill: {
+       // SteamVR probes its sibling processes for liveness with kill(pid, 0).

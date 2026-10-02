@@ -234,6 +234,14 @@ frameplayer/
 
 ---
 
+## 7b. Side track: WebXR on the Frame
+
+A sandboxed WebXR browser is the fallback path for web-hosted VR video and a
+useful reference for how SteamVR behaves inside a seccomp sandbox. Chromium's
+immersive sessions currently work on the Frame only with the seccomp filter
+disabled. The root cause and three Chromium patches are in
+[docs/webxr/README.md](webxr/README.md); on-device confirmation is pending.
+
 ## 8. Open questions for the owner
 1. Licence: MIT, Apache-2.0, or GPL-3 (GPL would simplify linking ffmpeg with all codecs enabled)?
 2. Project name final? (`FramePlayer` vs something trademark-safer given "Frame" is Valve's.)
