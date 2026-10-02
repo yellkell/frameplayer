@@ -1,0 +1,64 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/yellkell/frameplayer"
+
+[workspace.dependencies]
+fp-core = { path = "crates/core" }
+fp-xr = { path = "crates/xr" }
+fp-gfx = { path = "crates/gfx" }
+fp-video = { path = "crates/video" }
+fp-audio = { path = "crates/audio" }
+fp-sources = { path = "crates/sources" }
+fp-library = { path = "crates/library" }
+fp-haptics = { path = "crates/haptics" }
+fp-remote = { path = "crates/remote" }
+fp-ui = { path = "crates/ui" }
+fp-updater = { path = "crates/updater" }
+
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+bytes = "1"
+futures = "0.3"
+glam = { version = "0.29", features = ["serde"] }
+bytemuck = { version = "1", features = ["derive"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
+url = { version = "2", features = ["serde"] }
+sha2 = "0.10"
+hex = "0.4"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+base64 = "0.22"
+libc = "0.2"
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3"
+quick-xml = { version = "0.36", features = ["serialize"] }
+axum = { version = "0.7", features = ["ws"] }
+tokio-tungstenite = "0.24"
+clap = { version = "4", features = ["derive"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+ash = { version = "0.38", default-features = false, features = ["loaded", "debug", "std"] }
+openxr = { version = "0.19", default-features = false, features = ["loaded"] }
+fontdue = "0.9"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+panic = "abort"

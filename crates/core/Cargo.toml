@@ -1,0 +1,14 @@
+[package]
+name = "fp-core"
+description = "Shared types for FramePlayer: projections, stereo layouts, picture corrections, media info, time."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+glam.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
