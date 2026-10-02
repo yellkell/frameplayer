@@ -93,6 +93,9 @@ INI
     --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,vp9_superframe_split,extract_extradata,null \
     --extra-ldflags="-Wl,-rpath,\\\$\$ORIGIN" \
     > "$work/configure.log" 2>&1) || { tail -30 "$work/configure.log"; tail -40 "$ff_dir/ffbuild/config.log"; exit 1; }
+  # zig's glibc headers have no <sys/sysctl.h> (removed from glibc 2.32), but
+  # configure's link test still finds the symbol; FFmpeg never needs it on Linux.
+  sed -i 's/^#define HAVE_SYSCTL 1$/#define HAVE_SYSCTL 0/' "$ff_dir/config.h"
   make -C "$ff_dir" -j"$(nproc)" >"$work/make.log" 2>&1 || { tail -40 "$work/make.log"; exit 1; }
   make -C "$ff_dir" install >/dev/null
   rm -rf "$out/share" "$out/lib/pkgconfig"
