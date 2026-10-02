@@ -1,8 +1,16 @@
 [package]
 name = "fp-ui"
+description = "Immediate-mode VR UI toolkit for FramePlayer: text, layout, widgets, laser/gaze/hand input and the app screens, emitting renderer-agnostic draw lists."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 fp-core.workspace = true
+fontdue.workspace = true
+glam.workspace = true
+thiserror.workspace = true
+# Noto Sans Regular (Apache-2.0 licensed font release), embedded as the default UI face.
+ttf-noto-sans = "0.1.2"
+qrcode = { version = "0.14", default-features = false }
