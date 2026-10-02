@@ -66,7 +66,7 @@ pub fn from_filename(name: &str) -> Detected {
         };
         if let Some(p) = lens {
             let more_specific = matches!(&p, Projection::Fisheye { lens, fov_deg, .. } if *lens != FisheyeLens::Generic || *fov_deg != 180.0);
-            if d.projection.as_ref().map_or(true, |cur| !matches!(cur, Projection::Fisheye { .. }) || more_specific) {
+            if d.projection.as_ref().is_none_or(|cur| !matches!(cur, Projection::Fisheye { .. }) || more_specific) {
                 d.projection = Some(p);
             }
             continue;

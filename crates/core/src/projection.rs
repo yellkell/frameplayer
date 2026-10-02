@@ -269,10 +269,8 @@ mod tests {
 
     #[test]
     fn keyframe_interpolation() {
-        let mut a = Corrections::default();
-        a.zoom = 1.0;
-        let mut b = a;
-        b.zoom = 2.0;
+        let a = Corrections::default();
+        let b = Corrections { zoom: 2.0, ..a };
         let vs = ViewSettings {
             keyframes: vec![
                 CorrectionKeyframe { at: MediaTime::from_millis(1000), corrections: a },
