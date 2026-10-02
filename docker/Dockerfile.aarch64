@@ -1,0 +1,120 @@
+# syntax=docker/dockerfile:1.7
+#
+# FramePlayer aarch64 build image (OUTLINE §5).
+#
+# Native linux/arm64 image (GitHub ubuntu-24.04-arm runners, an arm64 Mac /
+# Linux box, or `docker buildx --platform linux/arm64` under QEMU). Building
+# inside Valve's Steam Linux Runtime SDK pins the glibc/libstdc++ baseline to
+# what SteamOS guarantees, so the binary runs outside the runtime container
+# on the headset. Media libraries are built static + PIC with only
+# LGPL-compatible options (see docs/adr/0002-licence.md).
+#
+#   docker build --platform linux/arm64 -f docker/Dockerfile.aarch64 -t frameplayer-build docker
+#   docker run --rm -v "$PWD:/src" -w /src frameplayer-build \
+#     cargo build --release --target aarch64-unknown-linux-gnu -p fp-app
+#
+# [verify] SLR 4's registry path and arm64 tag. Valve publishes Steam Runtime
+# SDK images at registry.gitlab.steamos.cloud/steamrt/<suite>/sdk (sniper =
+# SLR 3, x86_64 only). The Frame-era runtime ("steamrt4", arm64) is expected
+# at the path below; if it is unavailable, build with
+#   --build-arg BASE=debian:bookworm
+# which has glibc 2.36 (check against SteamOS-ARM's glibc on device).
+ARG BASE=registry.gitlab.steamos.cloud/steamrt/steamrt4/sdk/arm64:latest
+FROM ${BASE} AS base
+
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ca-certificates curl git pkg-config python3 \
+      nasm meson ninja-build cmake autoconf automake libtool gperf \
+      zstd xz-utils file \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PREFIX=/opt/fp-deps
+ENV PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig:$PREFIX/lib/aarch64-linux-gnu/pkgconfig \
+    PKG_CONFIG_ALL_STATIC=1 \
+    CFLAGS="-O2 -fPIC -march=armv8.2-a+fp16+dotprod" \
+    CXXFLAGS="-O2 -fPIC -march=armv8.2-a+fp16+dotprod"
+WORKDIR /build
+
+# ---- versions (bump together, record in docs/format-support.md) ----
+ARG DAV1D_VERSION=1.5.1
+ARG FFMPEG_VERSION=7.1.1
+ARG LIBSMB2_VERSION=6.2
+ARG FREETYPE_VERSION=2.13.3
+ARG FRIBIDI_VERSION=1.0.16
+ARG HARFBUZZ_VERSION=10.2.0
+ARG LIBASS_VERSION=0.17.3
+
+# dav1d: AV1 software fallback (BSD-2).
+RUN curl -fsSL https://code.videolan.org/videolan/dav1d/-/archive/${DAV1D_VERSION}/dav1d-${DAV1D_VERSION}.tar.gz | tar xz \
+ && meson setup dav1d-${DAV1D_VERSION}/build dav1d-${DAV1D_VERSION} --prefix=$PREFIX --libdir=lib \
+      --buildtype=release --default-library=static -Denable_tools=false -Denable_tests=false \
+ && ninja -C dav1d-${DAV1D_VERSION}/build install && rm -rf dav1d-*
+
+# libass and its text stack (ISC / FTL / LGPL-2.1 / MIT). No fontconfig: the
+# app ships its own fonts and hands them to libass.
+RUN curl -fsSL https://download.savannah.gnu.org/releases/freetype/freetype-${FREETYPE_VERSION}.tar.xz | tar xJ \
+ && meson setup freetype-${FREETYPE_VERSION}/build freetype-${FREETYPE_VERSION} --prefix=$PREFIX --libdir=lib \
+      --buildtype=release --default-library=static -Dbrotli=disabled -Dbzip2=disabled -Dharfbuzz=disabled \
+      -Dpng=disabled -Dzlib=disabled \
+ && ninja -C freetype-${FREETYPE_VERSION}/build install && rm -rf freetype-*
+RUN curl -fsSL https://github.com/fribidi/fribidi/releases/download/v${FRIBIDI_VERSION}/fribidi-${FRIBIDI_VERSION}.tar.xz | tar xJ \
+ && meson setup fribidi-${FRIBIDI_VERSION}/build fribidi-${FRIBIDI_VERSION} --prefix=$PREFIX --libdir=lib \
+      --buildtype=release --default-library=static -Ddocs=false -Dbin=false -Dtests=false \
+ && ninja -C fribidi-${FRIBIDI_VERSION}/build install && rm -rf fribidi-*
+RUN curl -fsSL https://github.com/harfbuzz/harfbuzz/releases/download/${HARFBUZZ_VERSION}/harfbuzz-${HARFBUZZ_VERSION}.tar.xz | tar xJ \
+ && meson setup harfbuzz-${HARFBUZZ_VERSION}/build harfbuzz-${HARFBUZZ_VERSION} --prefix=$PREFIX --libdir=lib \
+      --buildtype=release --default-library=static -Dfreetype=enabled -Dglib=disabled -Dgobject=disabled \
+      -Dcairo=disabled -Dicu=disabled -Dtests=disabled -Ddocs=disabled -Dutilities=disabled \
+ && ninja -C harfbuzz-${HARFBUZZ_VERSION}/build install && rm -rf harfbuzz-*
+RUN curl -fsSL https://github.com/libass/libass/releases/download/${LIBASS_VERSION}/libass-${LIBASS_VERSION}.tar.xz | tar xJ \
+ && cd libass-${LIBASS_VERSION} \
+ && ./configure --prefix=$PREFIX --enable-static --disable-shared --disable-fontconfig --disable-require-system-font-provider \
+ && make -j"$(nproc)" install && cd .. && rm -rf libass-*
+
+# libsmb2: SMB2/3 client (LGPL-2.1).
+RUN curl -fsSL https://github.com/sahlberg/libsmb2/archive/refs/tags/v${LIBSMB2_VERSION}.tar.gz | tar xz \
+ && cd libsmb2-${LIBSMB2_VERSION} && ./bootstrap \
+ && ./configure --prefix=$PREFIX --enable-static --disable-shared --without-libkrb5 --disable-werror \
+ && make -j"$(nproc)" install && cd .. && rm -rf libsmb2-*
+
+# FFmpeg: demux + software decode, LGPL-2.1 only: no --enable-gpl, no
+# --enable-nonfree, no --enable-version3. Hardware decode goes through V4L2 /
+# Vulkan Video in fp-video itself (ash), so FFmpeg's Vulkan hwaccel (which
+# needs newer Vulkan headers than the SDK ships) stays off; v4l2-m2m is kept
+# as an alternative path for the spike.
+RUN curl -fsSL https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz | tar xJ \
+ && cd ffmpeg-${FFMPEG_VERSION} \
+ && ./configure --prefix=$PREFIX --pkg-config-flags=--static \
+      --enable-static --disable-shared --enable-pic \
+      --disable-programs --disable-doc --disable-network --disable-autodetect \
+      --disable-everything \
+      --enable-protocol=file,pipe \
+      --enable-demuxer=mov,matroska,mpegts,webm_dash_manifest,hls,dash,srt,ass,webvtt,wav,flac,ogg,aac,mp3 \
+      --enable-parser=h264,hevc,vp9,av1,aac,opus,vorbis,flac,mpegaudio,ac3 \
+      --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,vp9_superframe_split,av1_frame_split,extract_extradata \
+      --enable-decoder=h264,hevc,vp9,libdav1d,h264_v4l2m2m,hevc_v4l2m2m,vp9_v4l2m2m,aac,aac_latm,opus,vorbis,flac,mp3,ac3,eac3,pcm_s16le,pcm_s24le,pcm_f32le,srt,subrip,ass,ssa,webvtt,mov_text,pgssub \
+      --enable-libdav1d \
+      --enable-v4l2-m2m \
+      --enable-swresample --enable-swscale \
+      --extra-cflags="-I$PREFIX/include" --extra-ldflags="-L$PREFIX/lib" \
+ && make -j"$(nproc)" install && cd .. && rm -rf ffmpeg-*
+
+# Rust toolchain (version from rust-toolchain.toml is honoured by rustup).
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:$PATH
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
+      --component rustfmt,clippy \
+ && rustup target add aarch64-unknown-linux-gnu
+
+# How the -sys crates find the static libraries.
+ENV FFMPEG_DIR=$PREFIX \
+    FFMPEG_PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig \
+    DAV1D_STATIC=1 \
+    LIBSMB2_STATIC=1 \
+    LIBASS_STATIC=1 \
+    CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=cc \
+    FP_DEPS_PREFIX=$PREFIX
+
+# Record the glibc baseline in the image for release notes.
+RUN ldd --version | head -n1 > /etc/fp-glibc-baseline && cat /etc/fp-glibc-baseline
+WORKDIR /src

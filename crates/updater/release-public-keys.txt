@@ -1,0 +1,8 @@
+# Trusted ed25519 release-manifest public keys (hex), one per line.
+#
+# PLACEHOLDER DEVELOPMENT KEY. Before the first public release the project
+# owner must run `frameplayer-install gen-key`, store the secret half as the
+# FP_SIGNING_KEY GitHub Actions secret, and replace the line below with the
+# printed public key. To rotate: add the new key here, ship one release signed
+# with the old key, then sign with the new key and remove the old line later.
+afc312785533ef959acc0251f2e975bb7b7cc66d7392a0270d39c6af7ceccdc5

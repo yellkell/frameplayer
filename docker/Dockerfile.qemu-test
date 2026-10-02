@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1.7
+#
+# x86_64 image that cross-compiles the workspace for aarch64 and runs the test
+# binaries under QEMU user-mode, for contributors without arm64 hardware.
+# (QEMU cannot run SteamVR; XR/GPU code is tested against recorded sessions.)
+#
+#   docker build -f docker/Dockerfile.qemu-test -t frameplayer-qemu-test docker
+#   docker run --rm -v "$PWD:/src" -w /src frameplayer-qemu-test \
+#     cargo test --workspace --target aarch64-unknown-linux-gnu
+FROM debian:bookworm
+
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ca-certificates curl git pkg-config file \
+      gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross \
+      qemu-user qemu-user-binfmt \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:$PATH
+RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
+ && rustup target add aarch64-unknown-linux-gnu
+
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+    CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER="qemu-aarch64 -L /usr/aarch64-linux-gnu" \
+    CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+    CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ \
+    AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar \
+    QEMU_LD_PREFIX=/usr/aarch64-linux-gnu
+WORKDIR /src

@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yellkell.github.io/frameplayer/frameplayer.schema.json",
+  "title": "FramePlayer website install manifest",
+  "description": "Superset manifest read by Frame Control (frame-control://install?manifest=<url>), FrameDrop and frameplayer-install. Flat alias fields (url, download_url, sha256, size, launch_command, executable) duplicate the structured fields for tools that expect top-level names and must always hold identical values.",
+  "type": "object",
+  "required": [
+    "manifest_version", "id", "name", "version", "description", "author", "homepage", "license",
+    "platform", "arch", "install_dir", "tarball", "launch", "artwork", "update_manifest", "published",
+    "url", "download_url", "sha256", "size", "launch_command", "executable"
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+    "https": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "relpath": { "type": "string", "pattern": "^(?!/)(?!.*\\.\\.).+$" },
+    "image": {
+      "type": "object",
+      "required": ["url", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "url": { "$ref": "#/$defs/https", "description": "Downloadable PNG." },
+        "path": { "$ref": "#/$defs/relpath", "description": "Same PNG inside the installed tree, relative to the install dir." }
+      }
+    }
+  },
+  "properties": {
+    "$schema": { "type": "string" },
+    "manifest_version": { "const": 1 },
+    "id": { "type": "string", "description": "Reverse-DNS identifier, stable across versions." },
+    "name": { "type": "string", "description": "Display name in the Steam library." },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$" },
+    "description": { "type": "string" },
+    "author": { "type": "string" },
+    "homepage": { "type": "string", "format": "uri" },
+    "license": { "type": "string" },
+    "platform": { "const": "linux" },
+    "arch": { "const": "aarch64" },
+    "install_dir": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$", "description": "Directory under ~/devkit-game/." },
+    "tarball": {
+      "type": "object",
+      "required": ["url", "sha256", "size"],
+      "additionalProperties": false,
+      "properties": {
+        "url": { "$ref": "#/$defs/https" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size": { "type": "integer", "minimum": 1 },
+        "format": { "enum": ["tar.gz", "tar.zst"], "default": "tar.gz" }
+      }
+    },
+    "launch": {
+      "type": "object",
+      "required": ["command"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "$ref": "#/$defs/relpath", "description": "Executable relative to the install dir." },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "working_dir": { "type": "string", "default": "." },
+        "env": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "artwork": {
+      "type": "object",
+      "required": ["grid", "grid_horizontal", "hero", "logo", "icon"],
+      "additionalProperties": false,
+      "properties": {
+        "grid": { "$ref": "#/$defs/image", "description": "Portrait capsule, 600x900." },
+        "grid_horizontal": { "$ref": "#/$defs/image", "description": "Landscape capsule, 920x430." },
+        "hero": { "$ref": "#/$defs/image", "description": "Library hero, 3840x1240." },
+        "logo": { "$ref": "#/$defs/image", "description": "Transparent logo over the hero." },
+        "icon": { "$ref": "#/$defs/image", "description": "Square icon, 256x256." }
+      }
+    },
+    "min_steamos": { "type": "string", "description": "Minimum /etc/os-release VERSION_ID." },
+    "update_manifest": { "$ref": "#/$defs/https", "description": "ed25519-signed in-app update manifest (fp-updater format); signature at <url>.sig." },
+    "release_notes_url": { "type": "string", "format": "uri" },
+    "published": { "type": "string", "format": "date-time" },
+    "url": { "$ref": "#/$defs/https", "description": "Alias of tarball.url." },
+    "download_url": { "$ref": "#/$defs/https", "description": "Alias of tarball.url." },
+    "sha256": { "$ref": "#/$defs/sha256", "description": "Alias of tarball.sha256." },
+    "size": { "type": "integer", "minimum": 1, "description": "Alias of tarball.size." },
+    "launch_command": { "type": "string", "description": "Alias of launch.command." },
+    "executable": { "type": "string", "description": "launch.command without a leading ./" }
+  },
+  "additionalProperties": false
+}
