@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#111318">
+<title>FramePlayer Remote</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --text: #16181d; --muted: #646b78; --line: #dde0e6;
+    --accent: #2f6fed; --accent-text: #ffffff; --danger: #c93a3a; --ok: #1f9d55;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111318; --panel: #1b1e25; --text: #e8eaef; --muted: #9aa1ad; --line: #2c313b;
+            --accent: #5b8cff; --accent-text: #0b0d12; --danger: #ff6b6b; --ok: #3ccf7f; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { padding: 0 16px calc(env(safe-area-inset-bottom) + 220px); }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 14px 0 10px; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 650; }
+  .conn { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
+  .dot.on { background: var(--ok); }
+  input[type=search], input[type=text] { width: 100%; padding: 12px 14px; font-size: 16px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    border-radius: 10px; padding: 10px 14px; min-height: 44px; cursor: pointer; touch-action: manipulation; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button:active { transform: scale(0.97); }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .grow { flex: 1; min-width: 0; }
+  #list { list-style: none; padding: 0; margin: 12px 0; display: grid; gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); }
+  .item { display: flex; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 8px; cursor: pointer; align-items: center; }
+  .item img, .item .ph { width: 112px; height: 63px; object-fit: cover; border-radius: 8px; background: var(--line); flex: none; }
+  .item .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+    -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .item .m { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .badge { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--line); margin-right: 4px; }
+  .muted { color: var(--muted); }
+  #more { width: 100%; }
+  #player { position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 1px solid var(--line);
+    padding: 10px 16px calc(env(safe-area-inset-bottom) + 10px); box-shadow: 0 -4px 18px rgba(0,0,0,0.12); }
+  #player .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #seek { width: 100%; margin: 8px 0 2px; accent-color: var(--accent); height: 28px; }
+  .times { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .controls { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 6px; }
+  .controls button { padding: 8px 0; }
+  select { font: inherit; padding: 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); min-height: 44px; }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 14px; min-height: 32px; }
+  #auth { display: none; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-top: 12px; }
+  .toast { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); background: var(--danger); color: #fff;
+    padding: 8px 14px; border-radius: 10px; font-size: 14px; display: none; z-index: 10; }
+</style>
+</head>
+<body>
+<header>
+  <h1>FramePlayer</h1>
+  <div class="conn"><span id="dot" class="dot"></span><span id="connText">offline</span></div>
+</header>
+
+<section id="auth">
+  <p>Scan the pairing QR code shown in the headset (Settings → Remote), or paste the access token:</p>
+  <div class="row"><input id="tokenInput" type="text" class="grow" autocomplete="off" placeholder="Access token">
+    <button class="primary" id="tokenSave">Connect</button></div>
+</section>
+
+<main id="main">
+  <input id="search" type="search" placeholder="Search library" autocomplete="off" enterkeyhint="search">
+  <ul id="list"></ul>
+  <p id="empty" class="muted" hidden>No videos found.</p>
+  <button id="more" hidden>Load more</button>
+</main>
+
+<div id="toast" class="toast"></div>
+
+<section id="player">
+  <div class="title" id="title">Nothing playing</div>
+  <input id="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Seek">
+  <div class="times"><span id="pos">0:00</span><span id="dur">0:00</span></div>
+  <div class="controls">
+    <button id="back30" aria-label="Back 30 seconds">−30</button>
+    <button id="back10" aria-label="Back 10 seconds">−10</button>
+    <button id="toggle" class="primary" aria-label="Play or pause">▶</button>
+    <button id="fwd10" aria-label="Forward 10 seconds">+10</button>
+    <button id="fwd30" aria-label="Forward 30 seconds">+30</button>
+  </div>
+  <details>
+    <summary>Speed, keyboard, stop</summary>
+    <div class="row" style="margin-top:6px">
+      <select id="speed" aria-label="Playback speed">
+        <option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="0.75">0.75×</option>
+        <option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option>
+        <option value="2">2×</option><option value="3">3×</option><option value="4">4×</option>
+      </select>
+      <button id="stop">Stop</button>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <input id="typeText" type="text" class="grow" placeholder="Type into the headset" autocomplete="off" enterkeyhint="send">
+      <button id="typeSend">Send</button>
+    </div>
+  </details>
+</section>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const KEY = "fp-remote-token";
+  const store = {
+    get() { try { return localStorage.getItem(KEY) || ""; } catch (_) { return ""; } },
+    set(v) { try { localStorage.setItem(KEY, v); } catch (_) {} },
+  };
+
+  // Pairing: take ?token= from the URL, remember it, and remove it from the address bar.
+  let token = store.get();
+  const params = new URLSearchParams(location.search);
+  if (params.get("token")) {
+    token = params.get("token");
+    store.set(token);
+    history.replaceState(null, "", location.pathname);
+  }
+
+  const toast = (msg) => {
+    const t = $("toast");
+    t.textContent = msg;
+    t.style.display = "block";
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => (t.style.display = "none"), 2500);
+  };
+
+  const showAuth = (show) => {
+    $("auth").style.display = show ? "block" : "none";
+    $("main").style.display = show ? "none" : "block";
+  };
+
+  async function api(path, opts = {}) {
+    const headers = Object.assign({ Authorization: "Bearer " + token }, opts.body ? { "Content-Type": "application/json" } : {});
+    const res = await fetch(path, { method: opts.method || "GET", headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+    if (res.status === 401) { showAuth(true); throw new Error("unauthorized"); }
+    if (!res.ok) { let m = res.statusText; try { m = (await res.json()).error || m; } catch (_) {} throw new Error(m); }
+    return res.status === 204 ? null : res.json();
+  }
+  const post = (path, body) => api(path, { method: "POST", body }).catch((e) => toast(e.message));
+
+  const fmt = (s) => {
+    if (!isFinite(s) || s < 0) s = 0;
+    s = Math.floor(s);
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    const mm = h ? String(m).padStart(2, "0") : String(m);
+    return (h ? h + ":" : "") + mm + ":" + String(sec).padStart(2, "0");
+  };
+
+  // ---- Player status (pushed over WebSocket, extrapolated locally between pushes) ----
+  let status = { position: 0, duration: null, playing: false, speed: 1, path: null, title: null };
+  let statusAt = performance.now();
+  let dragging = false;
+
+  const currentPos = () => {
+    let p = status.position || 0;
+    if (status.playing) p += ((performance.now() - statusAt) / 1000) * (status.speed || 1);
+    return status.duration ? Math.min(p, status.duration) : p;
+  };
+
+  function applyStatus(s) {
+    status = s;
+    statusAt = performance.now();
+    const name = s.title || (s.path ? decodeURIComponent(s.path.split(/[\\/]/).pop()) : "Nothing playing");
+    $("title").textContent = name;
+    $("toggle").textContent = s.playing ? "❚❚" : "▶";
+    $("dur").textContent = fmt(s.duration || 0);
+    const sp = String(s.speed || 1);
+    if ([...$("speed").options].some((o) => o.value === sp)) $("speed").value = sp;
+  }
+
+  function frame() {
+    if (!dragging) {
+      const p = currentPos();
+      $("pos").textContent = fmt(p);
+      $("seek").value = status.duration ? Math.round((p / status.duration) * 1000) : 0;
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  let ws = null, backoff = 500;
+  function connect() {
+    if (!token) return;
+    const proto = location.protocol === "https:" ? "wss://" : "ws://";
+    ws = new WebSocket(proto + location.host + "/api/events?token=" + encodeURIComponent(token));
+    ws.onopen = () => { backoff = 500; $("dot").classList.add("on"); $("connText").textContent = "connected"; };
+    ws.onmessage = (ev) => {
+      try { const m = JSON.parse(ev.data); if (m.type === "status") applyStatus(m.status); } catch (_) {}
+    };
+    ws.onclose = () => {
+      $("dot").classList.remove("on");
+      $("connText").textContent = "reconnecting…";
+      setTimeout(connect, backoff);
+      backoff = Math.min(backoff * 2, 10000);
+    };
+  }
+
+  // ---- Controls ----
+  $("toggle").onclick = () => post("/api/toggle");
+  $("stop").onclick = () => post("/api/stop");
+  for (const [id, d] of [["back30", -30], ["back10", -10], ["fwd10", 10], ["fwd30", 30]]) {
+    $(id).onclick = () => post("/api/seek", { t: d, relative: true });
+  }
+  $("speed").onchange = (e) => post("/api/speed", { speed: parseFloat(e.target.value) });
+  const seek = $("seek");
+  seek.addEventListener("input", () => {
+    dragging = true;
+    if (status.duration) $("pos").textContent = fmt((seek.value / 1000) * status.duration);
+  });
+  seek.addEventListener("change", () => {
+    if (status.duration) {
+      const t = (seek.value / 1000) * status.duration;
+      status.position = t; statusAt = performance.now();
+      post("/api/seek", { t });
+    }
+    dragging = false;
+  });
+  const sendText = (submit) => {
+    const v = $("typeText").value;
+    if (!v && !submit) return;
+    post("/api/text", { text: v, submit });
+    $("typeText").value = "";
+  };
+  $("typeSend").onclick = () => sendText(true);
+  $("typeText").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sendText(true); } });
+
+  // ---- Library ----
+  const PAGE = 40;
+  let query = "", offset = 0, total = 0, loading = false, seq = 0;
+
+  function card(it) {
+    const li = document.createElement("li");
+    li.className = "item";
+    li.tabIndex = 0;
+    let img;
+    if (it.has_thumbnail) {
+      img = document.createElement("img");
+      img.loading = "lazy";
+      img.alt = "";
+      img.src = "/api/thumb/" + encodeURIComponent(it.id) + "?token=" + encodeURIComponent(token);
+      img.onerror = () => img.replaceWith(Object.assign(document.createElement("div"), { className: "ph" }));
+    } else {
+      img = Object.assign(document.createElement("div"), { className: "ph" });
+    }
+    const box = document.createElement("div");
+    box.className = "grow";
+    const t = document.createElement("div");
+    t.className = "t";
+    t.textContent = it.title || it.uri;
+    const m = document.createElement("div");
+    m.className = "m";
+    const bits = [];
+    if (it.duration) bits.push(fmt(it.duration));
+    if (it.height) bits.push(it.height >= 2160 ? Math.round(it.height / 1080) * 2 + "K" : it.height + "p");
+    m.textContent = bits.join(" · ") + " ";
+    for (const b of [it.projection, it.has_script ? "script" : null, it.favourite ? "★" : null]) {
+      if (!b) continue;
+      const s = document.createElement("span");
+      s.className = "badge";
+      s.textContent = b;
+      m.appendChild(s);
+    }
+    box.append(t, m);
+    li.append(img, box);
+    const open = () => post("/api/play", { id: it.id });
+    li.onclick = open;
+    li.onkeydown = (e) => { if (e.key === "Enter") open(); };
+    return li;
+  }
+
+  async function load(reset) {
+    if (loading && !reset) return;
+    const my = ++seq;
+    loading = true;
+    if (reset) { offset = 0; }
+    try {
+      const q = new URLSearchParams({ offset: String(offset), limit: String(PAGE) });
+      if (query) q.set("q", query);
+      const page = await api("/api/library?" + q);
+      if (my !== seq) return;
+      if (reset) $("list").replaceChildren();
+      for (const it of page.items) $("list").appendChild(card(it));
+      total = page.total;
+      offset += page.items.length;
+      $("more").hidden = offset >= total;
+      $("empty").hidden = total > 0;
+    } catch (e) {
+      if (e.message !== "unauthorized") toast("Library: " + e.message);
+    } finally {
+      if (my === seq) loading = false;
+    }
+  }
+
+  let debounce;
+  $("search").addEventListener("input", (e) => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => { query = e.target.value.trim(); load(true); }, 250);
+  });
+  $("more").onclick = () => load(false);
+
+  $("tokenSave").onclick = () => {
+    token = $("tokenInput").value.trim();
+    if (!token) return;
+    store.set(token);
+    showAuth(false);
+    start();
+  };
+
+  function start() {
+    api("/api/status").then((s) => { applyStatus(s); showAuth(false); connect(); load(true); }).catch(() => {});
+  }
+
+  if (!token) showAuth(true); else start();
+})();
+</script>
+</body>
+</html>

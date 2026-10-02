@@ -4,5 +4,31 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+# Native Bluetooth LE link to The Handy (needs BlueZ/D-Bus at build and run time).
+bluetooth = ["dep:btleplug", "dep:uuid", "dep:dbus"]
+# TCode over USB serial (OSR2/SR6 plugged into the headset's USB-C port).
+serial = ["dep:serialport"]
+
 [dependencies]
 fp-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+url.workspace = true
+reqwest = { workspace = true, features = ["multipart"] }
+tokio-tungstenite.workspace = true
+btleplug = { version = "0.11", optional = true }
+uuid = { version = "1", optional = true }
+# Statically link libdbus: native Frame builds run outside the Steam Runtime and bundle everything beyond glibc.
+dbus = { version = "0.9", features = ["vendored"], optional = true }
+serialport = { version = "4", default-features = false, optional = true }
+
+[dev-dependencies]
+axum.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

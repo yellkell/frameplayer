@@ -5,4 +5,20 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-fp-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+bytes.workspace = true
+rand.workspace = true
+axum.workspace = true
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+png = "0.17"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+tokio-tungstenite.workspace = true
