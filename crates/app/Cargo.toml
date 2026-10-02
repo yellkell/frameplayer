@@ -1,8 +1,21 @@
 [package]
 name = "fp-app"
+description = "FramePlayer application: wires XR, rendering, playback, library, haptics and remote APIs together."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "frameplayer"
+path = "src/main.rs"
+
 [dependencies]
 fp-core.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
