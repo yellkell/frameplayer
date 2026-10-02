@@ -354,7 +354,7 @@ pub fn validate(list: &DrawList) -> Result<(), String> {
     if let Some(i) = list.indices.iter().find(|&&i| i >= nv) {
         return Err(format!("index {i} out of range ({nv} vertices)"));
     }
-    if list.indices.len() % 3 != 0 {
+    if !list.indices.len().is_multiple_of(3) {
         return Err("index count not a multiple of 3".into());
     }
     let mut expected = 0;
