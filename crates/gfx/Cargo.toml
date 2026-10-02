@@ -1,8 +1,21 @@
 [package]
 name = "fp-gfx"
+description = "FramePlayer Vulkan renderer: projection meshes, YUV->RGB/tone-map compute, per-eye projection pass, UI draw-list pass."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+build = "build.rs"
 
 [dependencies]
 fp-core.workspace = true
+ash.workspace = true
+glam.workspace = true
+bytemuck.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[build-dependencies]
+naga = { version = "30", features = ["wgsl-in", "spv-out"] }
+
+[dev-dependencies]
+naga = { version = "30", features = ["wgsl-in"] }
