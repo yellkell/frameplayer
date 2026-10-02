@@ -1,0 +1,19 @@
+[package]
+name = "fp-remote"
+version = "0.1.0"
+description = "FramePlayer remote control: DeoVR-compatible TCP API and LAN web remote"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+fp-core = { path = "../fp-core" }
+crossbeam-channel = "0.5"
+getrandom = "0.3"
+libc = "0.2"
+log = "0.4"
+qrcode = { version = "0.14", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tiny_http = { version = "0.12", default-features = false }
