@@ -1,8 +1,27 @@
 [package]
 name = "fp-library"
+description = "FramePlayer media library: SQLite index, indexer, search, playlists, user data, export/import."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 fp-core.workspace = true
+fp-sources.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+hex.workspace = true
+parking_lot.workspace = true
+rand.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+zip.workspace = true
+percent-encoding = "2"
+
+[dev-dependencies]
+tempfile.workspace = true
