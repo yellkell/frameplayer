@@ -116,7 +116,7 @@ mod tests {
     #[test]
     fn encodes_and_runs_cover_dark_modules() {
         let m = QrMatrix::encode("http://192.168.1.20:8642/pair?token=abcdef").unwrap();
-        assert!(m.width >= 21 && (m.width - 17) % 4 == 0);
+        assert!(m.width >= 21 && (m.width - 17).is_multiple_of(4));
         // Finder pattern: top-left 7x7 has a dark border.
         assert!(m.dark(0, 0) && m.dark(6, 0) && m.dark(0, 6) && !m.dark(1, 1));
         let dark = m.modules.iter().filter(|&&d| d).count();
