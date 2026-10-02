@@ -1,0 +1,57 @@
+{
+  "$schema": "https://yellkell.github.io/frameplayer/frameplayer.schema.json",
+  "manifest_version": 1,
+  "id": "io.github.yellkell.frameplayer",
+  "name": "FramePlayer",
+  "version": "0.1.0",
+  "description": "Native VR video player for the Steam Frame: 180/360/fisheye, SBS/OU, HDR, subtitles, DeoVR-compatible library and remote APIs.",
+  "author": "FramePlayer contributors",
+  "homepage": "https://github.com/yellkell/frameplayer",
+  "license": "MIT OR Apache-2.0",
+  "platform": "linux",
+  "arch": "aarch64",
+  "install_dir": "frameplayer",
+  "tarball": {
+    "url": "https://github.com/yellkell/frameplayer/releases/download/v0.1.0/frameplayer-0.1.0-aarch64.tar.gz",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "size": 1,
+    "format": "tar.gz"
+  },
+  "launch": {
+    "command": "./frameplayer.sh",
+    "args": [],
+    "working_dir": ".",
+    "env": {}
+  },
+  "artwork": {
+    "grid": {
+      "url": "https://yellkell.github.io/frameplayer/art/grid.png",
+      "path": "versions/0.1.0/share/steam/grid.png"
+    },
+    "grid_horizontal": {
+      "url": "https://yellkell.github.io/frameplayer/art/grid_horizontal.png",
+      "path": "versions/0.1.0/share/steam/grid_horizontal.png"
+    },
+    "hero": {
+      "url": "https://yellkell.github.io/frameplayer/art/hero.png",
+      "path": "versions/0.1.0/share/steam/hero.png"
+    },
+    "logo": {
+      "url": "https://yellkell.github.io/frameplayer/art/logo.png",
+      "path": "versions/0.1.0/share/steam/logo.png"
+    },
+    "icon": {
+      "url": "https://yellkell.github.io/frameplayer/art/icon.png",
+      "path": "versions/0.1.0/share/steam/icon.png"
+    }
+  },
+  "update_manifest": "https://yellkell.github.io/frameplayer/updates/stable.json",
+  "release_notes_url": "https://github.com/yellkell/frameplayer/releases/tag/v0.1.0",
+  "published": "2026-10-02T00:00:00Z",
+  "url": "https://github.com/yellkell/frameplayer/releases/download/v0.1.0/frameplayer-0.1.0-aarch64.tar.gz",
+  "download_url": "https://github.com/yellkell/frameplayer/releases/download/v0.1.0/frameplayer-0.1.0-aarch64.tar.gz",
+  "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "size": 1,
+  "launch_command": "./frameplayer.sh",
+  "executable": "frameplayer.sh"
+}

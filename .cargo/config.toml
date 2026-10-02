@@ -1,0 +1,16 @@
+# Cross-compiling to the Steam Frame (aarch64 Linux, glibc).
+#
+# Only applies to `--target aarch64-unknown-linux-gnu`; native host builds are
+# unaffected. Debian/Ubuntu x86_64: `apt install gcc-aarch64-linux-gnu`.
+# Native arm64 Debian/Ubuntu (and the docker/ build images) also provide the
+# `aarch64-linux-gnu-gcc` name. Elsewhere override with
+#   CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=cc
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+# Snapdragon 8 Gen 3 (Cortex-X4/A720/A520) implements Armv9.2-A; target a
+# conservative baseline (fp16, dotprod, rcpc) that every SM8650 core has.
+rustflags = ["-C", "target-feature=+fp16,+dotprod,+rcpc"]
+
+# To run aarch64 tests under QEMU user-mode on x86_64 (docker/Dockerfile.qemu-test
+# sets this for you):
+#   CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER="qemu-aarch64 -L /usr/aarch64-linux-gnu"

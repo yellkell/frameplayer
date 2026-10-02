@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  lint:
+    name: fmt + clippy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test-x86_64:
+    name: tests (ubuntu x86_64)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  test-arm64:
+    name: tests (ubuntu arm64, native)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  cross-aarch64:
+    name: cross build aarch64-unknown-linux-gnu
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - name: Install cross linker
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: aarch64
+      # Linker comes from .cargo/config.toml.
+      - run: cargo build --workspace --target aarch64-unknown-linux-gnu
+      - run: cargo build --release --target aarch64-unknown-linux-gnu -p fp-app
+      - name: Report ELF details
+        run: |
+          B=target/aarch64-unknown-linux-gnu/release/frameplayer
+          file "$B"
+          aarch64-linux-gnu-readelf -d "$B" | grep NEEDED || true
+          echo "max GLIBC: $(aarch64-linux-gnu-readelf -V "$B" | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -n1)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frameplayer-aarch64-${{ github.sha }}
+          path: target/aarch64-unknown-linux-gnu/release/frameplayer
+          retention-days: 7
+
+  scripts:
+    name: shellcheck + manifests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck -S warning tools/*.sh dist/frameplayer.sh
+      - name: JSON well-formed
+        run: for f in dist/*.json; do python3 -m json.tool "$f" > /dev/null && echo "ok $f"; done
+      - name: Release dry run (unsigned, fake binary)
+        run: |
+          printf '#!/bin/sh\necho fake\n' > /tmp/fakebin && chmod +x /tmp/fakebin
+          tools/release.sh --version 0.0.1 --bin /tmp/fakebin --out /tmp/rel
+          test -s /tmp/rel/frameplayer-0.0.1-aarch64.tar.gz
+          test -s /tmp/rel/site/updates/stable.json

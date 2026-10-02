@@ -1,8 +1,43 @@
 [package]
 name = "fp-installer"
+description = "frameplayer-install: pair with a Steam Frame over Valve's devkit service and install/launch FramePlayer"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+name = "fp_installer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "frameplayer-install"
+path = "src/main.rs"
+
 [dependencies]
-fp-core.workspace = true
+fp-updater.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+url.workspace = true
+clap.workspace = true
+base64.workspace = true
+hex.workspace = true
+sha2.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+futures.workspace = true
+rand.workspace = true
+tokio-tungstenite.workspace = true
+semver = { version = "1", features = ["serde"] }
+tar = { version = "0.4", default-features = false }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+ssh-key = { version = "0.6", default-features = false, features = ["ed25519", "std", "rand_core", "alloc"] }
+mdns-sd = "0.13"
+dirs = "6"
+
+[dev-dependencies]
+tempfile.workspace = true

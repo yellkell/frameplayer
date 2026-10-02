@@ -1,8 +1,30 @@
 [package]
 name = "fp-updater"
+description = "FramePlayer self-updater: signed release manifests, resumable/delta downloads, atomic version swap with rollback"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 fp-core.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+sha2.workspace = true
+hex.workspace = true
+ed25519-dalek.workspace = true
+rand.workspace = true
+base64.workspace = true
+reqwest.workspace = true
+url.workspace = true
+chrono.workspace = true
+futures.workspace = true
+tokio = { workspace = true }
+semver = { version = "1", features = ["serde"] }
+tar = { version = "0.4", default-features = false }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+ruzstd = "0.8"
+
+[dev-dependencies]
+tempfile.workspace = true

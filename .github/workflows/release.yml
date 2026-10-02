@@ -1,0 +1,188 @@
+name: Release
+
+# Tag vX.Y.Z (stable) or vX.Y.Z-beta.N (beta) → build the aarch64 tarball in the
+# SLR build image → delta from the previous release → sign manifests with the
+# FP_SIGNING_KEY secret → GitHub Release → GitHub Pages (website manifest,
+# download page, update channels) → installed apps pick it up.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)release, e.g. v0.2.0"
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+
+jobs:
+  image:
+    name: build image (SLR 4 arm64)
+    runs-on: ubuntu-24.04-arm
+    outputs:
+      image: ${{ steps.ref.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: ref
+        run: |
+          h=$(sha256sum docker/Dockerfile.aarch64 | cut -c1-16)
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}/build-aarch64:$h" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push if missing
+        env:
+          IMAGE: ${{ steps.ref.outputs.image }}
+        run: |
+          if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then echo "cached: $IMAGE"; exit 0; fi
+          # [verify] SLR 4 arm64 SDK path; fall back to Debian bookworm so a release is never blocked.
+          docker build -f docker/Dockerfile.aarch64 -t "$IMAGE" docker \
+            || docker build --build-arg BASE=debian:bookworm -f docker/Dockerfile.aarch64 -t "$IMAGE" docker
+          docker push "$IMAGE"
+
+  build:
+    name: build + sign
+    needs: image
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: ${{ needs.image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      channel: ${{ steps.v.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+      - id: v
+        name: Version and channel
+        run: |
+          git config --global --add safe.directory "$PWD"
+          V=${TAG#v}
+          CARGO_V=$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version *= *"\(.*\)"/\1/p}' Cargo.toml | head -n1)
+          [ "$V" = "$CARGO_V" ] || { echo "::error::tag $TAG does not match Cargo.toml version $CARGO_V"; exit 1; }
+          case "$V" in *-*) CH=beta ;; *) CH=stable ;; esac
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "channel=$CH" >> "$GITHUB_OUTPUT"
+          PREV=$(git describe --tags --abbrev=0 --match 'v*' "$TAG^" 2>/dev/null || true)
+          echo "prev=$PREV" >> "$GITHUB_OUTPUT"
+      - name: Fetch previous release for delta
+        if: steps.v.outputs.prev != ''
+        run: |
+          P=${{ steps.v.outputs.prev }}
+          curl -fsSL -o /tmp/prev.tar.gz \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/$P/frameplayer-${P#v}-aarch64.tar.gz" \
+            || rm -f /tmp/prev.tar.gz
+      - name: Build release
+        env:
+          FP_SIGNING_KEY: ${{ secrets.FP_SIGNING_KEY }}
+          REPO_URL: https://github.com/${{ github.repository }}
+        run: |
+          [ -n "$FP_SIGNING_KEY" ] || { echo "::error::FP_SIGNING_KEY secret is not set"; exit 1; }
+          args=(--version "${{ steps.v.outputs.version }}" --channel "${{ steps.v.outputs.channel }}" --require-trusted)
+          [ -f /tmp/prev.tar.gz ] && args+=(--prev-tarball /tmp/prev.tar.gz)
+          [ -f "docs/release-notes/${{ steps.v.outputs.version }}.md" ] && args+=(--notes "docs/release-notes/${{ steps.v.outputs.version }}.md")
+          tools/release.sh "${args[@]}"
+          cp target/release/frameplayer-install "dist/out/${{ steps.v.outputs.version }}/frameplayer-install-linux-aarch64"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: dist/out/${{ steps.v.outputs.version }}
+
+  installers:
+    name: frameplayer-install (${{ matrix.name }})
+    strategy:
+      matrix:
+        include:
+          - { name: linux-x86_64, os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, exe: frameplayer-install }
+          - { name: macos-arm64, os: macos-14, target: aarch64-apple-darwin, exe: frameplayer-install }
+          - { name: macos-x86_64, os: macos-14, target: x86_64-apple-darwin, exe: frameplayer-install }
+          - { name: windows-x86_64, os: windows-2022, target: x86_64-pc-windows-msvc, exe: frameplayer-install.exe }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release -p fp-installer --target ${{ matrix.target }}
+      - name: Stage
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" "out/frameplayer-install-${{ matrix.name }}${{ endsWith(matrix.exe, '.exe') && '.exe' || '' }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.name }}
+          path: out/*
+
+  publish:
+    name: GitHub Release
+    needs: [build, installers]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          V: ${{ needs.build.outputs.version }}
+          CH: ${{ needs.build.outputs.channel }}
+        run: |
+          cd artifacts
+          files=(release/frameplayer-*.tar.gz release/frameplayer-*.sha256 release/frameplayer-install-* installer-*/*)
+          compgen -G "release/*.fpd" > /dev/null && files+=(release/*.fpd)
+          (cd release && sha256sum frameplayer-* > SHA256SUMS) && files+=(release/SHA256SUMS)
+          flags=(--title "FramePlayer $V" --generate-notes --verify-tag)
+          [ "$CH" = beta ] && flags+=(--prerelease)
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" "${flags[@]}" "${files[@]}" \
+            || gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "${files[@]}"
+
+  pages:
+    name: Website + update channels
+    needs: [build, publish]
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+      - name: Keep channels this release did not touch
+        run: |
+          cd release/site
+          for f in updates/stable.json updates/stable.json.sig updates/beta.json updates/beta.json.sig; do
+            [ -f "$f" ] || curl -fsSL -o "$f" "$PAGES_URL/$f" || echo "no live $f yet"
+          done
+          if [ "${{ needs.build.outputs.channel }}" = beta ]; then
+            # Beta tags never move the one-click website install.
+            curl -fsSL -o frameplayer.json "$PAGES_URL/frameplayer.json" || echo "keeping template frameplayer.json"
+          fi
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: release/site
+      - id: deploy
+        uses: actions/deploy-pages@v4

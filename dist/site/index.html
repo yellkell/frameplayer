@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FramePlayer for Steam Frame</title>
+<meta name="description" content="Native VR video player for the Steam Frame. One-click install with Frame Control or FrameDrop.">
+<style>
+  :root {
+    --bg: #f6f7f9; --fg: #15171a; --muted: #5b626b; --card: #ffffff;
+    --line: #dde1e6; --accent: #1a73e8; --accent-fg: #ffffff; --accent2: #0f8a5f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1113; --fg: #e8eaed; --muted: #9aa0a6; --card: #181b1f;
+            --line: #2a2f35; --accent: #8ab4f8; --accent-fg: #0f1113; --accent2: #5fd3a5; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 48px 16px 64px; }
+  h1 { font-size: 2.2rem; margin: 0 0 4px; letter-spacing: -0.02em; }
+  .lede { color: var(--muted); margin: 0 0 32px; font-size: 1.1rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 24px; margin-bottom: 20px; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0 8px; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 48px;
+         padding: 0 22px; border-radius: 10px; font-weight: 600; text-decoration: none;
+         background: var(--accent); color: var(--accent-fg); flex: 1 1 220px; }
+  .btn.alt { background: var(--accent2); }
+  .btn:focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+  .meta { color: var(--muted); font-size: 0.9rem; word-break: break-all; }
+  ol { padding-left: 1.3em; margin: 8px 0 0; }
+  li { margin: 6px 0; }
+  code { font: 0.9em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg);
+         border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
+  a { color: var(--accent); }
+  h2 { font-size: 1.15rem; margin: 0 0 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>FramePlayer</h1>
+  <p class="lede">A native VR video player for the Valve Steam Frame. 180°, 360°, fisheye, SBS/OU, HDR, subtitles, and your existing DeoVR-compatible library.</p>
+
+  <section class="card" aria-labelledby="install">
+    <h2 id="install">Install in under two minutes</h2>
+    <ol>
+      <li>On the headset: <strong>Settings → System → Developer Mode</strong> (one time).</li>
+      <li>Pair the headset with <a href="https://github.com/saphid/steam-frame">Frame Control</a> or FrameDrop on your computer (one time).</li>
+      <li>Click a button below. FramePlayer appears under <strong>Library → Non-Steam</strong> with its artwork.</li>
+    </ol>
+    <div class="buttons">
+      <a class="btn" id="fc" href="#">Install with Frame Control</a>
+      <a class="btn alt" id="fd" href="#">Install with FrameDrop</a>
+    </div>
+    <p class="meta" id="meta">Loading release details…</p>
+  </section>
+
+  <section class="card" aria-labelledby="other">
+    <h2 id="other">Other ways to install</h2>
+    <p>Command line (macOS, Windows, Linux): download <code>frameplayer-install</code> from the
+      <a href="https://github.com/yellkell/frameplayer/releases/latest">latest release</a>, then run
+      <code>frameplayer-install pair</code> and <code>frameplayer-install install</code>.</p>
+    <p>After the first install FramePlayer updates itself from inside the headset.
+      Full guide: <a href="https://github.com/yellkell/frameplayer/blob/main/docs/install.md">docs/install.md</a>.</p>
+  </section>
+</main>
+<script>
+  // Manifest lives next to this page so forks and staging sites work unchanged.
+  const manifest = new URL("frameplayer.json", location.href).href;
+  const enc = encodeURIComponent(manifest);
+  document.getElementById("fc").href = "frame-control://install?manifest=" + enc;
+  // [verify] FrameDrop's install-link scheme; adjust once its docs confirm it.
+  document.getElementById("fd").href = "framedrop://install?manifest=" + enc;
+  fetch(manifest).then(r => r.json()).then(m => {
+    const mb = (m.tarball.size / 1e6).toFixed(1);
+    document.getElementById("meta").textContent =
+      "Version " + m.version + " · " + mb + " MB · SHA-256 " + m.tarball.sha256;
+  }).catch(() => {
+    document.getElementById("meta").textContent = "Release details unavailable.";
+  });
+</script>
+</body>
+</html>
