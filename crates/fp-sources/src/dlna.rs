@@ -438,21 +438,19 @@ fn item_entry(item: &Element, base: &str) -> Option<(Entry, Option<String>)> {
         // Subtitles offered as extra resources or Samsung/MiniDLNA captions.
         for r in &resources {
             let m = protocol_mime(r.attr("protocolInfo").unwrap_or("")).to_ascii_lowercase();
-            if m.starts_with("text/") || m.contains("subrip") {
-                if let Ok(u) = resolve(base, r.text.trim()) {
-                    e.subtitles.push(u);
-                }
+            if (m.starts_with("text/") || m.contains("subrip"))
+                && let Ok(u) = resolve(base, r.text.trim())
+            {
+                e.subtitles.push(u);
             }
         }
         if let Some(cap) = item
             .child_text("CaptionInfoEx")
             .or(item.child_text("CaptionInfo"))
+            && let Ok(u) = resolve(base, cap)
+            && !e.subtitles.contains(&u)
         {
-            if let Ok(u) = resolve(base, cap) {
-                if !e.subtitles.contains(&u) {
-                    e.subtitles.push(u);
-                }
-            }
+            e.subtitles.push(u);
         }
     }
     Some((e, item.attr("parentID").map(str::to_string)))
@@ -485,13 +483,13 @@ pub fn parse_didl(didl: &str, base: &str) -> Result<Didl> {
                 .child_text("albumArtURI")
                 .and_then(|u| resolve(base, u).ok());
             entries.push(e);
-        } else if el.name.eq_ignore_ascii_case("item") {
-            if let Some((e, parent)) = item_entry(el, base) {
-                if let Some(p) = parent {
-                    parents.push((e.location.clone(), p));
-                }
-                entries.push(e);
+        } else if el.name.eq_ignore_ascii_case("item")
+            && let Some((e, parent)) = item_entry(el, base)
+        {
+            if let Some(p) = parent {
+                parents.push((e.location.clone(), p));
             }
+            entries.push(e);
         }
     }
     Ok(Didl { entries, parents })

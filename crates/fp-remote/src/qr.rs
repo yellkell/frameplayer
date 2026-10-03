@@ -46,7 +46,11 @@ mod tests {
         let m = pairing_qr(&url).unwrap();
         assert_eq!(m.modules.len(), m.size * m.size);
         // Versions are 21 + 4k modules wide.
-        assert!(m.size >= 21 && (m.size - 21) % 4 == 0, "{}", m.size);
+        assert!(
+            m.size >= 21 && (m.size - 21).is_multiple_of(4),
+            "{}",
+            m.size
+        );
         // Finder patterns: dark corners top-left, top-right, bottom-left,
         // light separator just inside, light bottom-right corner region edge.
         let s = m.size;

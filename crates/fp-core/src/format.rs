@@ -133,6 +133,19 @@ pub enum Evidence {
     Default,
 }
 
+impl Evidence {
+    /// Where the format came from, for the UI.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Evidence::User => "your choice",
+            Evidence::Metadata => "from file metadata",
+            Evidence::FileName => "from the file name",
+            Evidence::AspectRatio => "guessed from the shape",
+            Evidence::Default => "default",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DetectedFormat {
     pub format: VideoFormat,
@@ -194,10 +207,9 @@ pub fn detect_from_name(name: &str) -> Option<VideoFormat> {
                 if let Some(deg) = t
                     .strip_prefix("FISHEYE")
                     .and_then(|d| d.parse::<f32>().ok())
+                    && (120.0..=270.0).contains(&deg)
                 {
-                    if (120.0..=270.0).contains(&deg) {
-                        projection = Some(Projection::fisheye(deg));
-                    }
+                    projection = Some(Projection::fisheye(deg));
                 }
             }
         }

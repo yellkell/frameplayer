@@ -266,10 +266,10 @@ impl Core {
             if !self.settings.device(&slot.name).enabled {
                 continue;
             }
-            if let Some(last) = slot.last_send_ms {
-                if now.saturating_sub(last) < u64::from(slot.dev.min_interval_ms()) {
-                    continue;
-                }
+            if let Some(last) = slot.last_send_ms
+                && now.saturating_sub(last) < u64::from(slot.dev.min_interval_ms())
+            {
+                continue;
             }
             match slot.mode {
                 SyncMode::Script => {
@@ -356,11 +356,12 @@ fn plan_moves(
             .round()
             .clamp(1.0, f64::from(u32::MAX)) as u32;
         let mut pos = target;
-        if settings.speed_limit > 0.0 && axis.is_positional() {
-            if let Some(prev) = state.last_pos {
-                let max_delta = settings.speed_limit / 100.0 * duration as f32 / 1000.0;
-                pos = prev + (pos - prev).clamp(-max_delta, max_delta);
-            }
+        if settings.speed_limit > 0.0
+            && axis.is_positional()
+            && let Some(prev) = state.last_pos
+        {
+            let max_delta = settings.speed_limit / 100.0 * duration as f32 / 1000.0;
+            pos = prev + (pos - prev).clamp(-max_delta, max_delta);
         }
         state.last_index = Some(index);
         state.last_pos = Some(pos);

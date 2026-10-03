@@ -242,17 +242,15 @@ pub fn parse_deovr_scene(v: &Value, base: &str) -> SceneInfo {
         }
     }
     // Some feeds put a single URL on the scene itself.
-    if sources.is_empty() {
-        if let Some(url) =
+    if sources.is_empty()
+        && let Some(url) =
             url_field(v, "videoUrl", base).or_else(|| url_field(v, "video_url", base))
-        {
-            if is_video_name(&last_segment(&url)) {
-                sources.push(MediaSource {
-                    url,
-                    ..MediaSource::default()
-                });
-            }
-        }
+        && is_video_name(&last_segment(&url))
+    {
+        sources.push(MediaSource {
+            url,
+            ..MediaSource::default()
+        });
     }
     let mut markers: Vec<(f64, String)> = array(v, "timeStamps")
         .iter()

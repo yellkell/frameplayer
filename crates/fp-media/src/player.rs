@@ -716,16 +716,16 @@ fn demux_thread(
                 } else if Some(idx) == audio_stream {
                     sh.apkts.push(serial, Some(pkt.take()));
                 } else if Some(idx) == sub_stream {
-                    if let Some((_, dec)) = subs.0.iter_mut().find(|(i, _)| *i == idx) {
-                        if let Some(cue) = subtitle::decode_packet(dec, &pkt) {
-                            let mut cues = sh.cues.lock().unwrap_or_else(|e| e.into_inner());
-                            if !cues
-                                .iter()
-                                .any(|c| (c.start - cue.start).abs() < 1e-3 && c.text == cue.text)
-                            {
-                                let pos = cues.partition_point(|c| c.start <= cue.start);
-                                cues.insert(pos, cue);
-                            }
+                    if let Some((_, dec)) = subs.0.iter_mut().find(|(i, _)| *i == idx)
+                        && let Some(cue) = subtitle::decode_packet(dec, &pkt)
+                    {
+                        let mut cues = sh.cues.lock().unwrap_or_else(|e| e.into_inner());
+                        if !cues
+                            .iter()
+                            .any(|c| (c.start - cue.start).abs() < 1e-3 && c.text == cue.text)
+                        {
+                            let pos = cues.partition_point(|c| c.start <= cue.start);
+                            cues.insert(pos, cue);
                         }
                     }
                     // SAFETY: valid packet.
@@ -797,12 +797,13 @@ fn video_thread(sh: Arc<Shared>, mut dec: Decoder, cap: usize) {
                             .filter(|d| *d > 0.0)
                             .unwrap_or(default_duration);
                         let floor = *sh.seek_floor.lock().unwrap_or_else(|e| e.into_inner());
-                        if let Some((fs, target)) = floor {
-                            if fs == serial && pts + dur * 0.5 < target {
-                                // SAFETY: valid frame; drop its reference.
-                                unsafe { ff::av_frame_unref(frame.as_ptr()) };
-                                continue;
-                            }
+                        if let Some((fs, target)) = floor
+                            && fs == serial
+                            && pts + dur * 0.5 < target
+                        {
+                            // SAFETY: valid frame; drop its reference.
+                            unsafe { ff::av_frame_unref(frame.as_ptr()) };
+                            continue;
                         }
                         let vf = match conv.convert(frame.take_raw(), pts, dur, serial) {
                             Ok(v) => Arc::new(v),
@@ -1022,10 +1023,10 @@ mod tests {
         let mut shown = Vec::new();
         while start.elapsed().as_secs_f64() < secs {
             let f = p.current_frame();
-            if let Some(f) = &f {
-                if shown.last() != Some(&f.pts) {
-                    shown.push(f.pts);
-                }
+            if let Some(f) = &f
+                && shown.last() != Some(&f.pts)
+            {
+                shown.push(f.pts);
             }
             if until(p, f.as_ref()) {
                 break;

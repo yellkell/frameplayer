@@ -176,11 +176,11 @@ fn fill_entry(e: &mut Map, spec: &ShortcutSpec, new: bool) {
             e.set(k, v);
         }
     }
-    if let Some(tags) = e.get_map_mut("tags") {
-        if !tags.0.iter().any(|(_, v)| *v == Value::Str(TAG.into())) {
-            let k = next_index(tags).to_string();
-            tags.0.push((k, Value::Str(TAG.into())));
-        }
+    if let Some(tags) = e.get_map_mut("tags")
+        && !tags.0.iter().any(|(_, v)| *v == Value::Str(TAG.into()))
+    {
+        let k = next_index(tags).to_string();
+        tags.0.push((k, Value::Str(TAG.into())));
     }
 }
 

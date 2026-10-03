@@ -137,18 +137,18 @@ fn spherical(par: &ff::AVCodecParameters) -> Option<Projection> {
 }
 
 fn stereo3d(par: &ff::AVCodecParameters, metadata: *mut ff::AVDictionary) -> Option<StereoLayout> {
-    if let Some(bytes) = side_data(par, ff::AV_PKT_DATA_STEREO3D) {
-        if bytes.len() >= std::mem::size_of::<ff::AVStereo3D>() {
-            // SAFETY: size checked; FFmpeg stores an AVStereo3D here.
-            let s = unsafe { &*(bytes.as_ptr() as *const ff::AVStereo3D) };
-            match s.type_ {
-                ff::AV_STEREO3D_SIDEBYSIDE | ff::AV_STEREO3D_SIDEBYSIDE_QUINCUNX => {
-                    return Some(StereoLayout::SideBySide);
-                }
-                ff::AV_STEREO3D_TOPBOTTOM => return Some(StereoLayout::TopBottom),
-                ff::AV_STEREO3D_2D => return Some(StereoLayout::Mono),
-                _ => {}
+    if let Some(bytes) = side_data(par, ff::AV_PKT_DATA_STEREO3D)
+        && bytes.len() >= std::mem::size_of::<ff::AVStereo3D>()
+    {
+        // SAFETY: size checked; FFmpeg stores an AVStereo3D here.
+        let s = unsafe { &*(bytes.as_ptr() as *const ff::AVStereo3D) };
+        match s.type_ {
+            ff::AV_STEREO3D_SIDEBYSIDE | ff::AV_STEREO3D_SIDEBYSIDE_QUINCUNX => {
+                return Some(StereoLayout::SideBySide);
             }
+            ff::AV_STEREO3D_TOPBOTTOM => return Some(StereoLayout::TopBottom),
+            ff::AV_STEREO3D_2D => return Some(StereoLayout::Mono),
+            _ => {}
         }
     }
     // Matroska StereoMode as exported in stream metadata.

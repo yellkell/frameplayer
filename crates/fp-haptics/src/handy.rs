@@ -150,10 +150,10 @@ fn check(status: u16, body: &str) -> Result<Value> {
     if !(200..300).contains(&status) {
         return Err(Error::Http(format!("status {status}: {body}")));
     }
-    if let Some(r) = v.get("result").and_then(Value::as_i64) {
-        if r < 0 {
-            return Err(Error::Http(format!("result {r}: {body}")));
-        }
+    if let Some(r) = v.get("result").and_then(Value::as_i64)
+        && r < 0
+    {
+        return Err(Error::Http(format!("result {r}: {body}")));
     }
     Ok(v)
 }

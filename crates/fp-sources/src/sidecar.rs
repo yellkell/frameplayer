@@ -61,12 +61,11 @@ fn suffix_after_stem<'a>(candidate: &'a str, stem: &str) -> Option<Option<&'a st
     }
     let head = candidate.get(..stem.len())?;
     let rest = candidate.get(stem.len()..)?;
-    if head.eq_ignore_ascii_case(stem) {
-        if let Some(sfx) = rest.strip_prefix('.') {
-            if !sfx.is_empty() {
-                return Some(Some(sfx));
-            }
-        }
+    if head.eq_ignore_ascii_case(stem)
+        && let Some(sfx) = rest.strip_prefix('.')
+        && !sfx.is_empty()
+    {
+        return Some(Some(sfx));
     }
     None
 }

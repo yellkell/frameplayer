@@ -182,6 +182,17 @@ impl Actions {
             let Ok(profile_path) = instance.string_to_path(profile) else {
                 continue;
             };
+            // Every profile we list has an aim pose; if the runtime rejects
+            // it, the runtime does not know the profile at all.
+            let Ok(probe) = instance.string_to_path("/user/hand/right/input/aim/pose") else {
+                continue;
+            };
+            if actions
+                .suggest(instance, profile_path, &[(probe, Kind::Aim)])
+                .is_err()
+            {
+                continue;
+            }
             let mut accepted: Vec<(xr::Path, Kind)> = Vec::new();
             for (component, kind, mask) in candidates.iter() {
                 for (i, side) in ["left", "right"].iter().enumerate() {
@@ -287,16 +298,16 @@ impl Actions {
                 .state(session, *h)
                 .map(|s| s.current_state)
                 .unwrap_or(false);
-            if let Some(spaces) = &self.aim_spaces {
-                if let Ok(loc) = spaces[i].locate(base, time) {
-                    let ok = loc.location_flags.contains(
-                        xr::SpaceLocationFlags::POSITION_VALID
-                            | xr::SpaceLocationFlags::ORIENTATION_VALID,
-                    );
-                    if ok {
-                        hand.aim = Some(crate::pose(loc.pose));
-                        hand.active = true;
-                    }
+            if let Some(spaces) = &self.aim_spaces
+                && let Ok(loc) = spaces[i].locate(base, time)
+            {
+                let ok = loc.location_flags.contains(
+                    xr::SpaceLocationFlags::POSITION_VALID
+                        | xr::SpaceLocationFlags::ORIENTATION_VALID,
+                );
+                if ok {
+                    hand.aim = Some(crate::pose(loc.pose));
+                    hand.active = true;
                 }
             }
         }

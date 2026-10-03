@@ -182,27 +182,27 @@ fn parse_size(tok: &str, next: Option<&str>) -> Option<u64> {
         return None;
     }
     let value: f64 = num.parse().ok()?;
-    if unit.is_empty() {
-        if let Some(n) = next {
-            let n = n.trim();
-            if matches!(
-                n.to_ascii_lowercase().as_str(),
-                "b" | "bytes"
-                    | "k"
-                    | "kb"
-                    | "kib"
-                    | "m"
-                    | "mb"
-                    | "mib"
-                    | "g"
-                    | "gb"
-                    | "gib"
-                    | "t"
-                    | "tb"
-                    | "tib"
-            ) {
-                unit = n;
-            }
+    if unit.is_empty()
+        && let Some(n) = next
+    {
+        let n = n.trim();
+        if matches!(
+            n.to_ascii_lowercase().as_str(),
+            "b" | "bytes"
+                | "k"
+                | "kb"
+                | "kib"
+                | "m"
+                | "mb"
+                | "mib"
+                | "g"
+                | "gb"
+                | "gib"
+                | "t"
+                | "tb"
+                | "tib"
+        ) {
+            unit = n;
         }
     }
     let mult: f64 = match unit.to_ascii_lowercase().as_str() {
@@ -228,12 +228,12 @@ fn parse_details(text: &str) -> (Option<i64>, Option<u64>) {
     let mut modified = None;
     let mut size_from = 0;
     for i in 0..toks.len() {
-        if let Some(clock) = toks.get(i + 1) {
-            if let Some(t) = parse_listing_date(toks[i], clock) {
-                modified = Some(t);
-                size_from = i + 2;
-                break;
-            }
+        if let Some(clock) = toks.get(i + 1)
+            && let Some(t) = parse_listing_date(toks[i], clock)
+        {
+            modified = Some(t);
+            size_from = i + 2;
+            break;
         }
     }
     let size = toks

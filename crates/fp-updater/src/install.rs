@@ -315,22 +315,22 @@ pub fn validate_install_dir(dir: &Path, expected: Option<&Version>) -> Result<Ve
         )));
     }
     let launcher = dir.join(LAUNCHER_NAME);
-    if let Ok(m) = fs::symlink_metadata(&launcher) {
-        if !m.file_type().is_file() || !is_executable(&m) {
-            return Err(Error::InvalidInstall(format!(
-                "{LAUNCHER_NAME} is not an executable regular file"
-            )));
-        }
+    if let Ok(m) = fs::symlink_metadata(&launcher)
+        && (!m.file_type().is_file() || !is_executable(&m))
+    {
+        return Err(Error::InvalidInstall(format!(
+            "{LAUNCHER_NAME} is not an executable regular file"
+        )));
     }
     let version = installed_version(dir)?
         .ok_or_else(|| Error::InvalidInstall(format!("{VERSION_FILE} file is missing")))?;
-    if let Some(exp) = expected {
-        if exp != &version {
-            return Err(Error::VersionMismatch {
-                expected: exp.to_string(),
-                found: version.to_string(),
-            });
-        }
+    if let Some(exp) = expected
+        && exp != &version
+    {
+        return Err(Error::VersionMismatch {
+            expected: exp.to_string(),
+            found: version.to_string(),
+        });
     }
     Ok(version)
 }

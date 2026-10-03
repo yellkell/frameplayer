@@ -41,10 +41,10 @@ pub fn load_or_create(path: &Path) -> Result<String, RemoteError> {
     match fs::read_to_string(path) {
         Ok(s) if valid_token(s.trim()) => {
             // Tighten permissions left loose by hand edits or old versions.
-            if let Ok(meta) = fs::metadata(path) {
-                if meta.permissions().mode() & 0o077 != 0 {
-                    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(err)?;
-                }
+            if let Ok(meta) = fs::metadata(path)
+                && meta.permissions().mode() & 0o077 != 0
+            {
+                fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(err)?;
             }
             return Ok(s.trim().to_owned());
         }
@@ -63,10 +63,10 @@ pub fn store(path: &Path, token: &str) -> Result<(), RemoteError> {
         path: path.to_path_buf(),
         source,
     };
-    if let Some(dir) = path.parent() {
-        if !dir.as_os_str().is_empty() {
-            fs::create_dir_all(dir).map_err(err)?;
-        }
+    if let Some(dir) = path.parent()
+        && !dir.as_os_str().is_empty()
+    {
+        fs::create_dir_all(dir).map_err(err)?;
     }
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");

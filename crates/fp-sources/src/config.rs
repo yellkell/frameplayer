@@ -355,14 +355,14 @@ pub fn load_configs(path: &Path) -> Result<Vec<SourceConfig>> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e.into()),
     };
-    if let Ok(meta) = std::fs::metadata(path) {
-        if meta.permissions().mode() & 0o077 != 0 {
-            log::warn!(
-                "{} was readable by other users; restricting to 0600",
-                path.display()
-            );
-            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-        }
+    if let Ok(meta) = std::fs::metadata(path)
+        && meta.permissions().mode() & 0o077 != 0
+    {
+        log::warn!(
+            "{} was readable by other users; restricting to 0600",
+            path.display()
+        );
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
     }
     // Accept the versioned object and a bare array.
     let value: serde_json::Value = serde_json::from_slice(&data)

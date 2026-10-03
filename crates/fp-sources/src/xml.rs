@@ -121,12 +121,11 @@ pub(crate) fn parse(xml: &str) -> Result<Element> {
             }
             Event::End(_) => {
                 // A stray end tag at the root is ignored.
-                if stack.len() > 1 {
-                    if let Some(done) = stack.pop() {
-                        if let Some(top) = stack.last_mut() {
-                            top.children.push(done);
-                        }
-                    }
+                if stack.len() > 1
+                    && let Some(done) = stack.pop()
+                    && let Some(top) = stack.last_mut()
+                {
+                    top.children.push(done);
                 }
             }
             Event::Text(t) => {
@@ -153,10 +152,10 @@ pub(crate) fn parse(xml: &str) -> Result<Element> {
     }
     // Close elements left open by a truncated document.
     while stack.len() > 1 {
-        if let Some(done) = stack.pop() {
-            if let Some(top) = stack.last_mut() {
-                top.children.push(done);
-            }
+        if let Some(done) = stack.pop()
+            && let Some(top) = stack.last_mut()
+        {
+            top.children.push(done);
         }
     }
     let root = stack.pop().unwrap_or_default();

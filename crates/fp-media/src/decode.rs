@@ -128,12 +128,13 @@ impl Decoder {
         let mut candidates: Vec<(*const ff::AVCodec, bool)> = Vec::new();
         // SAFETY: decoder lookups return static descriptors or null.
         unsafe {
-            if kind == ff::AVMEDIA_TYPE_VIDEO && hw == HwDecode::Auto {
-                if let Some(n) = v4l2_name(codec_id) {
-                    let c = ff::avcodec_find_decoder_by_name(n.as_ptr());
-                    if !c.is_null() {
-                        candidates.push((c, true));
-                    }
+            if kind == ff::AVMEDIA_TYPE_VIDEO
+                && hw == HwDecode::Auto
+                && let Some(n) = v4l2_name(codec_id)
+            {
+                let c = ff::avcodec_find_decoder_by_name(n.as_ptr());
+                if !c.is_null() {
+                    candidates.push((c, true));
                 }
             }
             if codec_id == ff::AV_CODEC_ID_AV1 {

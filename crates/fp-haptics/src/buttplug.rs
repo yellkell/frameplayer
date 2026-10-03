@@ -388,10 +388,10 @@ fn wait_for<T>(
         };
         let parsed: Value = serde_json::from_str(text.as_str())?;
         for msg in parsed.as_array().into_iter().flatten() {
-            if let Some((kind, body)) = shared.handle(msg) {
-                if let Some(r) = want(kind, body) {
-                    return r;
-                }
+            if let Some((kind, body)) = shared.handle(msg)
+                && let Some(r) = want(kind, body)
+            {
+                return r;
             }
         }
     }
@@ -557,14 +557,14 @@ fn io_loop(
                 Err(TryRecvError::Empty) => break,
             }
         }
-        if let Some(every) = ping_every {
-            if last_ping.elapsed() >= every {
-                last_ping = Instant::now();
-                let frame = shared.frame(vec![("Ping", json!({}))]);
-                if let Err(e) = send_text(&mut ws, frame) {
-                    fail(e.to_string());
-                    break 'run;
-                }
+        if let Some(every) = ping_every
+            && last_ping.elapsed() >= every
+        {
+            last_ping = Instant::now();
+            let frame = shared.frame(vec![("Ping", json!({}))]);
+            if let Err(e) = send_text(&mut ws, frame) {
+                fail(e.to_string());
+                break 'run;
             }
         }
         match ws.read() {

@@ -218,10 +218,10 @@ impl<F: RangeFetch> Inner<F> {
         if st.blocks.contains_key(&index) {
             return;
         }
-        if let Some(size) = self.fetcher.size() {
-            if index * self.block_size >= size {
-                return;
-            }
+        if let Some(size) = self.fetcher.size()
+            && index * self.block_size >= size
+        {
+            return;
         }
         st.blocks.insert(index, Slot::Loading);
         st.stats.read_aheads += 1;

@@ -162,12 +162,12 @@ impl DeovrMessage {
     /// the open video. `duration` is informational and ignored.
     pub fn to_commands(&self, current_location: &str) -> Vec<PlayerCommand> {
         let mut out = Vec::new();
-        if let Some(p) = &self.path {
-            if p != current_location {
-                out.push(PlayerCommand::Open {
-                    location: p.clone(),
-                });
-            }
+        if let Some(p) = &self.path
+            && p != current_location
+        {
+            out.push(PlayerCommand::Open {
+                location: p.clone(),
+            });
         }
         if let Some(speed) = self.playback_speed {
             out.push(PlayerCommand::SetSpeed { speed });

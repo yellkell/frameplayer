@@ -260,10 +260,10 @@ fn next_data(s: &mut TcpStream, buf: &mut Vec<u8>, f: impl Fn(&serde_json::Value
             let event = String::from_utf8_lossy(&buf[..i]).into_owned();
             buf.drain(..i + 2);
             for line in event.lines() {
-                if let Some(json) = line.strip_prefix("data: ") {
-                    if f(&serde_json::from_str(json).unwrap()) {
-                        return;
-                    }
+                if let Some(json) = line.strip_prefix("data: ")
+                    && f(&serde_json::from_str(json).unwrap())
+                {
+                    return;
                 }
             }
         }

@@ -176,10 +176,10 @@ pub fn load_file(src: Arc<dyn ByteSource>, name: &str) -> Result<Vec<Cue>> {
     let mut cues = Vec::new();
     let pkt = Packet::new();
     while input.read(pkt.as_ptr())? {
-        if pkt.stream_index() == idx {
-            if let Some(c) = decode_packet(&mut dec, &pkt) {
-                cues.push(c);
-            }
+        if pkt.stream_index() == idx
+            && let Some(c) = decode_packet(&mut dec, &pkt)
+        {
+            cues.push(c);
         }
         // SAFETY: valid packet.
         unsafe { ff::av_packet_unref(pkt.as_ptr()) };

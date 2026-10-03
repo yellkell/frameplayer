@@ -178,6 +178,16 @@ impl XrSession {
         };
     }
 
+    /// Asks the runtime to end the session; [`XrSession::poll`] reports
+    /// [`SessionEvent::Exit`] once it has.
+    pub fn request_exit(&self) {
+        if self.running
+            && let Err(e) = self.session.request_exit()
+        {
+            log::warn!("xrRequestExitSession: {e}");
+        }
+    }
+
     /// Processes runtime events. Call once per loop iteration.
     pub fn poll(&mut self) -> Result<SessionEvent> {
         let mut result = SessionEvent::None;

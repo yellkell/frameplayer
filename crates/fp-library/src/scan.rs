@@ -367,10 +367,10 @@ impl Library {
                     .into_iter()
                     .map(|s| path_string(&dir.join(s)))
                     .collect();
-                if scripts.is_empty() {
-                    if let (Some((idir, _)), Some((fs, _))) = (&interactive, fallback.get(i)) {
-                        scripts = fs.iter().map(|s| path_string(&idir.join(s))).collect();
-                    }
+                if scripts.is_empty()
+                    && let (Some((idir, _)), Some((fs, _))) = (&interactive, fallback.get(i))
+                {
+                    scripts = fs.iter().map(|s| path_string(&idir.join(s))).collect();
                 }
                 let subs = subs
                     .into_iter()

@@ -164,15 +164,15 @@ impl FramedropManifest {
             if !ALLOWED_EXTENSIONS.iter().any(|ext| path.ends_with(ext)) {
                 return Err(bad_url("must point to a .apk, .zip or .exe file".into()));
             }
-            if let Some(h) = &f.sha256 {
-                if !crate::manifest::is_sha256_hex(h) {
-                    return Err(FramedropError::BadSha256(index));
-                }
+            if let Some(h) = &f.sha256
+                && !crate::manifest::is_sha256_hex(h)
+            {
+                return Err(FramedropError::BadSha256(index));
             }
-            if let Some(size) = f.size {
-                if size > MAX_FILE_BYTES {
-                    return Err(FramedropError::TooBig { index, size });
-                }
+            if let Some(size) = f.size
+                && size > MAX_FILE_BYTES
+            {
+                return Err(FramedropError::TooBig { index, size });
             }
             if let Some(exe) = &f.exe {
                 let bad_exe = |reason: &str| FramedropError::BadExe {

@@ -1,0 +1,157 @@
+//! Persistent user settings (`~/.config/frameplayer/settings.json`).
+//! Source credentials live separately in `sources.json` (mode 0600).
+
+use fp_core::view::ViewSettings;
+use fp_haptics::HapticsSettings;
+use fp_remote::config::RemoteConfig;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+
+/// A haptic device the user added.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HapticDeviceConfig {
+    /// TCode over serial (`/dev/ttyACM0`), `tcp://host:port` or `udp://host:port`.
+    Tcode { endpoint: String },
+    /// Intiface Central / Buttplug server.
+    Buttplug { url: String },
+    /// The Handy, by connection key.
+    Handy { key: String },
+}
+
+impl HapticDeviceConfig {
+    pub fn label(&self) -> String {
+        match self {
+            HapticDeviceConfig::Tcode { endpoint } => format!("TCode {endpoint}"),
+            HapticDeviceConfig::Buttplug { url } => format!("Intiface {url}"),
+            HapticDeviceConfig::Handy { key } => {
+                let shown: String = key.chars().take(3).collect();
+                format!("The Handy ({shown}…)")
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Settings {
+    /// Local folders indexed into the library.
+    pub library_folders: Vec<PathBuf>,
+    /// Use the V4L2 hardware decoder when available.
+    pub hardware_decoding: bool,
+    /// ALSA device ("default" routes to PipeWire on SteamOS).
+    pub audio_device: String,
+    pub volume: f32,
+    /// Defaults for videos without saved adjustments.
+    pub default_view: ViewSettings,
+    /// Show the real world around flat screens and the UI.
+    pub passthrough: bool,
+    /// Resume videos where they were left.
+    pub resume: bool,
+    /// Seconds of inactivity before the playback UI hides.
+    pub auto_hide_secs: f32,
+    /// Thumbstick seek step in seconds.
+    pub seek_step: f64,
+    pub remote: RemoteConfig,
+    pub haptics: HapticsSettings,
+    pub haptic_devices: Vec<HapticDeviceConfig>,
+    /// "stable" or "beta".
+    pub update_channel: String,
+    pub check_updates: bool,
+    /// UI text size multiplier.
+    pub ui_scale: f32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        let mut library_folders = Vec::new();
+        if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+            for d in ["Videos", "Downloads"] {
+                let p = home.join(d);
+                if p.is_dir() {
+                    library_folders.push(p);
+                }
+            }
+        }
+        Settings {
+            library_folders,
+            hardware_decoding: true,
+            audio_device: "default".into(),
+            volume: 1.0,
+            default_view: ViewSettings::default(),
+            passthrough: false,
+            resume: true,
+            auto_hide_secs: 4.0,
+            seek_step: 10.0,
+            remote: RemoteConfig::default(),
+            haptics: HapticsSettings::default(),
+            haptic_devices: Vec::new(),
+            update_channel: "stable".into(),
+            check_updates: true,
+            ui_scale: 1.0,
+        }
+    }
+}
+
+impl Settings {
+    pub fn path() -> PathBuf {
+        fp_core::dirs::config_dir().join("settings.json")
+    }
+
+    pub fn sources_path() -> PathBuf {
+        fp_core::dirs::config_dir().join("sources.json")
+    }
+
+    /// Loads settings, falling back to defaults (and logging why) when the
+    /// file is missing or unreadable.
+    pub fn load(path: &Path) -> Settings {
+        match std::fs::read_to_string(path) {
+            Ok(text) => match serde_json::from_str(&text) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::warn!("settings {}: {e}; using defaults", path.display());
+                    Settings::default()
+                }
+            },
+            Err(_) => Settings::default(),
+        }
+    }
+
+    /// Writes atomically (temp file + rename).
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
+        std::fs::write(&tmp, json)?;
+        std::fs::rename(&tmp, path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn round_trip_and_partial_files() {
+        let dir = std::env::temp_dir().join(format!("fp-settings-{}", std::process::id()));
+        let path = dir.join("settings.json");
+        let mut s = Settings {
+            volume: 0.5,
+            ..Default::default()
+        };
+        s.haptic_devices.push(HapticDeviceConfig::Tcode {
+            endpoint: "tcp://10.0.0.2:8000".into(),
+        });
+        s.save(&path).unwrap();
+        assert_eq!(Settings::load(&path), s);
+        std::fs::write(&path, r#"{"volume": 0.25}"#).unwrap();
+        let p = Settings::load(&path);
+        assert_eq!(p.volume, 0.25);
+        assert_eq!(p.seek_step, 10.0);
+        std::fs::write(&path, "garbage").unwrap();
+        assert_eq!(Settings::load(&path).volume, 1.0);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

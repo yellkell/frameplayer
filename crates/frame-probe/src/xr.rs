@@ -268,13 +268,13 @@ fn system_info(
     if enabled.ext_eye_gaze_interaction {
         s.eye_gaze_supported = eye_gaze_supported(instance, system).ok();
     }
-    if enabled.khr_vulkan_enable2 {
-        if let Ok(req) = instance.graphics_requirements::<xr::Vulkan>(system) {
-            s.vulkan_api_range = Some((
-                req.min_api_version_supported.to_string(),
-                req.max_api_version_supported.to_string(),
-            ));
-        }
+    if enabled.khr_vulkan_enable2
+        && let Ok(req) = instance.graphics_requirements::<xr::Vulkan>(system)
+    {
+        s.vulkan_api_range = Some((
+            req.min_api_version_supported.to_string(),
+            req.max_api_version_supported.to_string(),
+        ));
     }
     s
 }

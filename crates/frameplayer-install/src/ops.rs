@@ -296,15 +296,15 @@ fn upload_and_unpack(
     let needed = size
         .saturating_add(info.uncompressed_size)
         .saturating_add(SPACE_MARGIN);
-    if let Some(free) = device.free_bytes {
-        if free < needed {
-            return Err(InstallError::Requirement(format!(
-                "the headset has {:.0} MB free but the install needs about {:.0} MB; \
+    if let Some(free) = device.free_bytes
+        && free < needed
+    {
+        return Err(InstallError::Requirement(format!(
+            "the headset has {:.0} MB free but the install needs about {:.0} MB; \
                  free some space and try again",
-                free as f64 / 1e6,
-                needed as f64 / 1e6
-            )));
-        }
+            free as f64 / 1e6,
+            needed as f64 / 1e6
+        )));
     }
     let staging = device.home_path(REMOTE_STAGING);
     let plan = RemotePlan {

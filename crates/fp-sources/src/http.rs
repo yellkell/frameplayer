@@ -500,15 +500,12 @@ impl HttpFetcher {
                         range: Some((start, _)),
                         ..
                     }) = cr
+                        && start != offset
                     {
-                        if start != offset {
-                            return Err(Failure::Fatal(Error::Http {
-                                url: self.display(),
-                                message: format!(
-                                    "asked for {range}, server sent bytes from {start}"
-                                ),
-                            }));
-                        }
+                        return Err(Failure::Fatal(Error::Http {
+                            url: self.display(),
+                            message: format!("asked for {range}, server sent bytes from {start}"),
+                        }));
                     }
                     let data =
                         read_body(resp.into_body().into_reader(), want as u64).map_err(io_retry)?;
