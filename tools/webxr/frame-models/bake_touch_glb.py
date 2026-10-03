@@ -184,10 +184,15 @@ def bake_hand(gltf, hand):
     root = m.add("frame-controller", t, r, scene["nodes"])
     scene["nodes"] = [root]
 
-    for name, visible in hand.get("visibleAtRest", {}).items():
-        i = m.find(name)
-        if i is not None and not visible:
-            m.nodes[i]["scale"] = [0, 0, 0]
+    # Parts hidden at rest (touch indicators). SteamVR has been seen to
+    # report every part hidden, which would hide the whole controller:
+    # only trust the data when something is visible.
+    vis = hand.get("visibleAtRest", {})
+    if any(vis.values()):
+        for name, visible in vis.items():
+            i = m.find(name)
+            if i is not None and not visible:
+                m.nodes[i]["scale"] = [0, 0, 0]
 
     done = []
     stick_nodes = set()
