@@ -334,10 +334,18 @@ pub fn evaluate(r: &Report) -> Vec<Verdict> {
         Some(p) => v(
             "Frame controller interaction profile",
             Status::No,
-            p.rejected
-                .first()
-                .map(|(path, e)| format!("{path}: {e}"))
-                .unwrap_or_default(),
+            if !xr
+                .extensions
+                .iter()
+                .any(|(name, _)| name == "XR_VALVE_frame_controller_interaction")
+            {
+                "runtime does not offer XR_VALVE_frame_controller_interaction (controllers arrive as emulated Touch)".to_string()
+            } else {
+                p.rejected
+                    .first()
+                    .map(|(path, e)| format!("{path}: {e}"))
+                    .unwrap_or_default()
+            },
         ),
         None => v(
             "Frame controller interaction profile",
@@ -547,6 +555,25 @@ mod tests {
         });
         let v = evaluate(&r);
         assert_eq!(find(&v, "Frame controller").status, Status::Yes);
+
+        // Without the extension the profile is rejected, and the verdict says why.
+        let mut r = empty();
+        r.xr.interaction_profiles.push(xr::ProfileProbe {
+            profile: "/interaction_profiles/valve/frame_controller_valve".into(),
+            accepted: vec![],
+            rejected: vec![(
+                "/user/hand/left/input/trigger/value".into(),
+                "XR_ERROR_PATH_UNSUPPORTED".into(),
+            )],
+        });
+        let verdicts = evaluate(&r);
+        let f = find(&verdicts, "Frame controller");
+        assert_eq!(f.status, Status::No);
+        assert!(
+            f.answer.contains("XR_VALVE_frame_controller_interaction"),
+            "{}",
+            f.answer
+        );
         let rr = find(&v, "Display refresh");
         assert_eq!(rr.status, Status::Yes);
         assert!(rr.answer.contains("currently 90"), "{}", rr.answer);
