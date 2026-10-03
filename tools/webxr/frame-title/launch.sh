@@ -1,9 +1,10 @@
 #!/bin/bash
 # Starts Chromium XR from the Frame Control / Steam devkit title. The title's
 # top-level chromium-xr.sh and chromium-xr-sandboxed.sh call this with
-# CHROMIUM_XR_SANDBOXED=0 or 1; Steam passes no arguments, so it opens the
-# bundled start page (the WebXR check, served on localhost so WebXR is
-# allowed). Arguments, if any, go to Chromium: `chromium-xr.sh URL`.
+# CHROMIUM_XR_SANDBOXED=0 or 1. Steam passes no arguments, so it opens the
+# page in ~/.config/chromium-xr-frame/home-url (FramePlayer's Web XR tab
+# writes it), else Fish & Chips. Arguments, if any, go to Chromium:
+# `chromium-xr.sh URL`. The WebXR check page is in chromium/start/.
 #
 # Based on saphid/chromium-webxr-steam-frame frame/chromium-xr (BSD-3).
 set -euo pipefail
@@ -36,16 +37,15 @@ if [[ -n "${LD_PRELOAD:-}" ]]; then
   fi
 fi
 
-# Start page, on loopback only. A second launch finds the port taken and
-# reuses the first one's server.
-port=8765
-server=
-if ! (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
-  python3 -m http.server "$port" --bind 127.0.0.1 --directory "$here/start" >/dev/null 2>&1 &
-  server=$!
-  for _ in 1 2 3 4 5 6 7 8 9 10; do (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null && break; sleep 0.2; done
+# The page to open when started without one (from the Steam library or by
+# FramePlayer through Steam). A running browser opens it in a new tab.
+home_url=https://yellkell.com/fac
+home_file=$HOME/.config/chromium-xr-frame/home-url
+if [[ -s $home_file ]]; then
+  read -r saved <"$home_file" || true
+  [[ $saved == http://* || $saved == https://* ]] && home_url=$saved
 fi
-(( $# )) || set -- "http://localhost:$port/?title=$name"
+(( $# )) || set -- "$home_url"
 
 # WebXR at 90 Hz. SteamVR runs each app at its per-app preferredRefreshRate
 # (72 Hz unless set) and overrides what the app requests through OpenXR, so
@@ -87,6 +87,5 @@ flags=(
 echo "flags: ${flags[*]} $*"
 status=0
 "$here/chrome" "${flags[@]}" "$@" || status=$?
-[[ -n $server ]] && kill "$server" 2>/dev/null
 echo "$(date -Is) exit $status"
 exit "$status"

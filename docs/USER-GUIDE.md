@@ -106,21 +106,20 @@ phone through the web remote.
 
 ## Web XR games and experiences
 
-The **Web XR** tab opens WebXR pages (Fish & Chips at
-`https://yellkell.com/fac` is already in the list) in a browser that can do
-immersive VR on the Frame:
+The **Web XR** tab opens a web page in **Chromium XR**, the Frame's WebXR
+browser. The address starts as Fish & Chips (`https://yellkell.com/fac`);
+type another to change it (**Reset** puts Fish & Chips back).
 
 1. Install **Chromium XR for Steam Frame** once: the `ChromiumXR-Frame-arm64.zip`
-   release of this repository, unpacked into `~/chromium-xr-frame` (see
-   `docs/webxr/README.md`). It carries the Frame fixes: both eyes render,
-   the controllers work like Quest Touch controllers in Quest-made games,
-   and WebXR runs at 90 Hz. saphid's build in `~/.local/bin/chromium-xr`
-   also works, without those fixes. The Web XR tab shows the browser it
-   found.
-2. In FramePlayer, **Web XR › Launch** next to Fish & Chips. FramePlayer
-   closes its VR view and the page opens; press the page's **Enter VR**
-   button.
-3. Close the browser to return to FramePlayer's library.
+   release of this repository, unpacked into `~/chromium-xr-frame`, with its
+   Steam library entry (see `docs/webxr/README.md`). It carries the Frame
+   fixes: both eyes render, the controllers work like Quest Touch
+   controllers in Quest-made games, and WebXR runs at 90 Hz.
+2. In FramePlayer, **Web XR › Open in Chromium XR**. FramePlayer closes and
+   Steam starts Chromium XR at that page, as its own app in the headset;
+   press the page's **Enter VR** button. It's a normal browser window: use
+   its address bar to go anywhere else.
+3. Start FramePlayer again from your library when you're done.
 
 Mixed-reality pages (WebXR `immersive-ar`) also
 need the headset to offer passthrough to apps: Chromium only offers AR when

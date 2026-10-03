@@ -92,10 +92,8 @@ pub enum Action {
     RegenerateToken,
     CheckUpdates,
     InstallUpdate,
-    /// Hand the headset to the WebXR browser at this page.
+    /// Open this page in the WebXR browser, which takes over the headset.
     LaunchWeb(String),
-    AddWebApp(crate::webxr::WebApp),
-    RemoveWebApp(usize),
     Recenter,
     TogglePassthrough,
     /// Show the library/browser panel (during playback).
@@ -221,7 +219,7 @@ pub struct UiState {
     /// Hide the seek-preview while scrubbing has not moved.
     pub scrub: Option<f64>,
     pub keyboard_shift: bool,
-    pub web_name: String,
+    /// The Web XR tab's address field (filled from the saved page).
     pub web_url: String,
     /// Facts for the About tab (runtime, GPU, decoder...).
     pub about: Vec<(String, String)>,
@@ -265,7 +263,6 @@ impl Default for UiState {
             toast: None,
             scrub: None,
             keyboard_shift: false,
-            web_name: String::new(),
             web_url: String::new(),
             about: Vec::new(),
         }

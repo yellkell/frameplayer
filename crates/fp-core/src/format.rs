@@ -101,6 +101,16 @@ impl Default for VideoFormat {
 }
 
 impl VideoFormat {
+    /// The format of a video nothing identifies (no metadata, file name tag
+    /// or telling shape): stereo 180 side by side, the most common VR video
+    /// format and what FramePlayer is mostly used for. Flat videos are
+    /// switched in the player's format menu.
+    pub const FALLBACK: VideoFormat = VideoFormat {
+        projection: Projection::EQUIRECT_180,
+        stereo: StereoLayout::SideBySide,
+        eyes_swapped: false,
+    };
+
     pub const fn new(projection: Projection, stereo: StereoLayout) -> Self {
         VideoFormat {
             projection,
@@ -335,7 +345,7 @@ pub fn resolve(
         };
     }
     DetectedFormat {
-        format: VideoFormat::default(),
+        format: VideoFormat::FALLBACK,
         evidence: Evidence::Default,
     }
 }
@@ -505,7 +515,7 @@ mod tests {
         );
         assert_eq!(
             resolve(None, Default::default(), "a.mp4", 1920, 1080).format,
-            VideoFormat::default()
+            VideoFormat::FALLBACK
         );
     }
 

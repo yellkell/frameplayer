@@ -1,11 +1,14 @@
-//! Launching WebXR pages (web games and experiences) in a WebXR-capable
-//! browser on the Frame, handing the headset over and coming back after.
+//! Opening web pages (WebXR games and experiences) in the Frame's WebXR
+//! browser, Chromium XR, which takes over the headset.
 //!
-//! Only one app can drive the headset, so FramePlayer exits its OpenXR
-//! session first: it writes the browser command to [`handoff_path`] and
-//! exits with [`HANDOFF_EXIT_CODE`]; `frameplayer.sh` runs the browser,
-//! waits for it to close and starts FramePlayer again. Started without the
-//! launcher, FramePlayer starts the browser itself and quits.
+//! The browser is started as its own Steam library entry (Chromium XR, set
+//! up by its installer): Steam only shows an app's windows as a panel in the
+//! headset when it launched that app, so a browser started by FramePlayer
+//! itself ran invisibly. FramePlayer writes the page to [`home_url_path`],
+//! which the browser's launcher opens, asks Steam to start the entry and
+//! quits. Without a Steam entry it falls back to the hand-off: it writes the
+//! browser command to [`handoff_path`] and exits with [`HANDOFF_EXIT_CODE`];
+//! `frameplayer.sh` runs the browser and starts FramePlayer again after.
 //!
 //! The browser is FramePlayer's WebXR Chromium build for the Steam Frame
 //! (tools/webxr, released as chromium-xr-frame-* with FramePlayer), installed
@@ -13,7 +16,6 @@
 //! (github.com/saphid/chromium-webxr-steam-frame, `~/.local/bin/chromium-xr`)
 //! also works, without the Frame rendering and controller fixes.
 
-use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// Exit code telling `frameplayer.sh` to run the hand-off command.
@@ -24,28 +26,56 @@ pub const BROWSER_PROJECT: &str = "https://github.com/yellkell/frameplayer/relea
 /// Where FramePlayer's Chromium XR build is installed, under `$HOME`.
 pub const FRAME_BROWSER: &str = "chromium-xr-frame/chromium-xr.sh";
 
-/// A web page with WebXR content, as listed in the Web XR tab.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct WebApp {
-    pub name: String,
-    pub url: String,
+/// The page the Web XR tab opens unless the user types another: Fish & Chips.
+pub const DEFAULT_URL: &str = "https://yellkell.com/fac";
+/// Under `$HOME`: the page Chromium XR's launcher opens when Steam starts it
+/// (`tools/webxr/frame-title/launch.sh`).
+pub const HOME_URL_FILE: &str = ".config/chromium-xr-frame/home-url";
+/// Under `$HOME`: Chromium XR's Steam shortcut app id, written by its
+/// installer (saphid's steam-shortcut.py).
+pub const STEAM_APPID_FILE: &str = ".local/share/chromium-xr-frame/steam-appid";
+
+/// The `steam://rungameid/` id of a non-Steam shortcut with this app id.
+pub fn shortcut_game_id(appid: u32) -> u64 {
+    (u64::from(appid) << 32) | 0x0200_0000
 }
 
-pub fn default_apps() -> Vec<WebApp> {
-    vec![WebApp {
-        name: "Fish & Chips".into(),
-        url: "https://yellkell.com/fac".into(),
-    }]
+/// Chromium XR's Steam shortcut app id, if its installer recorded one.
+pub fn steam_appid(home: &Path) -> Option<u32> {
+    std::fs::read_to_string(home.join(STEAM_APPID_FILE))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
 }
 
-/// Fixes entries saved by earlier versions: the default app was listed as
-/// "Factory Fight".
-pub fn migrate_apps(apps: &mut [WebApp]) {
-    for app in apps {
-        if app.name == "Factory Fight" && app.url == "https://yellkell.com/fac" {
-            app.name = "Fish & Chips".into();
-        }
+pub fn home_url_path(home: &Path) -> PathBuf {
+    home.join(HOME_URL_FILE)
+}
+
+/// Records the page for the browser's launcher to open.
+pub fn write_home_url(home: &Path, url: &str) -> std::io::Result<()> {
+    let path = home_url_path(home);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
     }
+    std::fs::write(path, format!("{url}\n"))
+}
+
+/// Asks Steam to start Chromium XR's library entry once FramePlayer (also a
+/// Steam app) has gone: a shell that waits two seconds, so Steam isn't asked
+/// while FramePlayer is still running.
+pub fn launch_via_steam(appid: u32) -> std::io::Result<()> {
+    use std::os::unix::process::CommandExt;
+    let url = format!("steam://rungameid/{}", shortcut_game_id(appid));
+    std::process::Command::new("sh")
+        .args(["-c", "sleep 2; exec steam -ifrunning \"$0\"", &url])
+        .process_group(0)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
 }
 
 /// A WebXR-capable browser found on this device.
@@ -173,8 +203,8 @@ pub fn command(browser: &Browser, url: &str, home: &Path) -> Vec<String> {
             "--disable-seccomp-filter-sandbox".into(),
         ]);
     }
-    // App mode: just the page, no tabs or address bar.
-    argv.push(format!("--app={url}"));
+    // A normal window, with tabs and an address bar to go elsewhere.
+    argv.push(url.to_string());
     argv
 }
 
@@ -285,21 +315,20 @@ mod tests {
     }
 
     #[test]
-    fn renames_the_old_default_app() {
-        let mut apps = vec![
-            WebApp {
-                name: "Factory Fight".into(),
-                url: "https://yellkell.com/fac".into(),
-            },
-            WebApp {
-                name: "Factory Fight".into(),
-                url: "https://example.com/".into(),
-            },
-        ];
-        migrate_apps(&mut apps);
-        assert_eq!(apps[0].name, "Fish & Chips");
-        assert_eq!(apps[1].name, "Factory Fight");
-        assert_eq!(default_apps()[0].name, "Fish & Chips");
+    fn steam_entry_and_home_page() {
+        // Matches steam://rungameid for shortcut 3269230940 on the Frame.
+        assert_eq!(shortcut_game_id(3_269_230_940), 14_041_239_970_404_892_672);
+        let home = std::env::temp_dir().join(format!("fp-webhome-{}", std::process::id()));
+        assert_eq!(steam_appid(&home), None);
+        std::fs::create_dir_all(home.join(".local/share/chromium-xr-frame")).unwrap();
+        std::fs::write(home.join(STEAM_APPID_FILE), "3269230940\n").unwrap();
+        assert_eq!(steam_appid(&home), Some(3_269_230_940));
+        write_home_url(&home, DEFAULT_URL).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(home_url_path(&home)).unwrap(),
+            "https://yellkell.com/fac\n"
+        );
+        std::fs::remove_dir_all(&home).unwrap();
     }
 
     #[test]
@@ -312,10 +341,7 @@ mod tests {
         );
         assert_eq!(
             l,
-            vec![
-                "/home/deck/.local/bin/chromium-xr",
-                "--app=https://yellkell.com/fac"
-            ]
+            vec!["/home/deck/.local/bin/chromium-xr", "https://yellkell.com/fac"]
         );
         let c = command(
             &Browser::Chrome("/home/deck/chromium-xr/chrome".into()),
@@ -324,13 +350,13 @@ mod tests {
         );
         assert!(c.contains(&"--enable-features=OpenXR".to_string()));
         assert!(c.contains(&"--disable-seccomp-filter-sandbox".to_string()));
-        assert_eq!(c.last().unwrap(), "--app=https://x.y/");
+        assert_eq!(c.last().unwrap(), "https://x.y/");
 
         let path = std::env::temp_dir().join(format!("fp-handoff-{}", std::process::id()));
         write_handoff(&path, &l).unwrap();
         assert_eq!(
             std::fs::read(&path).unwrap(),
-            b"/home/deck/.local/bin/chromium-xr\0--app=https://yellkell.com/fac\0"
+            b"/home/deck/.local/bin/chromium-xr\0https://yellkell.com/fac\0"
         );
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(

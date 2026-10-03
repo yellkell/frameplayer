@@ -828,21 +828,28 @@ impl App {
                     let home = std::env::var_os("HOME")
                         .map(std::path::PathBuf::from)
                         .unwrap_or_default();
-                    log::info!("handing the headset to {} for {url}", b.path().display());
-                    self.handoff = Some(crate::webxr::command(&b, &url, &home));
-                    self.quit = true;
+                    self.settings.web_home = url.clone();
+                    if let Err(e) = crate::webxr::write_home_url(&home, &url) {
+                        log::warn!("can't record the browser's page: {e}");
+                    }
+                    // Started as its own Steam entry, the browser gets a
+                    // panel in the headset; started by us it stays hidden.
+                    match crate::webxr::steam_appid(&home) {
+                        Some(appid) => match crate::webxr::launch_via_steam(appid) {
+                            Ok(()) => {
+                                log::info!("opening {url} in Chromium XR (Steam app {appid})");
+                                self.quit = true;
+                            }
+                            Err(e) => self.ui.toast(format!("Can't start Chromium XR: {e}")),
+                        },
+                        None => {
+                            log::info!("handing the headset to {} for {url}", b.path().display());
+                            self.handoff = Some(crate::webxr::command(&b, &url, &home));
+                            self.quit = true;
+                        }
+                    }
                 }
             },
-            Action::AddWebApp(w) => {
-                if !self.settings.web_apps.iter().any(|a| a.url == w.url) {
-                    self.settings.web_apps.push(w);
-                }
-            }
-            Action::RemoveWebApp(i) => {
-                if i < self.settings.web_apps.len() {
-                    self.settings.web_apps.remove(i);
-                }
-            }
             Action::Recenter => self.reanchor = true,
             Action::TogglePassthrough => self.settings.passthrough = !self.settings.passthrough,
             Action::ShowBrowser(show) => {

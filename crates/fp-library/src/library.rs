@@ -152,7 +152,7 @@ pub(crate) fn detect_name(name: &str) -> DetectedFormat {
             evidence: Evidence::FileName,
         },
         None => DetectedFormat {
-            format: VideoFormat::default(),
+            format: VideoFormat::FALLBACK,
             evidence: Evidence::Default,
         },
     }

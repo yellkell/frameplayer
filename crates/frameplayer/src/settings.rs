@@ -62,8 +62,8 @@ pub struct Settings {
     pub check_updates: bool,
     /// UI text size multiplier.
     pub ui_scale: f32,
-    /// WebXR pages listed in the Web XR tab.
-    pub web_apps: Vec<crate::webxr::WebApp>,
+    /// The page the Web XR tab opens in Chromium XR (the last one opened).
+    pub web_home: String,
 }
 
 impl Default for Settings {
@@ -94,7 +94,7 @@ impl Default for Settings {
             update_channel: "stable".into(),
             check_updates: true,
             ui_scale: 1.0,
-            web_apps: crate::webxr::default_apps(),
+            web_home: crate::webxr::DEFAULT_URL.into(),
         }
     }
 }
@@ -113,10 +113,7 @@ impl Settings {
     pub fn load(path: &Path) -> Settings {
         match std::fs::read_to_string(path) {
             Ok(text) => match serde_json::from_str::<Settings>(&text) {
-                Ok(mut s) => {
-                    crate::webxr::migrate_apps(&mut s.web_apps);
-                    s
-                }
+                Ok(s) => s,
                 Err(e) => {
                     log::warn!("settings {}: {e}; using defaults", path.display());
                     Settings::default()
