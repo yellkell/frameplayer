@@ -735,7 +735,8 @@ mod tests {
                 .all(|c| *c == ThumbnailCrop::Full)
         );
 
-        // Aspect ratio: 2:1 at 5760 wide is SBS 180, so the filter finds it.
+        // Aspect ratio: 2:1 at 5760 wide is SBS 180, so the filter finds it,
+        // along with the unreadable file, which plays as the 180 SBS fallback.
         let c = lib.get(aspect).unwrap().unwrap();
         assert_eq!(c.detected.evidence, Evidence::AspectRatio);
         let found = lib
@@ -744,7 +745,10 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-        assert_eq!(found.iter().map(|r| r.id).collect::<Vec<_>>(), vec![aspect]);
+        assert_eq!(
+            found.iter().map(|r| r.id).collect::<Vec<_>>(),
+            vec![broken, aspect]
+        );
 
         // The failure is recorded and not retried...
         let x = lib.get(broken).unwrap().unwrap();
