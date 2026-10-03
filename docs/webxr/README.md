@@ -131,10 +131,9 @@ and a static arm64 `strace`.
    the XR utility process, and a `getsockopt(..., SOL_SOCKET, SO_PEERCRED, ...)`
    in `sockopts.txt`. Any `/proc/self/<entry>` outside
    `{cmdline, comm, exe, stat, status}` goes into patch 0002.
-2. **Build.** Follow saphid's build (`CL 8132979` for the OpenXR device
-   provider is still needed until it lands) and apply the three patches with
-   `tools/webxr/apply-chromium-patches.sh`. Drop saphid's local
-   `0001-xr-sandbox-allow-getsockopt-SO_PEERCRED.patch`; 0003 supersedes it.
+2. **Build.** `tools/webxr/build-frame-chromium.sh` (§8). It replaces
+   saphid's local `0001-xr-sandbox-allow-getsockopt-SO_PEERCRED.patch` with
+   0003, which supersedes it.
 3. **Unit tests** on the build host:
    `sandbox_linux_unittests --gtest_filter='BrokerProcess.RewriteProcSelf*'`
    and `content_unittests --gtest_filter='XrSandboxHookLinuxTest.*'`.
@@ -170,7 +169,54 @@ Expected: 2 failures for the unpatched model (`readlink` and `stat` of bare
 3. Until they land, saphid's Frame build can carry them as local patches and
    drop `--disable-seccomp-filter-sandbox`.
 
-## 8. What this does not solve
+## 8. Building and installing the Frame browser
+
+CL 8132979 (the OpenXR device on Linux) merged on 2026-09-29, so the build no
+longer pins a Gerrit patch set: it builds `chromium/main` at `2255089d4176`,
+the commit patches 0001-0003 here and IWFDK's controller patch
+(`yellkell/iwfdk`, `platform/chromium/patches/0004`) were written against.
+
+**Build** on x86-64 Linux or WSL2 (about 90 GB free, no root apart from
+`pkg-config`):
+
+```sh
+sudo apt install pkg-config
+mkdir -p ~/chromium-xr
+tmux new -d -s chromium-xr 'tools/webxr/build-frame-chromium.sh > ~/chromium-xr/build.log 2>&1'
+tail -F ~/chromium-xr/stage
+```
+
+The script fetches the IWFDK patch itself, checks that all four patches
+apply before syncing, and resumes when re-run. Output:
+`~/chromium-xr/chromium-xr-arm64.tar.xz`, then the arm64 `device_unittests`
+and `sandbox_linux_unittests` in `src/out/XR`. On Windows, keep the WSL
+distro and its swap file on a drive with the space, and check out this repo
+with LF endings (`.gitattributes` enforces it for patches and scripts).
+
+**Install from a link.** `TAG=… tools/webxr/package-frame-title.sh` packs the
+build as a Frame Control title: `ChromiumXR-Frame-arm64.zip` (Chromium in
+`chromium/`, launchers `chromium-xr.sh` and `chromium-xr-sandboxed.sh` on
+top) plus a manifest per title, for a GitHub release. Its `INSTALL.md` has
+the `frame-control://install?manifest=…` links. Both titles share the zip:
+
+- **Chromium XR**: seccomp filter off, the configuration saphid verified.
+- **Chromium XR Sandboxed**: seccomp filter on, with its own profile: the
+  configuration §5 step 4 tests.
+
+Each opens a start page (served on localhost) with the WebXR check and links
+to Fish & Chips (https://yellkell.com/fac) and other WebXR pages. Logs go to
+`~/.local/state/chromium-xr-frame/`.
+
+**Install over SSH** instead, with saphid's installer and a test run:
+`tools/webxr/frame-install.sh chromium-xr-arm64.tar.xz [tests.tar.xz]`.
+
+**The check page** (`tools/webxr/frame-webxr-check/`) reports `isSessionSupported`, then in VR
+shows every controller button live against the `valve-frame` layout, checks
+that Menu no longer ends the session, and produces a JSON report. On a
+desktop, `?emulate=frame` or `?emulate=touch` runs it against IWER's emulated
+controllers.
+
+## 9. What this does not solve
 
 - Anything SteamVR needs beyond these two items will only show up once the
   seccomp filter is on and the pid is right. §5 step 1 is designed to catch
