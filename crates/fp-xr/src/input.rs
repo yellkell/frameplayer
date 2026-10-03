@@ -91,6 +91,13 @@ const PROFILES: &[(&str, &[Candidate])] = &[
             ("input/x/click", Kind::Primary, 2),
             ("input/y/click", Kind::Secondary, 2),
             ("input/menu/click", Kind::Menu, 2),
+            // The left controller has a D-pad where the right has A/B/X/Y
+            // (Y top, X left, B right, A bottom): the same places, the same
+            // roles.
+            ("input/dpad_down/click", Kind::Primary, 1),
+            ("input/dpad_left/click", Kind::Primary, 1),
+            ("input/dpad_right/click", Kind::Secondary, 1),
+            ("input/dpad_up/click", Kind::Secondary, 1),
             ("input/view/click", Kind::Menu, 1),
             ("output/haptic", Kind::Haptic, 3),
         ],

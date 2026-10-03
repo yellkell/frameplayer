@@ -745,19 +745,18 @@ fn about(ui: &mut egui::Ui, v: &mut View) {
     heading(ui, "Controller");
     widgets::rows(ui, |r| {
         for (k, d) in [
-            ("A / X", "Play or pause"),
+            ("A / X, left D-pad down / left", "Play or pause"),
             (
-                "B / Y",
+                "B / Y, left D-pad up / right",
                 "Back: close a panel, library, then the video again",
             ),
             (
                 "Thumbstick left / right",
                 "Seek (hold to repeat); page lists you point at",
             ),
-            ("Right thumbstick up / down", "Tilt the picture up / down"),
             (
-                "Left thumbstick up / down",
-                "Volume; scroll menus you point at",
+                "Thumbstick up / down",
+                "Tilt the picture; scroll menus you point at",
             ),
             ("Thumbstick press", "Reset the image (zoom and drag)"),
             ("Hold grip + trigger", "Drag the picture to move it"),

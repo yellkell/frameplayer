@@ -3,11 +3,10 @@
 //!
 //! | Input | Action |
 //! |---|---|
-//! | A / X | Play / pause |
-//! | B / Y | Back (close a panel, leave the library, show the library) |
+//! | A / X (left D-pad down / left) | Play / pause |
+//! | B / Y (left D-pad up / right) | Back (close a panel, leave the library, show the library) |
 //! | Thumbstick left / right | Seek back / forward (repeats while held); pages the library when pointing at it |
-//! | Right thumbstick up / down | Tilt the picture up / down (pitch) |
-//! | Left thumbstick up / down | Volume |
+//! | Thumbstick up / down | Tilt the picture up / down (pitch) |
 //! | Thumbstick press | Reset the image (zoom and dome drag) |
 //! | Hold grip + trigger, move | Drag the dome (rotate / move the picture) |
 //! | Grip + thumbstick right / left | Next / previous video |
@@ -27,8 +26,6 @@ pub enum Cmd {
     Menu,
     /// -1 back, +1 forward.
     Seek(i32),
-    /// Volume change (fraction per frame).
-    Volume(f32),
     /// Picture pitch change (degrees per frame; up positive).
     Pitch(f32),
     /// Zoom change (factor delta per frame).
@@ -218,14 +215,10 @@ impl Controls {
                 }
                 self.held[i] = (dir, t2);
             }
-            // Stick up/down: the right hand tilts the picture, the left one
-            // sets the volume (menus scroll through the pointer instead).
+            // Stick up/down: tilt the picture (menus scroll through the
+            // pointer instead). Volume is on the control bar.
             if ctx.playing && !ctx.over_ui && s.y.abs() > 0.5 && s.x.abs() < STICK_RELEASE {
-                out.push(if i == 1 {
-                    Cmd::Pitch(s.y * ctx.dt * PITCH_SPEED)
-                } else {
-                    Cmd::Volume(s.y * ctx.dt * 0.6)
-                });
+                out.push(Cmd::Pitch(s.y * ctx.dt * PITCH_SPEED));
             }
         }
 
@@ -310,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn right_stick_tilts_left_stick_sets_volume() {
+    fn either_stick_tilts_the_picture() {
         let mut c = Controls::default();
         let mut h = hands();
         h[1].stick = Vec2::new(0.0, 1.0);
@@ -323,8 +316,8 @@ mod tests {
         h[0].stick = Vec2::new(0.0, -1.0);
         let down = run(&mut c, &h, ctx(true));
         assert!(
-            matches!(down[..], [Cmd::Volume(d)] if d < 0.0),
-            "left down lowers the volume: {down:?}"
+            matches!(down[..], [Cmd::Pitch(d)] if d < 0.0),
+            "left down tilts down: {down:?}"
         );
     }
 

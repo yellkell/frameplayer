@@ -1010,12 +1010,6 @@ impl App {
                     self.apply(Action::SeekRelative(self.settings.seek_step * dir as f64));
                     buzz.push((self.pointer.active, 0.15, 10));
                 }
-                Cmd::Volume(d) => {
-                    if let Some(p) = &self.playback {
-                        let v = (p.player.volume() + d).clamp(0.0, 1.5);
-                        self.apply(Action::SetVolume(v));
-                    }
-                }
                 Cmd::Pitch(d) => {
                     if let Some(p) = &mut self.playback {
                         p.settings.pitch = (p.settings.pitch + d).clamp(-90.0, 90.0);
