@@ -85,6 +85,15 @@ flags=(
 # --test-type hides the "unsupported command-line flag" bar the flag below
 # would put over every page (the flag is deliberate; see docs/webxr).
 [[ $sandboxed == 1 ]] || flags+=(--disable-seccomp-filter-sandbox --test-type)
+# Steam Frame controller models where pages ask for Quest Touch ones: an
+# extension made on this headset by tools/webxr/frame-models (the models are
+# SteamVR's, extracted locally, never shipped). Chromium only loads
+# extensions from the command line with this feature off.
+models="$here/../frame-models"
+if [[ -f $models/manifest.json ]]; then
+  flags+=(--load-extension="$(cd "$models" && pwd)"
+    --disable-features=DisableLoadExtensionCommandLineSwitch)
+fi
 # DevTools on loopback only while ~/.config/chromium-xr-frame-devtools exists,
 # for remote debugging over SSH (ssh -L 9223:127.0.0.1:9223). It has no
 # authentication, so remove the file when done.
