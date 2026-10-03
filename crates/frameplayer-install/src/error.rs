@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use crate::pair::PAIRING_MODE_PLACE;
 use crate::vdf::VdfError;
 
 /// Everything that can stop the installer.
@@ -77,6 +78,17 @@ pub enum InstallError {
     /// No release could be found to install.
     #[error("{0}")]
     NoRelease(String),
+    /// Pairing with the headset's devkit service failed or was refused.
+    #[error("pairing with the headset at {address} failed: {detail}")]
+    Pair {
+        /// Headset address used.
+        address: String,
+        /// What went wrong.
+        detail: String,
+    },
+    /// The pairing key could not be made or used.
+    #[error("{0}")]
+    Key(String),
 }
 
 /// Result alias for the installer.
@@ -95,10 +107,18 @@ impl InstallError {
                 "Check that:\n\
                  - the headset is switched on, awake and on the same network as this computer;\n\
                  - Developer Mode is on (Settings > System > Developer Mode);\n\
-                 - the headset is paired: pair it once with Frame Control (which creates the \
-                 ssh alias `frame`), FrameDrop or Valve's SteamOS Devkit Client;\n\
+                 - the headset is paired: open {PAIRING_MODE_PLACE} on the headset and run \
+                 `frameplayer-install pair <headset IP address>` (or pair once with Frame \
+                 Control, FrameDrop or Valve's SteamOS Devkit Client);\n\
                  - if you paired another way, pass --host user@address (current: {host}), and \
                  --ssh-option IdentityFile=<key> if the key is not your default one."
+            ),
+            InstallError::Pair { address, .. } => format!(
+                "The headset only accepts a new PC while it shows the pairing screen:\n\
+                 - on the headset, open {PAIRING_MODE_PLACE} and leave that screen showing;\n\
+                 - then run `frameplayer-install pair {address}` again.\n\
+                 Also check that Developer Mode is on, the headset is awake and on the same \
+                 network as this computer, and {address} is its IP address."
             ),
             InstallError::BadHost(_) => {
                 "Use --host frame (Frame Control's alias) or --host user@192.168.x.y.".into()

@@ -5,18 +5,21 @@ use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
 use fp_updater::{Channel, DEFAULT_MANIFEST_URL};
+use frameplayer_install::device::DeviceInfo;
 use frameplayer_install::ops::{
     self, DEFAULT_INSTALL_DIR, InstallOptions, ShortcutMethod, UninstallOptions,
 };
+use frameplayer_install::pair;
 use frameplayer_install::remote::SshRemote;
 use frameplayer_install::shortcut::DEFAULT_APP_NAME;
 use frameplayer_install::{InstallError, Result};
 
 /// Install FramePlayer on a Steam Frame over SSH.
 ///
-/// Before the first run: turn on Developer Mode on the headset and pair it
-/// once with Frame Control (or FrameDrop, or Valve's SteamOS Devkit
-/// Client). Then simply run `frameplayer-install`.
+/// Before the first run: turn on Developer Mode on the headset. Then simply
+/// run `frameplayer-install`; if this PC is not paired yet it offers to pair
+/// (or run `frameplayer-install pair <headset IP>` first). Pairings made by
+/// Frame Control, FrameDrop or Valve's SteamOS Devkit Client work too.
 #[derive(Debug, Parser)]
 #[command(version, args_conflicts_with_subcommands = true)]
 struct Cli {
@@ -57,6 +60,16 @@ enum Command {
     Uninstall(UninstallArgs),
     /// Show what is installed on the headset.
     Status(StatusArgs),
+    /// Pair this PC with the headset so ssh works (sets up the `frame`
+    /// alias). Open Steam Settings > Developer > Pair new host on the
+    /// headset first.
+    Pair(PairArgs),
+}
+
+#[derive(Debug, Args)]
+struct PairArgs {
+    /// The headset's IP address (or a host name that resolves to it).
+    address: String,
 }
 
 #[derive(Debug, Args)]
@@ -180,14 +193,56 @@ fn run(cli: Cli) -> Result<()> {
             let device = ops::connect(&mut remote, true)?;
             ops::status(&mut remote, &device, &args.dir).map(|_| ())
         }
+        Some(Command::Pair(args)) => {
+            pair::pair(&args.address, pair::interactive())?;
+            let mut remote = SshRemote::new(pair::FRAME_ALIAS, &[])?;
+            remote.check_tools()?;
+            ops::connect(&mut remote, true)?;
+            println!("\nDone. Now run frameplayer-install to install FramePlayer.");
+            Ok(())
+        }
     }
+}
+
+/// Connects for an install. When login fails in a way pairing can fix and
+/// someone is at the keyboard, offers to pair right away and then connects
+/// through the new `frame` alias.
+fn connect_or_pair(conn: &Connection, force: bool) -> Result<(SshRemote, DeviceInfo)> {
+    let mut remote = conn.remote()?;
+    let err = match ops::connect(&mut remote, force) {
+        Ok(device) => return Ok((remote, device)),
+        Err(e) if pair::pairing_might_help(&e) && pair::interactive() => e,
+        Err(e) => return Err(e),
+    };
+    println!("\n{err}");
+    println!("\nThis PC does not seem to be paired with the headset yet.");
+    let yes = pair::ask("Pair it now? [Y/n] ").is_some_and(|a| {
+        a.is_empty() || a.eq_ignore_ascii_case("y") || a.eq_ignore_ascii_case("yes")
+    });
+    if !yes {
+        return Err(err);
+    }
+    let known = pair::address_for_host(&conn.host, &pair::read_ssh_config());
+    let question = match &known {
+        Some(a) => format!("Headset IP address [{a}]: "),
+        None => "Headset IP address (see its Wi-Fi network details): ".to_string(),
+    };
+    let address = match (pair::ask(&question), known) {
+        (Some(a), _) if !a.is_empty() => a,
+        (_, Some(k)) => k,
+        _ => return Err(err),
+    };
+    pair::pair(&address, true)?;
+    println!("Connecting through the new `{}` alias.", pair::FRAME_ALIAS);
+    let mut remote = SshRemote::new(pair::FRAME_ALIAS, &conn.ssh_options)?;
+    let device = ops::connect(&mut remote, force)?;
+    Ok((remote, device))
 }
 
 fn install(args: InstallArgs) -> Result<()> {
     // Connect first: a pairing problem should show up before a long
     // download.
-    let mut remote = args.conn.remote()?;
-    let device = ops::connect(&mut remote, args.force)?;
+    let (mut remote, device) = connect_or_pair(&args.conn, args.force)?;
     let zip = match args.zip {
         Some(z) => {
             if !z.is_file() {
@@ -296,6 +351,12 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+        let cli = Cli::try_parse_from(["frameplayer-install", "pair", "192.168.0.68"]).unwrap();
+        match cli.command {
+            Some(Command::Pair(a)) => assert_eq!(a.address, "192.168.0.68"),
+            other => panic!("{other:?}"),
+        }
+        assert!(Cli::try_parse_from(["frameplayer-install", "pair"]).is_err());
         // Install options belong to install, not to other commands.
         assert!(Cli::try_parse_from(["frameplayer-install", "--zip", "a.zip", "status"]).is_err());
         assert!(Cli::try_parse_from(["frameplayer-install", "--channel", "nightly"]).is_err());

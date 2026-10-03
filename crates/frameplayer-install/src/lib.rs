@@ -13,6 +13,7 @@
 pub mod device;
 pub mod error;
 pub mod ops;
+pub mod pair;
 pub mod remote;
 pub mod shortcut;
 pub mod vdf;

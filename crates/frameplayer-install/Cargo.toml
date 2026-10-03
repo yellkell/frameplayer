@@ -17,6 +17,8 @@ fp-updater = { path = "../fp-updater" }
 serde_json = "1"
 tempfile = "3"
 thiserror = "2"
+# Plain HTTP to the headset's devkit service when pairing.
+ureq = { version = "3", default-features = false }
 
 [dev-dependencies]
 # Same features as fp-updater's, so tests build no extra code.

@@ -7,7 +7,8 @@ or your network.
 ## Install
 
 You need a Steam Frame with **Developer Mode** on, paired once with your PC
-by Frame Control, FrameDrop or Valve's SteamOS Devkit Client.
+by `frameplayer-install pair` (below), Frame Control, FrameDrop or Valve's
+SteamOS Devkit Client.
 
 **One click (Frame Control / FrameDrop).** Open the install link from the
 release page. It points the tool at `framedrop.json`, which downloads the
@@ -17,10 +18,18 @@ release, checks its SHA-256 and unpacks it into `~/frameplayer`.
 PC from the release page and run it:
 
 ```
+frameplayer-install pair 192.168.0.68       # once: the headset's IP address
 frameplayer-install                         # latest release
 frameplayer-install --zip frameplayer-0.1.0-aarch64.zip
 frameplayer-install status | uninstall
 ```
+
+To pair, open Steam Settings › Developer › Pair new host on the headset
+and keep that screen showing while `pair` runs. It creates an RSA key
+(`~/.ssh/id_rsa_frame_devkit`; the headset does not accept ed25519 keys),
+registers it with the headset and adds a `Host frame` entry to
+`~/.ssh/config`. If you skip this step, `frameplayer-install` offers to
+pair when it cannot log in.
 
 It reuses the `frame` SSH alias created when pairing, installs into
 `~/frameplayer` (keeping the previous version as `~/frameplayer.old`) and
