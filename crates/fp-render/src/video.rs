@@ -31,6 +31,23 @@ fn frame_key(f: &VideoFrame) -> u64 {
     f.id
 }
 
+/// `dst.copy_from_slice(src)` across a few threads: an 8K frame is 50 MB,
+/// several milliseconds for one core, and memory bandwidth goes further.
+fn par_copy(dst: &mut [u8], src: &[u8]) {
+    const THREADS: usize = 4;
+    const MIN_CHUNK: usize = 1 << 20;
+    if dst.len() < MIN_CHUNK * 2 {
+        dst.copy_from_slice(src);
+        return;
+    }
+    let chunk = dst.len().div_ceil(THREADS).next_multiple_of(64);
+    std::thread::scope(|scope| {
+        for (d, s) in dst.chunks_mut(chunk).zip(src.chunks(chunk)) {
+            scope.spawn(move || d.copy_from_slice(s));
+        }
+    });
+}
+
 impl VideoPlanes {
     /// Uploads `frame` unless it is already resident. Recreates images when
     /// the size or layout changes. Returns true when images were recreated
@@ -118,7 +135,7 @@ impl VideoPlanes {
                 if offset + len > dst.len() {
                     return Err(crate::Error::Unsupported("staging buffer too small".into()));
                 }
-                dst[offset..offset + len].copy_from_slice(&p.data[..len]);
+                par_copy(&mut dst[offset..offset + len], &p.data[..len]);
                 let texel = (p.components * p.bytes_per_sample) as usize;
                 regions.push((offset as u64, (p.stride / texel) as u32, p.width, p.height));
                 offset = (offset + len + 63) & !63;

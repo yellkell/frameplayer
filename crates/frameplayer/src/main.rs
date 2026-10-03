@@ -345,6 +345,10 @@ fn run_xr(args: &Args) -> Result<(), Error> {
     let mut last = Instant::now();
     let mut quitting = false;
     let (mut frames, mut video_frames) = (0u64, 0u64);
+    // Render-thread time per frame (after xrWaitFrame), logged every 10 s:
+    // over ~9 ms the compositor starts synthesising frames.
+    let mut frame_ms: Vec<f32> = Vec::new();
+    let mut timing_since = Instant::now();
     let layers = session.supports_quad_layers();
     log::info!(
         "UI as compositor quad layers: {}",
@@ -367,6 +371,7 @@ fn run_xr(args: &Args) -> Result<(), Error> {
             SessionEvent::Running => {}
         }
         let frame = session.begin_frame()?;
+        let work = Instant::now();
         let input = session.input(frame.state.predicted_display_time);
         let dt = last.elapsed().as_secs_f32().min(0.1);
         last = Instant::now();
@@ -434,7 +439,22 @@ fn run_xr(args: &Args) -> Result<(), Error> {
         for (hand, amp, ms) in out.buzz {
             session.buzz(hand, amp, ms);
         }
+        frame_ms.push(work.elapsed().as_secs_f32() * 1000.0);
         session.end_frame(frame, &submits)?;
+        if timing_since.elapsed() > Duration::from_secs(10) && !frame_ms.is_empty() {
+            frame_ms.sort_by(f32::total_cmp);
+            let at = |q: f32| frame_ms[((frame_ms.len() - 1) as f32 * q) as usize];
+            let slow = frame_ms.iter().filter(|&&t| t > 9.0).count();
+            log::info!(
+                "frame CPU ms: median {:.1}, 95% {:.1}, max {:.1}; {slow} of {} over 9 ms",
+                at(0.5),
+                at(0.95),
+                at(1.0),
+                frame_ms.len()
+            );
+            frame_ms.clear();
+            timing_since = Instant::now();
+        }
         let timed_out = args
             .exit_after
             .is_some_and(|t| start.elapsed().as_secs_f64() > t);

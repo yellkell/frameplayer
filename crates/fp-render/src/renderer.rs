@@ -127,7 +127,8 @@ struct Slot {
     uniform: Buffer,
     scene_set: vk::DescriptorSet,
     scene_set_dirty: bool,
-    video: Option<VideoPlanes>,
+    /// The video image set (index, generation) the scene set points at.
+    video_bound: Option<(usize, u64)>,
     has_video: bool,
     quad_vb: Buffer,
     egui_vb: Buffer,
@@ -159,6 +160,11 @@ pub struct Renderer {
     dummy: Image,
     panels: Vec<Option<Panel>>,
     slots: Vec<Slot>,
+    /// Two video image sets shared by the slots (see `set_video`), which
+    /// is newest, and how often each was recreated.
+    videos: [Option<VideoPlanes>; 2],
+    video_cur: usize,
+    video_gen: [u64; 2],
     current: usize,
     recording: bool,
 }
@@ -337,6 +343,9 @@ impl Renderer {
                 )?,
                 panels: Vec::new(),
                 slots: Vec::new(),
+                videos: [None, None],
+                video_cur: 0,
+                video_gen: [0, 0],
                 current: 0,
                 recording: false,
             };
@@ -435,6 +444,7 @@ impl Renderer {
                 scene_set,
                 scene_set_dirty: true,
                 video: None,
+                video_bound: None,
                 has_video: false,
                 quad_vb: cpu(64 << 10, vk::BufferUsageFlags::VERTEX_BUFFER, "quads")?,
                 egui_vb: cpu(
@@ -647,30 +657,56 @@ impl Renderer {
     }
 
     /// Uploads the frame to show (or clears the video when `None`).
+    /// Shows `frame` this frame. Each video frame is uploaded once, into
+    /// whichever of the two shared image sets the frame in flight isn't
+    /// reading: an 8K frame is 50 MB, and copying it for every frame slot
+    /// cost the render thread its 90 Hz deadline.
     pub fn set_video(&mut self, frame: Option<&Arc<VideoFrame>>) -> Result<()> {
-        let slot = &mut self.slots[self.current];
-        match frame {
-            None => {
-                if slot.has_video {
-                    slot.scene_set_dirty = true;
-                }
-                slot.has_video = false;
+        let Some(f) = frame else {
+            let slot = &mut self.slots[self.current];
+            if slot.has_video {
+                slot.scene_set_dirty = true;
             }
-            Some(f) => {
-                let recreated = VideoPlanes::upload(
-                    &mut slot.video,
-                    &self.gpu,
-                    slot.cmd,
-                    f,
-                    &mut slot.garbage,
-                )?;
-                if recreated || !slot.has_video {
-                    slot.scene_set_dirty = true;
-                }
-                slot.has_video = true;
+            slot.has_video = false;
+            return Ok(());
+        };
+        let resident = self.videos[self.video_cur]
+            .as_ref()
+            .is_some_and(|v| v.key == Some(f.id));
+        if !resident {
+            // The other set was last read by the frame before the one in
+            // flight, which begin_frame has waited for.
+            let target = 1 - self.video_cur;
+            let slot = &mut self.slots[self.current];
+            let recreated = VideoPlanes::upload(
+                &mut self.videos[target],
+                &self.gpu,
+                slot.cmd,
+                f,
+                &mut slot.garbage,
+            )?;
+            if recreated {
+                self.video_gen[target] += 1;
             }
+            self.video_cur = target;
         }
+        let bound = (self.video_cur, self.video_gen[self.video_cur]);
+        let slot = &mut self.slots[self.current];
+        if slot.video_bound != Some(bound) || !slot.has_video {
+            slot.scene_set_dirty = true;
+            slot.video_bound = Some(bound);
+        }
+        slot.has_video = true;
         Ok(())
+    }
+
+    /// The video image set this slot shows, if any.
+    fn slot_video(&self, slot: usize) -> Option<&VideoPlanes> {
+        let s = &self.slots[slot];
+        if !s.has_video {
+            return None;
+        }
+        self.videos[s.video_bound?.0].as_ref()
     }
 
     fn staging_alloc(&mut self, bytes: &[u8]) -> Result<(vk::Buffer, u64)> {
@@ -978,19 +1014,19 @@ impl Renderer {
     }
 
     fn update_scene_set(&mut self) {
-        let slot = &mut self.slots[self.current];
-        if !slot.scene_set_dirty {
+        if !self.slots[self.current].scene_set_dirty {
             return;
         }
         let dummy = self.dummy.views[0];
-        let views: Vec<vk::ImageView> = match (&slot.video, slot.has_video) {
-            (Some(v), true) => {
+        let views: Vec<vk::ImageView> = match self.slot_video(self.current) {
+            Some(v) => {
                 let mut vs: Vec<vk::ImageView> = v.images.iter().map(|i| i.views[0]).collect();
                 vs.resize(3, dummy);
                 vs
             }
-            _ => vec![dummy; 3],
+            None => vec![dummy; 3],
         };
+        let slot = &mut self.slots[self.current];
         let ubo = [vk::DescriptorBufferInfo::default()
             .buffer(slot.uniform.buffer)
             .range(vk::WHOLE_SIZE)];
@@ -1044,14 +1080,7 @@ impl Renderer {
             (eyes[1].proj * eyes[1].view).inverse(),
         ];
         let slot_idx = self.current;
-        let frame_desc = {
-            let s = &self.slots[slot_idx];
-            if s.has_video {
-                s.video.as_ref().map(|v| v.desc)
-            } else {
-                None
-            }
-        };
+        let frame_desc = self.slot_video(slot_idx).map(|v| v.desc);
         let p = params::build(video, frame_desc.as_ref(), inv);
         // Quad vertices: two triangles per quad.
         let mut verts: Vec<QuadVertex> = Vec::with_capacity(quads.len() * 6);
@@ -1543,15 +1572,17 @@ impl Drop for Renderer {
         let d = &gpu.device;
         // SAFETY: the device is idle; everything below was created by us.
         unsafe {
+            for v in &mut self.videos {
+                if let Some(mut v) = v.take() {
+                    v.destroy(&gpu);
+                }
+            }
             for mut s in self.slots.drain(..) {
                 for mut i in s.garbage.drain(..) {
                     i.destroy(&gpu);
                 }
                 for mut b in s.garbage_buffers.drain(..) {
                     b.destroy(&gpu);
-                }
-                if let Some(mut v) = s.video.take() {
-                    v.destroy(&gpu);
                 }
                 for mut b in [s.uniform, s.quad_vb, s.egui_vb, s.egui_ib, s.staging] {
                     b.destroy(&gpu);
