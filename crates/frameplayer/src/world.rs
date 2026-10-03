@@ -206,6 +206,14 @@ pub struct Aim {
     pub hit: Option<(usize, f32, Pos2)>,
 }
 
+/// How far (in panel points) the ray may move during a press before it
+/// counts as a drag. Pulling a trigger tilts the controller, and on the main
+/// panel (about 7 points per cm) that moves a laser pointer tens of points,
+/// while egui only reports a click when press and release are within 6
+/// points. Until the ray leaves this radius the pointer stays at the press
+/// point, so a trigger pull is a click; beyond it, a drag (scrolling).
+const CLICK_SLOP: f32 = 60.0;
+
 #[derive(Default)]
 pub struct Pointer {
     triggers: [Trigger; 2],
@@ -213,6 +221,10 @@ pub struct Pointer {
     pub active: usize,
     /// Panel that received the last press, so the release goes there too.
     pressed_panel: Option<usize>,
+    /// Where that press landed, and whether the ray has since left
+    /// [`CLICK_SLOP`] of it.
+    press_pos: Option<Pos2>,
+    dragging: bool,
     hovered_panel: Option<usize>,
     pub aims: [Option<Aim>; 2],
 }
@@ -227,6 +239,22 @@ pub struct Routed {
 }
 
 impl Pointer {
+    /// The position to report for a ray hit on `panel`: the press point
+    /// while a press on that panel hasn't moved beyond [`CLICK_SLOP`].
+    fn pinned(&mut self, panel: usize, pos: Pos2) -> Pos2 {
+        match (self.pressed_panel, self.press_pos) {
+            (Some(pressed), Some(start)) if pressed == panel && !self.dragging => {
+                if pos.distance(start) <= CLICK_SLOP {
+                    start
+                } else {
+                    self.dragging = true;
+                    pos
+                }
+            }
+            _ => pos,
+        }
+    }
+
     /// Routes the hands' rays and triggers into panel events.
     pub fn route(&mut self, panels: &mut [&mut Panel], hands: &[Hand; 2], dt: f32) -> Routed {
         let mut routed = Routed::default();
@@ -279,6 +307,7 @@ impl Pointer {
         }
         if let Some((pi, _, pos)) = hit {
             routed.over_ui = true;
+            let pos = self.pinned(pi, pos);
             let p = &mut panels[pi];
             p.hovered = true;
             p.push(Event::PointerMoved(pos));
@@ -301,16 +330,23 @@ impl Pointer {
                         modifiers: Modifiers::NONE,
                     });
                     self.pressed_panel = Some(pi);
+                    self.press_pos = Some(pos);
+                    self.dragging = false;
                 } else {
                     routed.click_outside = true;
                 }
             }
             Some(false) => {
                 if let Some(pi) = self.pressed_panel.take() {
+                    let start = self.press_pos.take();
                     let pos = hit
                         .filter(|h| h.0 == pi)
-                        .map(|h| h.2)
+                        .map(|h| match start {
+                            Some(start) if !self.dragging => start,
+                            _ => h.2,
+                        })
                         .unwrap_or(Pos2::new(-1.0, -1.0));
+                    self.dragging = false;
                     panels[pi].push(Event::PointerButton {
                         pos,
                         button: PointerButton::Primary,
@@ -392,6 +428,50 @@ mod tests {
         );
         let back = p.world_point(pt);
         assert!((back.z + 2.0).abs() < 0.01);
+    }
+
+    fn button_positions(p: &Panel) -> Vec<Pos2> {
+        p.events
+            .iter()
+            .filter_map(|e| match e {
+                Event::PointerButton { pos, .. } => Some(*pos),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_wobbling_trigger_pull_still_clicks() {
+        let mut p = panel_in_front();
+        let mut ptr = Pointer::default();
+        let mut hands = [Hand::default(), Hand::default()];
+        hands[1].active = true;
+        hands[1].aim = Some((Vec3::ZERO, Quat::IDENTITY));
+        ptr.route(&mut [&mut p], &hands, 0.016);
+        hands[1].trigger = 0.9;
+        ptr.route(&mut [&mut p], &hands, 0.016);
+        // Pulling the trigger tips the controller about a degree: ~17 points
+        // on this panel, far beyond egui's 6-point click distance.
+        hands[1].aim = Some((Vec3::ZERO, Quat::from_rotation_x(-0.0175)));
+        ptr.route(&mut [&mut p], &hands, 0.016);
+        hands[1].trigger = 0.1;
+        ptr.route(&mut [&mut p], &hands, 0.016);
+        let b = button_positions(&p);
+        assert_eq!(b.len(), 2);
+        assert_eq!(b[0], b[1], "release reported at the press point");
+
+        // A long sweep is a drag: the release lands where the ray is.
+        p.events.clear();
+        hands[1].aim = Some((Vec3::ZERO, Quat::IDENTITY));
+        hands[1].trigger = 0.9;
+        ptr.route(&mut [&mut p], &hands, 0.016);
+        hands[1].aim = Some((Vec3::ZERO, Quat::from_rotation_x(-0.1)));
+        ptr.route(&mut [&mut p], &hands, 0.016);
+        hands[1].trigger = 0.1;
+        ptr.route(&mut [&mut p], &hands, 0.016);
+        let b = button_positions(&p);
+        assert_eq!(b.len(), 2);
+        assert!(b[0].distance(b[1]) > CLICK_SLOP, "{b:?}");
     }
 
     #[test]
