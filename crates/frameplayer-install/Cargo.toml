@@ -1,0 +1,23 @@
+[package]
+name = "frameplayer-install"
+version = "0.1.0"
+description = "PC-side installer: puts FramePlayer on a paired Steam Frame over SSH and adds it to the Steam library"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "frameplayer-install"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+crc32fast = "1"
+fp-updater = { path = "../fp-updater" }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+
+[dev-dependencies]
+# Same features as fp-updater's, so tests build no extra code.
+zip = { version = "7", default-features = false, features = ["deflate-flate2-zlib-rs"] }
