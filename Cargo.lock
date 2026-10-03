@@ -1191,6 +1191,7 @@ name = "frameplayer"
 version = "0.1.0"
 dependencies = [
  "ash",
+ "base64 0.22.1",
  "crossbeam-channel",
  "egui",
  "fp-core",
@@ -1208,6 +1209,7 @@ dependencies = [
  "png",
  "serde",
  "serde_json",
+ "tungstenite",
  "ureq",
 ]
 

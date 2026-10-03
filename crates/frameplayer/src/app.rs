@@ -96,6 +96,13 @@ pub struct App {
     mounts_checked: Instant,
     /// Browser command to run after FramePlayer exits (WebXR hand-off).
     pub handoff: Option<Vec<String>>,
+    /// The Web XR tab's embedded browser, once started.
+    pub web: Option<crate::webview::WebView>,
+    /// The browser being started (it takes a few seconds): its result.
+    web_starting: Option<std::sync::mpsc::Receiver<Result<crate::webview::WebView, String>>>,
+    web_error: Option<String>,
+    /// A page in the web view asked for the headset: quit so it can have it.
+    pub yield_to_web: bool,
     quit: bool,
 }
 
@@ -149,8 +156,16 @@ impl App {
             mounts: crate::services::removable_mounts(),
             mounts_checked: Instant::now(),
             handoff: None,
+            web: None,
+            web_starting: None,
+            web_error: None,
+            yield_to_web: false,
             quit: false,
         };
+        // Back from a page's VR session: reopen the web view.
+        if std::env::var("FRAMEPLAYER_RESUMED").is_ok_and(|v| v == "web") {
+            app.ui.screen = ui::Screen::Web;
+        }
         app.rescan(false);
         for cfg in app.settings.haptic_devices.clone() {
             app.connect_device(cfg);
@@ -859,6 +874,7 @@ impl App {
                 }
             }
             Action::Quit => self.quit = true,
+            Action::WebRetry => self.web_error = None,
         }
     }
 
@@ -1170,10 +1186,59 @@ impl App {
 
     // ---- frame -----------------------------------------------------------------
 
+    /// Starts the embedded browser when the Web XR tab is open, and gives a
+    /// page the headset when it asks for it.
+    fn update_web(&mut self) {
+        if let Some(rx) = &self.web_starting {
+            match rx.try_recv() {
+                Ok(Ok(w)) => {
+                    self.web = Some(w);
+                    self.web_starting = None;
+                }
+                Ok(Err(e)) => {
+                    log::warn!("web view: {e}");
+                    self.web_error = Some(e);
+                    self.web_starting = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.web_starting = None,
+            }
+        }
+        if self.ui.screen == ui::Screen::Web
+            && self.web.is_none()
+            && self.web_starting.is_none()
+            && self.web_error.is_none()
+        {
+            let home = std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_default();
+            let url = self.settings.web_home.clone();
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::webview::WebView::start(&home, &url));
+            });
+            self.web_starting = Some(rx);
+        }
+        // The browser went away (crashed, or was closed): offer a restart.
+        if let Some(w) = &self.web
+            && !w.connected()
+            && let Some(e) = w.error()
+        {
+            self.web_error = Some(format!("The browser stopped ({e})"));
+            self.web = None;
+        }
+        if self.web.is_some() && !self.yield_to_web && crate::webview::xr_requested() {
+            log::info!("a page in the web view asked for the headset");
+            self.yield_to_web = true;
+            self.quit = true;
+        }
+    }
+
     pub fn frame(&mut self, renderer: &mut Renderer, input: FrameInput) -> FrameOutput {
         self.poll_jobs();
         self.check_mounts();
         self.remote_events();
+        self.update_web();
         if let Some(p) = &mut self.playback {
             p.save_progress(&self.services.library, false);
         }
@@ -1238,8 +1303,17 @@ impl App {
         if self.thumbs.poll(&self.panels[MAIN].ctx) {
             self.panels[MAIN].request_repaint();
         }
+        // A new picture of the page in the Web XR tab.
+        if self.ui.screen == ui::Screen::Web && self.web.as_ref().is_some_and(|w| w.fresh()) {
+            self.panels[MAIN].request_repaint();
+        }
         let devices = self.services.haptics.devices();
         let passthrough_available = input.passthrough_available;
+        let web_status = if self.web_starting.is_some() {
+            Some("Starting the browser...".to_string())
+        } else {
+            self.web_error.clone()
+        };
         for idx in [MAIN, BAR, ADJUST] {
             if !self.panels[idx].needs_paint() {
                 continue;
@@ -1251,6 +1325,7 @@ impl App {
                 services,
                 thumbs,
                 playback,
+                web,
                 ..
             } = self;
             let mut view = View {
@@ -1262,6 +1337,8 @@ impl App {
                 actions: &mut actions,
                 passthrough_available,
                 devices: &devices,
+                web: web.as_mut(),
+                web_status: web_status.as_deref(),
             };
             let r = panels[idx].paint(renderer, input.time, |ctx| match idx {
                 MAIN => ui::library::browser(ctx, &mut view),
@@ -1389,6 +1466,12 @@ impl App {
     }
 
     pub fn shutdown(mut self) {
+        // The browser keeps running while a page has the headset.
+        if !self.yield_to_web
+            && let Some(w) = self.web.take()
+        {
+            w.close();
+        }
         if let Some(p) = self.playback.take() {
             p.close(&self.services.library);
         }

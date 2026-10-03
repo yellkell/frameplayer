@@ -94,6 +94,8 @@ pub enum Action {
     InstallUpdate,
     /// Open this page in the WebXR browser, which takes over the headset.
     LaunchWeb(String),
+    /// Try starting the embedded browser again after an error.
+    WebRetry,
     Recenter,
     TogglePassthrough,
     /// Show the library/browser panel (during playback).
@@ -315,6 +317,10 @@ pub struct View<'a> {
     pub actions: &'a mut Vec<Action>,
     pub passthrough_available: bool,
     pub devices: &'a [fp_haptics::DeviceStatus],
+    /// The Web XR tab's embedded browser, once running.
+    pub web: Option<&'a mut crate::webview::WebView>,
+    /// Why it isn't (starting, or an error).
+    pub web_status: Option<&'a str>,
 }
 
 /// A big square-ish button used in the navigation and transport rows.
