@@ -274,7 +274,7 @@ fn card(ui: &mut egui::Ui, v: &mut View, r: &MediaRecord) -> (bool, bool) {
             Align2::RIGHT_TOP,
         );
     }
-    if let Some(p) = r.progress() {
+    if let Some(p) = r.progress().filter(|p| *p > 0.005) {
         let bar = egui::Rect::from_min_max(
             egui::pos2(img.left() + 12.0, img.bottom() - 10.0),
             egui::pos2(img.right() - 12.0, img.bottom() - 6.0),

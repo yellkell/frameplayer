@@ -164,11 +164,7 @@ pub fn control_bar(ctx: &egui::Context, v: &mut View) {
             }
         }
         let mut vol_edit = vol;
-        left.spacing_mut().slider_width = 120.0;
-        if left
-            .add(egui::Slider::new(&mut vol_edit, 0.0..=1.5).show_value(false))
-            .changed()
-        {
+        if widgets::slider(&mut left, &mut vol_edit, 0.0..=1.5, 130.0).changed() {
             v.actions.push(Action::SetVolume(vol_edit));
         }
 
@@ -449,7 +445,7 @@ const TABS: [(&str, &str); 6] = [
     (icons::ARROWS_OUT_CARDINAL, "Position"),
     (icons::CUBE, "Stereo"),
     (icons::SUN, "Picture"),
-    (icons::SUBTITLES, "Audio & text"),
+    (icons::SUBTITLES, "Audio & subs"),
     (icons::VIBRATE, "Haptics"),
 ];
 
@@ -470,14 +466,9 @@ pub fn adjust_panel(ctx: &egui::Context, v: &mut View) {
                 .color(theme::TEXT),
         );
         ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
-            for (i, &(icon, label)) in TABS.iter().enumerate() {
-                if widgets::chip_icon(ui, Some(icon), label, v.state.adjust_tab == i).clicked() {
-                    v.state.adjust_tab = i;
-                }
-            }
-        });
+        if let Some(i) = widgets::segmented(ui, &TABS, v.state.adjust_tab) {
+            v.state.adjust_tab = i;
+        }
         ui.add_space(10.0);
         // Save and reset stay at the bottom while the page scrolls.
         let footer = v.state.adjust_tab <= 3;

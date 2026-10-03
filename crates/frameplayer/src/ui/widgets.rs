@@ -281,15 +281,17 @@ impl Rows<'_> {
             .inner_margin(egui::Margin::symmetric(16, 12))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.set_min_height(48.0);
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 10.0;
-                    let r = control(ui);
+                ui.horizontal(|ui| {
+                    ui.set_min_height(44.0);
+                    // Text on the left, leaving room for a slider row's
+                    // control; it wraps if longer.
                     let w = ui.available_width();
+                    let text_w = (w - 420.0).max(w * 0.4);
                     ui.allocate_ui_with_layout(
-                        Vec2::new(w, 0.0),
+                        Vec2::new(text_w, 0.0),
                         Layout::top_down(Align::Min),
                         |ui| {
+                            ui.set_max_width(text_w);
                             ui.spacing_mut().item_spacing.y = 3.0;
                             ui.label(
                                 egui::RichText::new(title)
@@ -305,7 +307,11 @@ impl Rows<'_> {
                             }
                         },
                     );
-                    r
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 10.0;
+                        control(ui)
+                    })
+                    .inner
                 })
                 .inner
             })
@@ -396,11 +402,101 @@ pub fn slider_control(
                 .color(theme::TEXT_2),
         ),
     );
-    ui.spacing_mut().slider_width = 240.0;
-    changed |= ui
-        .add(egui::Slider::new(value, range).show_value(false))
-        .changed();
+    changed |= slider(ui, value, range, 240.0).changed();
     changed
+}
+
+/// A slider: a slim rail filled in the accent up to a white knob.
+pub fn slider(
+    ui: &mut Ui,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+    width: f32,
+) -> Response {
+    let (rect, mut resp) = ui.allocate_exact_size(Vec2::new(width, 36.0), Sense::click_and_drag());
+    let (lo, hi) = (*range.start(), *range.end());
+    let inset = 11.0;
+    let rail_x = (rect.left() + inset)..=(rect.right() - inset);
+    if resp.is_pointer_button_down_on()
+        && let Some(p) = resp.interact_pointer_pos()
+    {
+        let f = ((p.x - rail_x.start()) / (rail_x.end() - rail_x.start())).clamp(0.0, 1.0);
+        let v = lo + f * (hi - lo);
+        if (v - *value).abs() > f32::EPSILON {
+            *value = v;
+            resp.mark_changed();
+        }
+    }
+    if ui.is_rect_visible(rect) {
+        let t = anim(ui, resp.id, resp.hovered() || resp.dragged());
+        let f = if hi > lo {
+            ((*value - lo) / (hi - lo)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let x = egui::lerp(rail_x.clone(), f);
+        let h = 6.0 + t * 2.0;
+        let y = rect.center().y;
+        let p = ui.painter();
+        let round = CornerRadius::same((h / 2.0) as u8);
+        p.rect_filled(
+            Rect::from_x_y_ranges(rail_x.clone(), (y - h / 2.0)..=(y + h / 2.0)),
+            round,
+            theme::SURFACE_3,
+        );
+        p.rect_filled(
+            Rect::from_x_y_ranges(*rail_x.start()..=x, (y - h / 2.0)..=(y + h / 2.0)),
+            round,
+            theme::ACCENT,
+        );
+        let r = 9.0 + t * 2.0;
+        p.circle_filled(Pos2::new(x, y + 1.5), r, Color32::from_black_alpha(90));
+        p.circle_filled(Pos2::new(x, y), r, Color32::WHITE);
+    }
+    resp
+}
+
+/// A row of equal segments, each an icon over a label, one selected;
+/// returns the segment clicked.
+pub fn segmented(ui: &mut Ui, items: &[(&str, &str)], selected: usize) -> Option<usize> {
+    let h = 66.0;
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::hover());
+    ui.painter()
+        .rect_filled(rect, CornerRadius::same(16), theme::SURFACE);
+    let n = items.len().max(1) as f32;
+    let w = (rect.width() - 8.0) / n;
+    let mut clicked = None;
+    for (i, (icon, label)) in items.iter().enumerate() {
+        let seg = Rect::from_min_size(
+            Pos2::new(rect.left() + 4.0 + i as f32 * w, rect.top() + 4.0),
+            Vec2::new(w, h - 8.0),
+        );
+        let resp = ui.interact(seg, ui.id().with(("segment", i)), Sense::click());
+        let t = anim(ui, resp.id, resp.hovered());
+        let s = anim(ui, resp.id.with("sel"), i == selected);
+        let p = ui.painter();
+        let bg = Color32::from_white_alpha((t * 10.0) as u8).lerp_to_gamma(theme::SURFACE_3, s);
+        p.rect_filled(seg, CornerRadius::same(12), bg);
+        let fg = mix(mix(theme::TEXT_2, theme::TEXT, t), Color32::WHITE, s);
+        p.text(
+            seg.center() - Vec2::new(0.0, 10.0),
+            Align2::CENTER_CENTER,
+            *icon,
+            theme::icon(22.0),
+            mix(fg, theme::ACCENT_HOVER, s),
+        );
+        p.text(
+            seg.center() + Vec2::new(0.0, 14.0),
+            Align2::CENTER_CENTER,
+            *label,
+            theme::font(Weight::SemiBold, 13.0),
+            fg,
+        );
+        if resp.clicked() {
+            clicked = Some(i);
+        }
+    }
+    clicked
 }
 
 /// A top-level navigation tab: icon and label, an accent bar under the
