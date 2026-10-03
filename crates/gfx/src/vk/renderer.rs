@@ -529,6 +529,14 @@ impl Renderer {
         Ok(())
     }
 
+    /// Stop showing the current video (e.g. playback closed): the
+    /// projection pass draws nothing until the next upload. GPU resources
+    /// and the DMA-BUF import cache are kept for reuse.
+    pub fn clear_video(&mut self) {
+        self.video.source = Source::None;
+        self.video.dirty = false;
+    }
+
     /// Drop the cached import of a decoder buffer (call when the decoder
     /// frees or reallocates it).
     pub fn forget_dmabuf(&mut self, buffer_id: u64) {

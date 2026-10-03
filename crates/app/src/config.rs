@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub general: General,
@@ -57,6 +57,10 @@ pub struct Comfort {
     pub passthrough_background: bool,
     /// Dim the UI when the user's gaze leaves it.
     pub gaze_dimming: bool,
+    /// Show the UI on a curved (cylinder) layer instead of a flat quad.
+    pub curved_ui: bool,
+    /// Distance of the UI panel from the viewer, metres.
+    pub ui_distance_m: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -80,7 +84,11 @@ pub struct Haptics {
     pub backend: String,
     pub handy_connection_key: Option<String>,
     pub buttplug_url: String,
+    /// `tcp://host:port`, `udp://host:port`, `host:port` (TCP) or a serial
+    /// device path (`/dev/ttyACM0`, needs the haptics `serial` feature).
     pub tcode_address: Option<String>,
+    /// "osr2" or "sr6" axis set for TCode devices.
+    pub tcode_model: String,
     pub offset_ms: i32,
 }
 
@@ -90,25 +98,17 @@ pub struct Updates {
     pub check_on_start: bool,
     /// "stable" or "beta".
     pub channel: String,
-    pub manifest_url: String,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            general: General::default(),
-            playback: Playback::default(),
-            comfort: Comfort::default(),
-            remote: Remote::default(),
-            haptics: Haptics::default(),
-            updates: Updates::default(),
-        }
-    }
+    /// Directory URL holding `<channel>.json` + `<channel>.json.sig`.
+    pub base_url: String,
 }
 
 impl Default for General {
     fn default() -> Self {
-        General { library_roots: Vec::new(), refresh_rate_hz: 0.0, log_level: "info".into() }
+        General {
+            library_roots: Vec::new(),
+            refresh_rate_hz: 0.0,
+            log_level: "info".into(),
+        }
     }
 }
 
@@ -129,13 +129,27 @@ impl Default for Playback {
 
 impl Default for Comfort {
     fn default() -> Self {
-        Comfort { head_locked_screen: false, lying_down: false, environment_dim: 0.2, passthrough_background: false, gaze_dimming: true }
+        Comfort {
+            head_locked_screen: false,
+            lying_down: false,
+            environment_dim: 0.2,
+            passthrough_background: false,
+            gaze_dimming: true,
+            curved_ui: true,
+            ui_distance_m: 1.3,
+        }
     }
 }
 
 impl Default for Remote {
     fn default() -> Self {
-        Remote { api_enabled: false, api_port: 8642, api_token: None, deovr_enabled: false, deovr_port: 23554 }
+        Remote {
+            api_enabled: false,
+            api_port: 8642,
+            api_token: None,
+            deovr_enabled: false,
+            deovr_port: 23554,
+        }
     }
 }
 
@@ -147,6 +161,7 @@ impl Default for Haptics {
             handy_connection_key: None,
             buttplug_url: "ws://127.0.0.1:12345".into(),
             tcode_address: None,
+            tcode_model: "osr2".into(),
             offset_ms: 0,
         }
     }
@@ -157,7 +172,7 @@ impl Default for Updates {
         Updates {
             check_on_start: true,
             channel: "stable".into(),
-            manifest_url: "https://github.com/yellkell/frameplayer/releases/latest/download/manifest.json".into(),
+            base_url: fp_updater::updater::DEFAULT_UPDATE_BASE.into(),
         }
     }
 }
@@ -172,8 +187,15 @@ pub struct Paths {
 
 impl Paths {
     pub fn from_env() -> Paths {
-        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-        let xdg = |var: &str, fallback: &str| std::env::var_os(var).map(PathBuf::from).filter(|p| p.is_absolute()).unwrap_or_else(|| home.join(fallback));
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let xdg = |var: &str, fallback: &str| {
+            std::env::var_os(var)
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute())
+                .unwrap_or_else(|| home.join(fallback))
+        };
         Paths {
             config_dir: xdg("XDG_CONFIG_HOME", ".config").join("frameplayer"),
             data_dir: xdg("XDG_DATA_HOME", ".local/share").join("frameplayer"),
@@ -182,11 +204,30 @@ impl Paths {
     }
 
     pub fn under(root: &Path) -> Paths {
-        Paths { config_dir: root.join("config"), data_dir: root.join("data"), cache_dir: root.join("cache") }
+        Paths {
+            config_dir: root.join("config"),
+            data_dir: root.join("data"),
+            cache_dir: root.join("cache"),
+        }
     }
 
     pub fn config_file(&self) -> PathBuf {
         self.config_dir.join("config.toml")
+    }
+
+    /// The library database.
+    pub fn library_db(&self) -> PathBuf {
+        self.data_dir.join("library.sqlite")
+    }
+
+    /// Thumbnails and preview sprites.
+    pub fn thumbs_dir(&self) -> PathBuf {
+        self.cache_dir.join("thumbs")
+    }
+
+    /// Perf capture protocol directory (see `tools/perf-capture.sh`).
+    pub fn perf_dir(&self) -> PathBuf {
+        self.data_dir.join("perf")
     }
 
     pub fn create_all(&self) -> Result<()> {
@@ -207,7 +248,11 @@ impl Config {
                 Ok(c) => Ok(c),
                 Err(e) => {
                     let bad = path.with_extension("toml.bad");
-                    tracing::warn!("config {} is invalid ({e}); moved to {}", path.display(), bad.display());
+                    tracing::warn!(
+                        "config {} is invalid ({e}); moved to {}",
+                        path.display(),
+                        bad.display()
+                    );
                     let _ = std::fs::rename(path, &bad);
                     Ok(Config::default())
                 }
@@ -229,13 +274,36 @@ impl Config {
     }
 }
 
+impl Config {
+    /// Settings for the remote-control servers (§3.6: off by default, LAN only).
+    pub fn remote_config(&self) -> fp_remote::RemoteConfig {
+        let mut rc = fp_remote::RemoteConfig::default();
+        rc.http.enabled = self.remote.api_enabled;
+        rc.http.port = self.remote.api_port;
+        rc.http.token = self.remote.api_token.clone().unwrap_or_default();
+        rc.deovr.enabled = self.remote.deovr_enabled;
+        rc.deovr.port = self.remote.deovr_port;
+        rc
+    }
+
+    /// Update channel as the updater understands it.
+    pub fn update_channel(&self) -> fp_updater::Channel {
+        if self.updates.channel.eq_ignore_ascii_case("beta") {
+            fp_updater::Channel::Beta
+        } else {
+            fp_updater::Channel::Stable
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn partial_file_uses_defaults() {
-        let c: Config = toml::from_str("[playback]\ndefault_speed = 1.5\n[future_section]\nx = 1\n").unwrap();
+        let c: Config =
+            toml::from_str("[playback]\ndefault_speed = 1.5\n[future_section]\nx = 1\n").unwrap();
         assert_eq!(c.playback.default_speed, 1.5);
         assert_eq!(c.playback.seek_step_s, 10.0);
         assert!(!c.remote.api_enabled);
@@ -253,5 +321,19 @@ mod tests {
         std::fs::write(&p, "this is = = not toml").unwrap();
         assert_eq!(Config::load(&p).unwrap(), Config::default());
         assert!(p.with_extension("toml.bad").exists());
+    }
+
+    #[test]
+    fn remote_config_mapping() {
+        let mut c = Config::default();
+        assert!(!c.remote_config().http.enabled && !c.remote_config().deovr.enabled);
+        c.remote.api_enabled = true;
+        c.remote.api_token = Some("tok".into());
+        let rc = c.remote_config();
+        assert!(rc.http.enabled);
+        assert_eq!(rc.http.token, "tok");
+        assert_eq!(rc.http.port, 8642);
+        c.updates.channel = "Beta".into();
+        assert_eq!(c.update_channel(), fp_updater::Channel::Beta);
     }
 }

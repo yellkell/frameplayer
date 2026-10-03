@@ -35,7 +35,11 @@ impl FisheyeLens {
 pub enum Projection {
     /// A rectangular virtual screen. `curvature` 0 = flat, 1 = cylinder
     /// segment centred on the viewer at `distance_m`.
-    Flat { width_m: f32, distance_m: f32, curvature: f32 },
+    Flat {
+        width_m: f32,
+        distance_m: f32,
+        curvature: f32,
+    },
     /// Equirectangular covering `h_fov_deg` horizontally (180 or 360) and
     /// 180° vertically.
     Equirect { h_fov_deg: f32 },
@@ -58,16 +62,32 @@ pub enum Projection {
 }
 
 impl Projection {
-    pub const FLAT_DEFAULT: Projection = Projection::Flat { width_m: 4.0, distance_m: 3.5, curvature: 0.0 };
+    pub const FLAT_DEFAULT: Projection = Projection::Flat {
+        width_m: 4.0,
+        distance_m: 3.5,
+        curvature: 0.0,
+    };
     pub const EQUIRECT_180: Projection = Projection::Equirect { h_fov_deg: 180.0 };
     pub const EQUIRECT_360: Projection = Projection::Equirect { h_fov_deg: 360.0 };
 
     pub fn fisheye(lens: FisheyeLens) -> Projection {
-        Projection::Fisheye { lens, fov_deg: lens.nominal_fov_deg(), center_x: 0.0, center_y: 0.0, radius: 1.0 }
+        Projection::Fisheye {
+            lens,
+            fov_deg: lens.nominal_fov_deg(),
+            center_x: 0.0,
+            center_y: 0.0,
+            radius: 1.0,
+        }
     }
 
     pub fn fisheye_fov(fov_deg: f32) -> Projection {
-        Projection::Fisheye { lens: FisheyeLens::Generic, fov_deg, center_x: 0.0, center_y: 0.0, radius: 1.0 }
+        Projection::Fisheye {
+            lens: FisheyeLens::Generic,
+            fov_deg,
+            center_x: 0.0,
+            center_y: 0.0,
+            radius: 1.0,
+        }
     }
 
     pub fn is_immersive(&self) -> bool {
@@ -79,9 +99,18 @@ impl Projection {
         match self {
             Projection::Flat { .. } => "Flat".into(),
             Projection::Equirect { h_fov_deg } => format!("{}°", h_fov_deg.round() as i32),
-            Projection::Fisheye { lens: FisheyeLens::CanonRf52, .. } => "RF 5.2".into(),
-            Projection::Fisheye { lens: FisheyeLens::Mkx200, .. } => "MKX200".into(),
-            Projection::Fisheye { lens: FisheyeLens::Mkx220, .. } => "MKX220".into(),
+            Projection::Fisheye {
+                lens: FisheyeLens::CanonRf52,
+                ..
+            } => "RF 5.2".into(),
+            Projection::Fisheye {
+                lens: FisheyeLens::Mkx200,
+                ..
+            } => "MKX200".into(),
+            Projection::Fisheye {
+                lens: FisheyeLens::Mkx220,
+                ..
+            } => "MKX220".into(),
             Projection::Fisheye { fov_deg, .. } => format!("Fisheye {}°", fov_deg.round() as i32),
             Projection::Eac => "EAC".into(),
             Projection::CustomMesh { .. } => "Mesh".into(),
@@ -246,7 +275,11 @@ impl ViewSettings {
                 let i = k.partition_point(|kf| kf.at <= t);
                 let (a, b) = (&k[i - 1], &k[i]);
                 let span = (b.at.0 - a.at.0) as f32;
-                let f = if span > 0.0 { (t.0 - a.at.0) as f32 / span } else { 0.0 };
+                let f = if span > 0.0 {
+                    (t.0 - a.at.0) as f32 / span
+                } else {
+                    0.0
+                };
                 a.corrections.lerp(&b.corrections, f)
             }
         }
@@ -273,8 +306,14 @@ mod tests {
         let b = Corrections { zoom: 2.0, ..a };
         let vs = ViewSettings {
             keyframes: vec![
-                CorrectionKeyframe { at: MediaTime::from_millis(1000), corrections: a },
-                CorrectionKeyframe { at: MediaTime::from_millis(3000), corrections: b },
+                CorrectionKeyframe {
+                    at: MediaTime::from_millis(1000),
+                    corrections: a,
+                },
+                CorrectionKeyframe {
+                    at: MediaTime::from_millis(3000),
+                    corrections: b,
+                },
             ],
             ..Default::default()
         };
@@ -285,7 +324,11 @@ mod tests {
 
     #[test]
     fn serde_roundtrip() {
-        let vs = ViewSettings { projection: Projection::fisheye(FisheyeLens::Mkx200), stereo: StereoMode::Sbs, ..Default::default() };
+        let vs = ViewSettings {
+            projection: Projection::fisheye(FisheyeLens::Mkx200),
+            stereo: StereoMode::Sbs,
+            ..Default::default()
+        };
         let s = serde_json::to_string(&vs).unwrap();
         let back: ViewSettings = serde_json::from_str(&s).unwrap();
         assert_eq!(vs, back);

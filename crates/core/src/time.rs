@@ -6,7 +6,9 @@ use std::time::Duration;
 
 /// A presentation timestamp in microseconds. Signed so that A/V offsets and
 /// "before start" positions are representable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
 pub struct MediaTime(pub i64);
 
 impl MediaTime {
@@ -60,7 +62,12 @@ impl std::fmt::Display for MediaTime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let neg = self.0 < 0;
         let total_ms = self.0.unsigned_abs() / 1000;
-        let (h, m, s, ms) = (total_ms / 3_600_000, (total_ms / 60_000) % 60, (total_ms / 1000) % 60, total_ms % 1000);
+        let (h, m, s, ms) = (
+            total_ms / 3_600_000,
+            (total_ms / 60_000) % 60,
+            (total_ms / 1000) % 60,
+            total_ms % 1000,
+        );
         if neg {
             write!(f, "-")?;
         }
@@ -78,7 +85,10 @@ mod tests {
 
     #[test]
     fn timebase_conversion() {
-        assert_eq!(MediaTime::from_timebase(90_000, 1, 90_000), MediaTime(1_000_000));
+        assert_eq!(
+            MediaTime::from_timebase(90_000, 1, 90_000),
+            MediaTime(1_000_000)
+        );
         assert_eq!(MediaTime::from_timebase(1001, 1, 30_000).0, 33_366);
     }
 

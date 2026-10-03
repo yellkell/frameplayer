@@ -65,20 +65,55 @@ impl DrawList {
 
     /// Append an axis-aligned quad, merging into the previous command when
     /// texture and clip match.
-    pub fn quad(&mut self, texture: TextureId, clip: [f32; 4], rect: [f32; 4], uv: [f32; 4], color: [f32; 4]) {
+    pub fn quad(
+        &mut self,
+        texture: TextureId,
+        clip: [f32; 4],
+        rect: [f32; 4],
+        uv: [f32; 4],
+        color: [f32; 4],
+    ) {
         let [x, y, w, h] = rect;
         let base = self.vertices.len() as u32;
         self.vertices.extend_from_slice(&[
-            Vertex { pos: [x, y], uv: [uv[0], uv[1]], color },
-            Vertex { pos: [x + w, y], uv: [uv[2], uv[1]], color },
-            Vertex { pos: [x + w, y + h], uv: [uv[2], uv[3]], color },
-            Vertex { pos: [x, y + h], uv: [uv[0], uv[3]], color },
+            Vertex {
+                pos: [x, y],
+                uv: [uv[0], uv[1]],
+                color,
+            },
+            Vertex {
+                pos: [x + w, y],
+                uv: [uv[2], uv[1]],
+                color,
+            },
+            Vertex {
+                pos: [x + w, y + h],
+                uv: [uv[2], uv[3]],
+                color,
+            },
+            Vertex {
+                pos: [x, y + h],
+                uv: [uv[0], uv[3]],
+                color,
+            },
         ]);
         let first = self.indices.len() as u32;
-        self.indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        self.indices
+            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         match self.cmds.last_mut() {
-            Some(c) if c.texture == texture && c.clip == clip && c.first_index + c.index_count == first => c.index_count += 6,
-            _ => self.cmds.push(DrawCmd { texture, clip, first_index: first, index_count: 6 }),
+            Some(c)
+                if c.texture == texture
+                    && c.clip == clip
+                    && c.first_index + c.index_count == first =>
+            {
+                c.index_count += 6
+            }
+            _ => self.cmds.push(DrawCmd {
+                texture,
+                clip,
+                first_index: first,
+                index_count: 6,
+            }),
         }
     }
 }
@@ -91,9 +126,27 @@ mod tests {
     fn quads_merge() {
         let mut d = DrawList::default();
         let clip = [0.0, 0.0, 100.0, 100.0];
-        d.quad(TextureId::White, clip, [0.0, 0.0, 10.0, 10.0], [0.0; 4], [1.0; 4]);
-        d.quad(TextureId::White, clip, [10.0, 0.0, 10.0, 10.0], [0.0; 4], [1.0; 4]);
-        d.quad(TextureId::FontAtlas, clip, [0.0, 0.0, 1.0, 1.0], [0.0; 4], [1.0; 4]);
+        d.quad(
+            TextureId::White,
+            clip,
+            [0.0, 0.0, 10.0, 10.0],
+            [0.0; 4],
+            [1.0; 4],
+        );
+        d.quad(
+            TextureId::White,
+            clip,
+            [10.0, 0.0, 10.0, 10.0],
+            [0.0; 4],
+            [1.0; 4],
+        );
+        d.quad(
+            TextureId::FontAtlas,
+            clip,
+            [0.0, 0.0, 1.0, 1.0],
+            [0.0; 4],
+            [1.0; 4],
+        );
         assert_eq!(d.cmds.len(), 2);
         assert_eq!(d.cmds[0].index_count, 12);
         assert_eq!(d.indices.len(), 18);

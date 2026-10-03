@@ -10,7 +10,9 @@
 pub enum Screen {
     Library,
     /// Video playing; controls may be hidden.
-    Player { controls_visible: bool },
+    Player {
+        controls_visible: bool,
+    },
     PictureAdjust,
     Settings,
     /// Virtual keyboard over whatever was open (search, server address...).
@@ -28,7 +30,11 @@ pub enum Nav {
     Activity,
     OpenSettings,
     OpenPictureAdjust,
+    // The library screen currently embeds its own keyboard; these drive a
+    // stand-alone keyboard overlay (server addresses, …).
+    #[cfg_attr(not(test), allow(dead_code))]
     OpenKeyboard,
+    #[cfg_attr(not(test), allow(dead_code))]
     KeyboardDone,
     /// Seconds since the last activity, polled every frame.
     Idle(f32),
@@ -48,7 +54,11 @@ pub struct AppState {
 
 impl Default for AppState {
     fn default() -> Self {
-        AppState { screen: Screen::Library, stack: Vec::new(), playing: false }
+        AppState {
+            screen: Screen::Library,
+            stack: Vec::new(),
+            playing: false,
+        }
     }
 }
 
@@ -67,7 +77,9 @@ impl AppState {
     fn pop(&mut self) {
         self.screen = self.stack.pop().unwrap_or(Screen::Library);
         if let Screen::Player { .. } = self.screen {
-            self.screen = Screen::Player { controls_visible: true };
+            self.screen = Screen::Player {
+                controls_visible: true,
+            };
         }
     }
 
@@ -75,23 +87,34 @@ impl AppState {
         match (nav, self.screen) {
             (Nav::OpenItem, _) => {
                 // Opening from anywhere replaces the player rather than stacking.
-                self.stack.retain(|s| !matches!(s, Screen::Player { .. } | Screen::Keyboard));
+                self.stack
+                    .retain(|s| !matches!(s, Screen::Player { .. } | Screen::Keyboard));
                 if matches!(self.screen, Screen::Player { .. } | Screen::Keyboard) {
                     self.screen = self.stack.pop().unwrap_or(Screen::Library);
                 }
                 self.playing = true;
-                self.push(Screen::Player { controls_visible: true });
+                self.push(Screen::Player {
+                    controls_visible: true,
+                });
             }
             (Nav::PlaybackEnded, _) => {
                 self.playing = false;
-                self.stack.retain(|s| !matches!(s, Screen::Player { .. } | Screen::PictureAdjust));
+                self.stack
+                    .retain(|s| !matches!(s, Screen::Player { .. } | Screen::PictureAdjust));
                 if matches!(self.screen, Screen::Player { .. } | Screen::PictureAdjust) {
                     self.pop();
                 }
             }
-            (Nav::Back, Screen::Player { controls_visible: true }) if self.playing => {
+            (
+                Nav::Back,
+                Screen::Player {
+                    controls_visible: true,
+                },
+            ) if self.playing => {
                 // First Back hides controls; second leaves the player.
-                self.screen = Screen::Player { controls_visible: false };
+                self.screen = Screen::Player {
+                    controls_visible: false,
+                };
             }
             (Nav::Back, Screen::Player { .. }) => {
                 self.playing = false;
@@ -101,11 +124,24 @@ impl AppState {
             (Nav::Back, _) | (Nav::KeyboardDone, Screen::Keyboard) => self.pop(),
             (Nav::KeyboardDone, _) => {}
             (Nav::ToggleControls, Screen::Player { controls_visible }) => {
-                self.screen = Screen::Player { controls_visible: !controls_visible };
+                self.screen = Screen::Player {
+                    controls_visible: !controls_visible,
+                };
             }
-            (Nav::Activity, Screen::Player { .. }) => self.screen = Screen::Player { controls_visible: true },
-            (Nav::Idle(s), Screen::Player { controls_visible: true }) if s >= CONTROLS_AUTOHIDE_S => {
-                self.screen = Screen::Player { controls_visible: false };
+            (Nav::Activity, Screen::Player { .. }) => {
+                self.screen = Screen::Player {
+                    controls_visible: true,
+                }
+            }
+            (
+                Nav::Idle(s),
+                Screen::Player {
+                    controls_visible: true,
+                },
+            ) if s >= CONTROLS_AUTOHIDE_S => {
+                self.screen = Screen::Player {
+                    controls_visible: false,
+                };
             }
             (Nav::OpenSettings, _) => self.push(Screen::Settings),
             (Nav::OpenPictureAdjust, _) if self.playing => self.push(Screen::PictureAdjust),
@@ -123,12 +159,27 @@ mod tests {
     fn library_player_back() {
         let mut s = AppState::default();
         s.handle(Nav::OpenItem);
-        assert_eq!(s.screen(), Screen::Player { controls_visible: true });
+        assert_eq!(
+            s.screen(),
+            Screen::Player {
+                controls_visible: true
+            }
+        );
         s.handle(Nav::Idle(5.0));
-        assert_eq!(s.screen(), Screen::Player { controls_visible: false });
+        assert_eq!(
+            s.screen(),
+            Screen::Player {
+                controls_visible: false
+            }
+        );
         s.handle(Nav::Activity);
         s.handle(Nav::Back);
-        assert_eq!(s.screen(), Screen::Player { controls_visible: false });
+        assert_eq!(
+            s.screen(),
+            Screen::Player {
+                controls_visible: false
+            }
+        );
         s.handle(Nav::Back);
         assert_eq!(s.screen(), Screen::Library);
         assert!(!s.playing);
@@ -144,7 +195,12 @@ mod tests {
         s.handle(Nav::KeyboardDone);
         assert_eq!(s.screen(), Screen::PictureAdjust);
         s.handle(Nav::Back);
-        assert_eq!(s.screen(), Screen::Player { controls_visible: true });
+        assert_eq!(
+            s.screen(),
+            Screen::Player {
+                controls_visible: true
+            }
+        );
         assert!(s.playing);
     }
 
