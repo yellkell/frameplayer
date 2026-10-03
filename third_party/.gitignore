@@ -1,0 +1,5 @@
+# Everything here is produced by tools/build-codecs.sh; only recipes are committed.
+/downloads/
+/build/
+/out/
+/sysroot/
