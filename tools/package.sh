@@ -4,7 +4,8 @@
 #
 #   dist/frameplayer-<version>-aarch64.zip   the install archive
 #   dist/manifest.json                       update manifest (sign it!)
-#   dist/framedrop.json                      Frame Control / FrameDrop manifest
+#   dist/framedrop.json                      FrameDrop manifest
+#   dist/frameplayer.json                    Frame Control install manifest
 #
 # Usage: tools/package.sh [--url-base URL] [--notes FILE] [--key PREFIX.key]
 #   --url-base  where the zip will be downloadable (default: the GitHub
@@ -83,6 +84,13 @@ args=(manifest --version "$version" --zip "dist/$zip" --url-base "$url_base" --o
 "$release" "${args[@]}"
 "$release" framedrop --name FramePlayer --zip "dist/$zip" --url "$url_base/$zip" --out dist/framedrop.json \
   --manifest-url "$url_base/framedrop.json"
+# The same file list for Frame Control install links
+# (frame-control://install?manifest=<url of frameplayer.json>).
+python3 - dist/framedrop.json > dist/frameplayer.json <<'P'
+import json, sys
+fd = json.load(open(sys.argv[1]))
+print(json.dumps({"schema": "frame-control.install/v1", "name": fd["name"], "files": fd["files"]}, indent=2))
+P
 if [ -n "$key" ]; then
   "$release" sign dist/manifest.json --key "$key"
 else
