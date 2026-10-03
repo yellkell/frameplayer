@@ -118,12 +118,7 @@ impl Thumbs {
     }
 }
 
-/// Paints `tex` covering `rect` (cropping to keep its aspect).
-pub fn paint_cover(painter: &egui::Painter, rect: egui::Rect, tex: &TextureHandle) {
-    painter.image(tex.id(), rect, cover_uv(rect, tex), egui::Color32::WHITE);
-}
-
-/// [`paint_cover`] with rounded corners.
+/// Paints `tex` filling `rect` (cropped to its aspect) with rounded corners.
 pub fn paint_cover_rounded(
     painter: &egui::Painter,
     rect: egui::Rect,

@@ -29,11 +29,6 @@ pub const OK: Color32 = Color32::from_rgb(92, 196, 110);
 pub const WARN: Color32 = Color32::from_rgb(242, 182, 64);
 pub const ERROR: Color32 = Color32::from_rgb(242, 88, 94);
 
-// Older names, used across the screens.
-pub const PANEL_BG: Color32 = BG;
-pub const CARD_BG: Color32 = SURFACE;
-pub const MUTED: Color32 = TEXT_2;
-
 /// Text weights; each is Inter with Phosphor icons as a fallback.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Weight {
