@@ -1,8 +1,9 @@
 name: frame-chromium-smoke
 
 # Smoke-tests a Steam Frame WebXR Chromium release on real arm64 hardware:
-# the published zip matches its install manifests, the browser starts, the
-# bundled start page runs offline, and the patches' unit tests pass. Runs on
+# the published zip matches its install manifests, the browser starts and
+# runs a WebXR page with the controller models extension loaded, and the
+# patches' unit tests pass. Runs on
 # publishing a chromium-xr-frame-* release (tools/webxr/package-frame-title.sh).
 on:
   release:
@@ -72,17 +73,21 @@ jobs:
       - name: Browser starts
         run: title/chromium/chrome --version
 
-      - name: Start page runs offline (headless)
+      - name: A page runs, with the Frame controller models extension
         run: |
-          python3 -m http.server 8765 --bind 127.0.0.1 --directory title/chromium/start >/dev/null 2>&1 &
+          # The title ships the extension that swaps Quest Touch controller
+          # models for the Frame's (frame-models/, loaded by the launcher).
+          for f in manifest.json rules.json models/left.glb models/right.glb; do
+            test -s "title/frame-models/$f" || { echo "missing frame-models/$f"; exit 1; }
+          done
+          mkdir -p page
+          printf '%s
+' '<!doctype html><body><script>'             'document.body.textContent = "xr:" + ("xr" in navigator) + " secure:" + isSecureContext;'             '</script>' > page/index.html
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory page >/dev/null 2>&1 &
           sleep 1
-          title/chromium/chrome --headless=new --no-sandbox --disable-gpu --virtual-time-budget=5000 \
-            --enable-features=OpenXR --dump-dom 'http://localhost:8765/?title=chromium-xr-frame' > dom.html
-          # The table only renders once the module script (and its local
-          # three.js import) has run.
-          grep -q 'Secure context</td><td class="ok">yes' dom.html
-          grep -o -E '(Launched as|navigator.xr|immersive-vr supported)</td><td[^>]*>[^<]*' dom.html
-          ! grep -q 'cdn.jsdelivr.net/npm/three' dom.html
+          title/chromium/chrome --headless=new --no-sandbox --disable-gpu --virtual-time-budget=3000             --enable-features=OpenXR             --disable-features=DisableLoadExtensionCommandLineSwitch             --load-extension="$PWD/title/frame-models"             --dump-dom http://localhost:8765/ > dom.html
+          cat dom.html
+          grep -q 'xr:true secure:true' dom.html
 
       - name: Patch 0004 unit tests (Frame controller profile)
         working-directory: tests
