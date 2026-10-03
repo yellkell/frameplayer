@@ -1,0 +1,38 @@
+[package]
+name = "fp-probe"
+description = "frameplayer-probe: on-device self-test that answers the Steam Frame platform questions (docs/platform-notes.md) and writes one shareable report."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "fp_probe"
+path = "src/lib.rs"
+
+[[bin]]
+name = "frameplayer-probe"
+path = "src/main.rs"
+
+[features]
+default = []
+# Enumerate audio devices through cpal as well (needs libasound headers at
+# build time). Without it the probe talks to libasound via dlopen.
+cpal = ["dep:cpal", "fp-audio/cpal"]
+
+[dependencies]
+fp-core.workspace = true
+fp-video.workspace = true
+fp-gfx.workspace = true
+fp-xr.workspace = true
+fp-ui.workspace = true
+fp-audio.workspace = true
+fp-sources.workspace = true
+ash.workspace = true
+openxr.workspace = true
+glam.workspace = true
+libc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+cpal = { version = "0.15", optional = true }
