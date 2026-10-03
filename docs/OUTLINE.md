@@ -218,6 +218,23 @@ frameplayer/
 | 6 | **Steam Store** | Steamworks depot, certification, Supporter DLC | Live on the Store |
 | 7 | **Beyond DeoVR** | Watch-together sync, depth-map volumetric playback, phone/PC screen casting | Opt-in, after a stable 1.0 |
 
+### Status (October 2026)
+
+Everything below is implemented and tested in CI, in the headless
+`--preview` harness and against Monado's simulated OpenXR headset; nothing
+has run on Steam Frame hardware yet, so every exit criterion that names the
+device is still open.
+
+| # | Done | Still open |
+|---|---|---|
+| 0 | `frame-probe`; aarch64/glibc 2.28 builds; direct OpenXR runtime loading | Device run; 72 Hz with 4K HEVC; zero-copy DMA-BUF import (frames are copied, as V4L2 decode in FFmpeg 7.1 returns NV12 in memory) |
+| 1 | Local browser, all layouts, auto-detect, seek/speed, subtitles, settings, manifests, microSD/USB drives | — |
+| 2 | Library, thumbnails, resume, SMB/WebDAV/DLNA/HTTP, DeoVR/HereSphere feeds, web remote | Tags UI (stored, searchable, not editable in the headset); credentials encrypted at rest |
+| 3 | Funscripts (multi-axis), Handy/Buttplug/TCode, DeoVR remote API, heatmap strip | Checking against real devices and tools |
+| 4 | Fisheye presets, lens/alignment/IPD, keyframes, PQ/HLG tone mapping, head-tracked ambisonics | HRTF rendering; 8K60 performance |
+| 5 | Passthrough background, signed self-updater, installer, Steam artwork | Eye-gaze UI, hand-only mode, Arcturus colour, refresh-rate choice |
+| 6–7 | — | Not started |
+
 ---
 
 ## 7. Risks and mitigations

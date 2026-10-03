@@ -17,21 +17,30 @@ jobs:
           components: clippy, rustfmt
           targets: aarch64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
       - name: Install build tools
         run: |
           sudo apt-get update
           sudo apt-get install -y meson ninja-build nasm pkg-config mesa-vulkan-drivers zip
-          pip install ziglang
           cargo install --locked cargo-zigbuild
-      - name: Cache FFmpeg builds
+      - name: Restore FFmpeg builds
         id: ffmpeg-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: third_party/ffmpeg
           key: ffmpeg-${{ hashFiles('tools/build-ffmpeg.sh') }}
       - name: Build FFmpeg (x86_64 for tests, aarch64 for the Frame)
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         run: tools/build-ffmpeg.sh x86_64 aarch64
+      # Saved right away, so a later failing step does not throw it away.
+      - name: Save FFmpeg builds
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: third_party/ffmpeg
+          key: ffmpeg-${{ hashFiles('tools/build-ffmpeg.sh') }}
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
@@ -48,9 +57,40 @@ jobs:
           name: frameplayer-aarch64
           path: dist/
 
+  # The PC-side installer, for each desktop OS.
+  installer:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: frameplayer-install-linux-x86_64
+            exe: frameplayer-install
+          - os: windows-latest
+            name: frameplayer-install-windows-x86_64
+            exe: frameplayer-install.exe
+          - os: macos-latest
+            name: frameplayer-install-macos-arm64
+            exe: frameplayer-install
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p frameplayer-install
+      - run: cargo build --release -p frameplayer-install
+      - name: Stage
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "target/release/${{ matrix.exe }}" "out/${{ matrix.name }}${{ endsWith(matrix.exe, '.exe') && '.exe' || '' }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: out/
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: check
+    needs: [check, installer]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -59,6 +99,11 @@ jobs:
         with:
           name: frameplayer-aarch64
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: frameplayer-install-*
+          path: dist
+          merge-multiple: true
       - uses: actions/checkout@v4
         with:
           path: src

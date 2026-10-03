@@ -22,13 +22,18 @@ fetch() { # url dest
 fetch "http://archive.ubuntu.com/ubuntu/pool/universe/f/ffmpeg/ffmpeg_${FFMPEG_VER}.orig.tar.xz" "$src/ffmpeg-$FFMPEG_VER.tar.xz"
 fetch "http://archive.ubuntu.com/ubuntu/pool/main/d/dav1d/dav1d_${DAV1D_VER}.orig.tar.xz" "$src/dav1d-$DAV1D_VER.tar.xz"
 
+# zig from PATH, else the pip package (`pip install ziglang`).
+if command -v zig >/dev/null; then zig="$(command -v zig)"; else zig="python3 -m ziglang"; fi
+
 zig_wrappers() { # dir
   mkdir -p "$1"
-  printf '#!/bin/sh\nexec python3 -m ziglang cc -target aarch64-linux-gnu.2.28 "$@"\n' > "$1/cc"
-  printf '#!/bin/sh\nexec python3 -m ziglang c++ -target aarch64-linux-gnu.2.28 "$@"\n' > "$1/cxx"
-  printf '#!/bin/sh\nexec python3 -m ziglang ar "$@"\n' > "$1/ar"
-  printf '#!/bin/sh\nexec python3 -m ziglang ranlib "$@"\n' > "$1/ranlib"
+  printf '#!/bin/sh\nexec %s cc -target aarch64-linux-gnu.2.28 "$@"\n' "$zig" > "$1/cc"
+  printf '#!/bin/sh\nexec %s c++ -target aarch64-linux-gnu.2.28 "$@"\n' "$zig" > "$1/cxx"
+  printf '#!/bin/sh\nexec %s ar "$@"\n' "$zig" > "$1/ar"
+  printf '#!/bin/sh\nexec %s ranlib "$@"\n' "$zig" > "$1/ranlib"
+  printf '#!/bin/sh\nexec %s nm "$@"\n' "$zig" > "$1/nm"
   chmod +x "$1"/*
+  "$1/cc" --version >/dev/null || { echo "zig does not work: install it or run: pip install ziglang" >&2; exit 1; }
 }
 
 build_arch() {
@@ -58,7 +63,7 @@ INI
     meson_cross=(--cross-file "$work/cross.ini")
     cross_args=(--enable-cross-compile --arch=aarch64 --target-os=linux
                 --cc="$cc" --cxx="$work/zig/cxx" --ar="$ar" --ranlib="$ranlib"
-                --nm="python3 -m ziglang nm" --strip=true --host-cc=cc)
+                --nm="$work/zig/nm" --strip=true --host-cc=cc)
   fi
 
   echo "== dav1d ($arch)"
@@ -67,8 +72,9 @@ INI
   meson setup "$work/dav1d-build" "$dav1d_dir" "${meson_cross[@]}" \
     --prefix="$work/dav1d-prefix" --libdir=lib --buildtype=release \
     --default-library=static -Db_staticpic=true \
-    -Denable_tools=false -Denable_tests=false -Denable_examples=false "${x86asm[@]}" >/dev/null
-  ninja -C "$work/dav1d-build" install >/dev/null
+    -Denable_tools=false -Denable_tests=false -Denable_examples=false "${x86asm[@]}" \
+    >"$work/dav1d-setup.log" 2>&1 || { tail -40 "$work/dav1d-setup.log"; cat "$work/dav1d-build/meson-logs/meson-log.txt" 2>/dev/null | tail -40; exit 1; }
+  ninja -C "$work/dav1d-build" install >"$work/dav1d-build.log" 2>&1 || { tail -40 "$work/dav1d-build.log"; exit 1; }
 
   echo "== ffmpeg ($arch)"
   local asm=()
