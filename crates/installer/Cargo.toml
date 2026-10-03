@@ -38,6 +38,13 @@ flate2 = { version = "1", default-features = false, features = ["rust_backend"] 
 ssh-key = { version = "0.6", default-features = false, features = ["ed25519", "std", "rand_core", "alloc"] }
 mdns-sd = "0.13"
 dirs = "6"
+regex = "1"
+# Built-in SSH transport (default on Windows): pure Rust, ring crypto, same
+# version fp-sources uses.
+russh = { version = "0.63", default-features = false, features = ["ring", "flate2"] }
+
+[target.'cfg(windows)'.dependencies]
+clipboard-win = "5"
 
 [dev-dependencies]
 tempfile.workspace = true

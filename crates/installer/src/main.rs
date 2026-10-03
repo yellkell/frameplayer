@@ -1,6 +1,8 @@
 //! `frameplayer-install`: pair with a Steam Frame and install FramePlayer.
 //!
 //! ```text
+//! frameplayer-install                      # guided mode (what a double-click runs)
+//! frameplayer-install probe [--interactive] [--post]   # self-test + report
 //! frameplayer-install pair                 # find the headset, approve on it
 //! frameplayer-install install --latest     # download, upload, add to library
 //! frameplayer-install launch | logs -f | status | uninstall
@@ -11,10 +13,12 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use fp_installer::config::{Paths, DEVKIT_SERVICE_PORT};
+use fp_installer::console::{self, WizardOptions};
 use fp_installer::installer::{
     Event, InstallOptions, InstallSource, Installer, PairOptions, Reporter,
 };
 use fp_installer::release;
+use fp_installer::transport::{TransportChoice, TransportKind};
 use fp_updater::manifest::Channel;
 use std::io::Write;
 use std::path::PathBuf;
@@ -35,12 +39,44 @@ struct Cli {
     /// More detailed output.
     #[arg(long, short = 'v', global = true)]
     verbose: bool,
+    /// SSH implementation: auto (built-in on Windows, system OpenSSH
+    /// elsewhere), system or native. Also FRAMEPLAYER_SSH.
+    #[arg(long, global = true)]
+    ssh: Option<TransportChoice>,
+    /// Without a command: the guided installer.
     #[command(subcommand)]
-    cmd: Cmd,
+    cmd: Option<Cmd>,
 }
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Guided install + self-test (same as running without a command).
+    Wizard {
+        /// Headset IP address (skips discovery).
+        #[arg(long)]
+        host: Option<String>,
+        /// Release tarball to install instead of downloading.
+        #[arg(long)]
+        tarball: Option<PathBuf>,
+        /// Run the in-headset part without asking.
+        #[arg(long, conflicts_with = "no_interactive")]
+        interactive: bool,
+        /// Skip the in-headset part without asking.
+        #[arg(long)]
+        no_interactive: bool,
+        /// Don't wait for Enter at the end.
+        #[arg(long)]
+        no_pause: bool,
+    },
+    /// Run the self-test on the paired headset and save the report on the Desktop.
+    Probe {
+        /// Also run the in-headset part (put the headset on).
+        #[arg(long)]
+        interactive: bool,
+        /// Open a GitHub issue page with the report on the clipboard (you paste and submit).
+        #[arg(long)]
+        post: bool,
+    },
     /// List headsets in Developer Mode on the local network.
     Discover {
         #[arg(long, default_value_t = 4)]
@@ -240,6 +276,46 @@ impl Reporter for Console {
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() {
     let cli = Cli::parse();
+    let transport = cli
+        .ssh
+        .map(TransportChoice::resolve)
+        .unwrap_or_else(TransportKind::from_env_or_default);
+    // Guided modes keep their own log and talk to the user directly.
+    let guided = match &cli.cmd {
+        None => Some(WizardOptions {
+            pause_at_end: true,
+            ..Default::default()
+        }),
+        Some(Cmd::Wizard {
+            host,
+            tarball,
+            interactive,
+            no_interactive,
+            no_pause,
+        }) => Some(WizardOptions {
+            host: host.clone(),
+            tarball: tarball.clone(),
+            interactive: if *interactive {
+                Some(true)
+            } else if *no_interactive {
+                Some(false)
+            } else {
+                None
+            },
+            pause_at_end: !no_pause,
+            ..Default::default()
+        }),
+        Some(Cmd::Probe { interactive, post }) => Some(WizardOptions {
+            interactive: Some(*interactive),
+            probe_only: Some(*post),
+            ..Default::default()
+        }),
+        _ => None,
+    };
+    if let Some(mut opts) = guided {
+        opts.transport = Some(transport);
+        std::process::exit(console::run(opts).await);
+    }
     let filter = if cli.verbose { "debug" } else { "warn" };
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -260,11 +336,19 @@ async fn run(cli: Cli) -> Result<i32> {
     let reporter = Arc::new(Console {
         last_pct: Default::default(),
     });
+    let transport = cli
+        .ssh
+        .map(TransportChoice::resolve)
+        .unwrap_or_else(TransportKind::from_env_or_default);
     let inst = || -> Result<Installer> {
-        Ok(Installer::new(Paths::platform_default()?, reporter.clone()))
+        Ok(Installer::new(Paths::platform_default()?, reporter.clone()).with_transport(transport))
     };
     let dev = cli.device.as_deref();
-    match cli.cmd {
+    let Some(cmd) = cli.cmd else {
+        return Ok(0);
+    };
+    match cmd {
+        Cmd::Wizard { .. } | Cmd::Probe { .. } => unreachable!("handled in main"),
         Cmd::Discover { timeout } => {
             let found = inst()?.discover(Duration::from_secs(timeout)).await?;
             if found.is_empty() {
@@ -361,12 +445,12 @@ async fn run(cli: Cli) -> Result<i32> {
         Cmd::Logs { lines, follow } => {
             let i = inst()?;
             let device = i.device(dev)?;
-            tokio::task::spawn_blocking(move || i.logs(&device, lines, follow)).await??;
+            i.logs(&device, lines, follow).await?;
         }
         Cmd::Status { json } => {
             let i = inst()?;
             let device = i.device(dev)?;
-            let s = tokio::task::spawn_blocking(move || i.status(&device)).await??;
+            let s = i.status(&device).await?;
             if json {
                 println!(
                     "{}",

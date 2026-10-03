@@ -62,14 +62,18 @@ fn js_str(s: &str) -> String {
     serde_json::to_string(s).expect("string serializes")
 }
 
-/// JS: resolve the appid of our shortcut by name or exe path, or `null`.
-pub fn js_find_shortcut(name: &str, exe_hint: &str) -> String {
+/// JS: resolve the appid of our shortcut, or `null`. An exact name match
+/// wins; otherwise the first shortcut whose exe path contains `exe_hint` and
+/// not `exclude` (so "FramePlayer" never resolves to the self-test entry,
+/// whose exe lives in the same directory).
+pub fn js_find_shortcut(name: &str, exe_hint: &str, exclude: &str) -> String {
     format!(
         r#"(async () => {{
-  const name = {n}, hint = {h};
+  const name = {n}, hint = {h}, ex = {x};
   try {{
-    const all = await SteamClient.Apps.GetAllShortcuts();
-    const m = all.find(s => s.data && (s.data.strAppName === name || (s.data.strExePath || "").includes(hint)));
+    const all = (await SteamClient.Apps.GetAllShortcuts()).filter(s => s.data);
+    let m = all.find(s => s.data.strAppName === name);
+    if (!m) m = all.find(s => {{ const p = s.data.strExePath || ""; return p.includes(hint) && !(ex && p.includes(ex)); }});
     if (m) return m.appid;
   }} catch (e) {{}}
   try {{
@@ -79,7 +83,8 @@ pub fn js_find_shortcut(name: &str, exe_hint: &str) -> String {
   return null;
 }})()"#,
         n = js_str(name),
-        h = js_str(exe_hint)
+        h = js_str(exe_hint),
+        x = js_str(exclude)
     )
 }
 
@@ -237,8 +242,15 @@ impl SteamCdp {
             .map_err(|_| anyhow!("Steam client did not answer within 30 s"))?
     }
 
-    pub async fn find_shortcut(&mut self, name: &str, exe_hint: &str) -> Result<Option<u32>> {
-        let v = self.eval(&js_find_shortcut(name, exe_hint)).await?;
+    pub async fn find_shortcut(
+        &mut self,
+        name: &str,
+        exe_hint: &str,
+        exclude: &str,
+    ) -> Result<Option<u32>> {
+        let v = self
+            .eval(&js_find_shortcut(name, exe_hint, exclude))
+            .await?;
         Ok(v.as_u64().map(|x| x as u32))
     }
 
@@ -276,8 +288,9 @@ mod tests {
 
     #[test]
     fn js_strings_are_escaped() {
-        let js = js_find_shortcut("Frame\"Player</script>", "/x");
+        let js = js_find_shortcut("Frame\"Player</script>", "/x", "probe");
         assert!(js.contains(r#""Frame\"Player</script>""#));
+        assert!(js.contains(r#"ex = "probe""#));
         let js = js_add_shortcut(
             "FramePlayer",
             "/home/steamos/devkit-game/frameplayer/frameplayer.sh",

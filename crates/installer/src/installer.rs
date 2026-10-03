@@ -6,10 +6,11 @@
 use crate::config::{Device, Paths, DEVKIT_SERVICE_PORT};
 use crate::devkit::{DevkitClient, RegisterOutcome};
 use crate::discovery::{self, Discovered};
-use crate::remote::{self, RemoteStatus};
+use crate::remote::{self, ProbeState, RemoteStatus};
 use crate::ssh::SshTarget;
 use crate::steam::{ArtKind, SteamCdp, CEF_DEBUG_PORT};
-use crate::{sshkey, DISPLAY_NAME, GAME_DIR};
+use crate::transport::{LineSink, Remote, TransportKind};
+use crate::{sshkey, DISPLAY_NAME, GAME_DIR, PROBE_DISPLAY_NAME};
 use anyhow::{anyhow, bail, Context, Result};
 use fp_updater::download::{self, Expect};
 use fp_updater::manifest::Channel;
@@ -167,15 +168,47 @@ fn kv(out: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
+/// Steam shortcut lookup hint for the app (its exe lives in the game dir).
+fn app_hint() -> String {
+    format!("devkit-game/{GAME_DIR}")
+}
+
+/// Report files copied back from the headset.
+#[derive(Debug, Clone, Default)]
+pub struct FetchedReports {
+    pub json: Option<String>,
+    pub txt: Option<String>,
+}
+
 /// Drives pairing and installation.
 pub struct Installer {
     pub paths: Paths,
     reporter: Arc<dyn Reporter>,
+    transport: TransportKind,
 }
 
 impl Installer {
+    /// Uses [`TransportKind::from_env_or_default`].
     pub fn new(paths: Paths, reporter: Arc<dyn Reporter>) -> Self {
-        Self { paths, reporter }
+        Self {
+            paths,
+            reporter,
+            transport: TransportKind::from_env_or_default(),
+        }
+    }
+
+    pub fn with_transport(mut self, kind: TransportKind) -> Self {
+        self.transport = kind;
+        self
+    }
+
+    pub fn transport(&self) -> TransportKind {
+        self.transport
+    }
+
+    /// Connection to a paired device over the configured transport.
+    pub fn remote(&self, d: &Device) -> Result<Remote> {
+        Ok(Remote::new(self.transport, self.target(d)?))
     }
 
     fn say(&self, e: Event) {
@@ -218,7 +251,9 @@ impl Installer {
 
     /// Pair with a headset via the devkit service. Idempotent.
     pub async fn pair(&self, opts: &PairOptions) -> Result<Device> {
-        SshTarget::ensure_client_available()?;
+        if self.transport == TransportKind::System {
+            SshTarget::ensure_client_available()?;
+        }
         let key = sshkey::load_or_create(
             &self.paths.ssh_key(),
             &self.paths.ssh_pubkey(),
@@ -290,9 +325,9 @@ impl Installer {
             ssh_port: opts.ssh_port,
             user,
         };
-        let target = self.target(&device)?;
+        let remote = self.remote(&device)?;
 
-        if !target.check() {
+        if !remote.check().await {
             self.say(Event::ApproveOnHeadset {
                 fingerprint: key.fingerprint.clone(),
             });
@@ -303,11 +338,17 @@ impl Installer {
                 RegisterOutcome::Denied(msg) => bail!("pairing was declined on the headset {msg}"),
                 RegisterOutcome::Accepted(_) => {}
             }
+            // The user just approved on the headset: a host key we recorded
+            // earlier (before a reset/reflash) is stale, not an attack.
+            match crate::transport::forget_host(&self.paths.known_hosts(), &host) {
+                Ok(n) if n > 0 => tracing::info!("forgot {n} old host key(s) for {host}"),
+                Ok(_) => {}
+                Err(e) => tracing::warn!("could not update known_hosts: {e:#}"),
+            }
             self.say(Event::Step("Waiting for SSH access…".into()));
             let deadline = Instant::now() + opts.approve_timeout;
             loop {
-                let t = target.clone();
-                if tokio::task::spawn_blocking(move || t.check()).await? {
+                if remote.check().await {
                     break;
                 }
                 if Instant::now() > deadline {
@@ -378,13 +419,12 @@ impl Installer {
         source: &InstallSource,
         opts: &InstallOptions,
     ) -> Result<String> {
-        let target = self.target(device)?;
-        let t = target.clone();
-        if !tokio::task::spawn_blocking(move || t.check()).await? {
-            bail!(
+        let remote = self.remote(device)?;
+        if let Err(e) = remote.verify().await {
+            return Err(e.context(format!(
                 "cannot log in to {} over SSH; run `frameplayer-install pair` again",
                 device.host
-            );
+            )));
         }
         let tarball = match source {
             InstallSource::Tarball(p) => p.clone(),
@@ -400,20 +440,22 @@ impl Installer {
             "Uploading FramePlayer {} to {}…",
             info.version, device.name
         )));
-        let (t, tb, up) = (target.clone(), tarball.clone(), upload_rel.clone());
-        tokio::task::spawn_blocking(move || -> Result<()> {
-            t.run_script(&remote::prepare_upload_script())?;
-            t.upload(&tb, &up)
-        })
-        .await??;
+        remote.run_script(&remote::prepare_upload_script()).await?;
+        let rep = self.reporter.clone();
+        remote
+            .upload(&tarball, &upload_rel, &mut |done, total| {
+                rep.event(Event::Progress {
+                    done,
+                    total: Some(total),
+                })
+            })
+            .await?;
 
         self.say(Event::Step("Installing on the headset…".into()));
-        let t = target.clone();
-        let out = tokio::task::spawn_blocking(move || {
-            t.run_script(&remote::install_script(&upload_rel, GAME_DIR))
-        })
-        .await??;
-        let out = kv(&String::from_utf8_lossy(&out.stdout));
+        let out = remote
+            .run_script(&remote::install_script(&upload_rel, GAME_DIR))
+            .await?;
+        let out = kv(&out.stdout_str());
         let home = out
             .get("home")
             .cloned()
@@ -427,7 +469,7 @@ impl Installer {
 
         if !opts.skip_steam {
             if let Err(e) = self
-                .register_with_steam(&target, &home, &info, opts.pin)
+                .register_with_steam(&remote, &home, &info, opts.pin)
                 .await
             {
                 self.say(Event::Warn(format!(
@@ -446,7 +488,7 @@ impl Installer {
 
     async fn register_with_steam(
         &self,
-        target: &SshTarget,
+        remote: &Remote,
         home: &str,
         info: &TarballInfo,
         pin: bool,
@@ -454,23 +496,18 @@ impl Installer {
         self.say(Event::Step(
             "Adding FramePlayer to the Steam library…".into(),
         ));
-        let t = target.clone();
-        let devkit = tokio::task::spawn_blocking(move || {
-            t.run_script(&remote::devkit_shortcut_script(GAME_DIR, DISPLAY_NAME))
-        })
-        .await?
-        .map(|o| String::from_utf8_lossy(&o.stdout).contains("devkit-utils: ok"))
-        .unwrap_or(false);
+        let devkit = remote
+            .run_script(&remote::devkit_shortcut_script(GAME_DIR, DISPLAY_NAME))
+            .await
+            .map(|o| o.stdout_str().contains("devkit-utils: ok"))
+            .unwrap_or(false);
 
-        let t = target.clone();
-        let tunnel =
-            tokio::task::spawn_blocking(move || t.open_tunnel("127.0.0.1", CEF_DEBUG_PORT))
-                .await??;
+        let tunnel = remote.open_tunnel("127.0.0.1", CEF_DEBUG_PORT).await?;
         let mut cdp = SteamCdp::connect(tunnel.local_port).await?;
         let root = format!("{home}/devkit-game/{GAME_DIR}");
         let exe = format!("{root}/frameplayer.sh");
         let appid = match cdp
-            .find_shortcut(DISPLAY_NAME, &format!("devkit-game/{GAME_DIR}"))
+            .find_shortcut(DISPLAY_NAME, &app_hint(), remote::PROBE_LAUNCHER_NAME)
             .await?
         {
             Some(id) => id,
@@ -499,19 +536,53 @@ impl Installer {
                 Err(e) => self.say(Event::Warn(format!("could not pin: {e:#}"))),
             }
         }
+        // Second entry for the self-test, so Steam can start it with the
+        // headset's XR environment.
+        if let Err(e) = self
+            .ensure_probe_shortcut(remote, &mut cdp, home, info)
+            .await
+        {
+            self.say(Event::Warn(format!(
+                "could not add the {PROBE_DISPLAY_NAME} entry: {e:#}"
+            )));
+        }
         drop(tunnel);
         Ok(())
     }
 
+    /// Find or create the "FramePlayer Self-Test" shortcut; returns its appid.
+    async fn ensure_probe_shortcut(
+        &self,
+        remote: &Remote,
+        cdp: &mut SteamCdp,
+        home: &str,
+        info: &TarballInfo,
+    ) -> Result<u32> {
+        remote
+            .run_script(&remote::ensure_probe_launcher_script(GAME_DIR))
+            .await?;
+        if let Some(id) = cdp
+            .find_shortcut(PROBE_DISPLAY_NAME, remote::PROBE_LAUNCHER_NAME, "")
+            .await?
+        {
+            return Ok(id);
+        }
+        let root = format!("{home}/devkit-game/{GAME_DIR}");
+        let exe = format!("{root}/{}", remote::PROBE_LAUNCHER_NAME);
+        let id = cdp.add_shortcut(PROBE_DISPLAY_NAME, &exe, &root).await?;
+        if let Some(png) = info.artwork.get(ArtKind::Icon.file_stem()) {
+            let _ = cdp.set_artwork(id, ArtKind::Icon, png).await;
+        }
+        Ok(id)
+    }
+
     /// Start FramePlayer through Steam (so it gets the right runtime env).
     pub async fn launch(&self, device: &Device) -> Result<()> {
-        let target = self.target(device)?;
-        let tunnel =
-            tokio::task::spawn_blocking(move || target.open_tunnel("127.0.0.1", CEF_DEBUG_PORT))
-                .await??;
+        let remote = self.remote(device)?;
+        let tunnel = remote.open_tunnel("127.0.0.1", CEF_DEBUG_PORT).await?;
         let mut cdp = SteamCdp::connect(tunnel.local_port).await?;
         let appid = cdp
-            .find_shortcut(DISPLAY_NAME, &format!("devkit-game/{GAME_DIR}"))
+            .find_shortcut(DISPLAY_NAME, &app_hint(), remote::PROBE_LAUNCHER_NAME)
             .await?
             .ok_or_else(|| {
                 anyhow!(
@@ -524,16 +595,19 @@ impl Installer {
     }
 
     pub async fn uninstall(&self, device: &Device, purge: bool) -> Result<()> {
-        let target = self.target(device)?;
-        let t = target.clone();
-        match tokio::task::spawn_blocking(move || t.open_tunnel("127.0.0.1", CEF_DEBUG_PORT))
-            .await?
-        {
+        let remote = self.remote(device)?;
+        match remote.open_tunnel("127.0.0.1", CEF_DEBUG_PORT).await {
             Ok(tunnel) => {
                 let r: Result<()> = async {
                     let mut cdp = SteamCdp::connect(tunnel.local_port).await?;
                     if let Some(id) = cdp
-                        .find_shortcut(DISPLAY_NAME, &format!("devkit-game/{GAME_DIR}"))
+                        .find_shortcut(DISPLAY_NAME, &app_hint(), remote::PROBE_LAUNCHER_NAME)
+                        .await?
+                    {
+                        cdp.remove(id).await?;
+                    }
+                    if let Some(id) = cdp
+                        .find_shortcut(PROBE_DISPLAY_NAME, remote::PROBE_LAUNCHER_NAME, "")
                         .await?
                     {
                         cdp.remove(id).await?;
@@ -551,10 +625,9 @@ impl Installer {
                 "Steam not reachable ({e:#}); removing files only"
             ))),
         }
-        tokio::task::spawn_blocking(move || {
-            target.run_script(&remote::uninstall_script(GAME_DIR, purge))
-        })
-        .await??;
+        remote
+            .run_script(&remote::uninstall_script(GAME_DIR, purge))
+            .await?;
         self.say(Event::Done(if purge {
             "FramePlayer and its settings were removed".into()
         } else {
@@ -563,29 +636,136 @@ impl Installer {
         Ok(())
     }
 
-    pub fn status(&self, device: &Device) -> Result<RemoteStatus> {
+    pub async fn status(&self, device: &Device) -> Result<RemoteStatus> {
         let out = self
-            .target(device)?
-            .run_script(&remote::status_script(GAME_DIR))?;
-        Ok(remote::parse_status(&String::from_utf8_lossy(&out.stdout)))
+            .remote(device)?
+            .run_script(&remote::status_script(GAME_DIR))
+            .await?;
+        Ok(remote::parse_status(&out.stdout_str()))
     }
 
-    /// Stream logs to stdout (blocking).
-    pub fn logs(&self, device: &Device, lines: u32, follow: bool) -> Result<()> {
-        let status = self
-            .target(device)?
-            .run_script_streaming(&remote::logs_script(lines, follow))?;
-        if !status.success() && !follow {
-            bail!("could not read logs ({status})");
+    /// Stream logs to stdout.
+    pub async fn logs(&self, device: &Device, lines: u32, follow: bool) -> Result<()> {
+        let code = self
+            .remote(device)?
+            .run_script_streaming(
+                &remote::logs_script(lines, follow),
+                Box::new(|l| match l.strip_prefix("! ") {
+                    Some(e) => eprintln!("{e}"),
+                    None => println!("{l}"),
+                }),
+            )
+            .await?;
+        if code != 0 && !follow {
+            bail!("could not read logs (exit {code})");
         }
         Ok(())
     }
 
-    /// Interactive shell / one-off command (blocking, inherits the terminal).
+    /// Interactive shell / one-off command (blocking, inherits the
+    /// terminal). Always uses the system OpenSSH client (needs a TTY).
     pub fn shell(&self, device: &Device, command: Option<&str>) -> Result<i32> {
+        SshTarget::ensure_client_available()?;
         let extra: &[&str] = if command.is_none() { &["-t"] } else { &[] };
         let mut c = self.target(device)?.ssh_command_with(extra, command);
         Ok(c.status()?.code().unwrap_or(1))
+    }
+
+    /// Run the self-test headless over SSH, streaming its output lines to
+    /// `sink`. Returns the probe's exit code
+    /// ([`remote::PROBE_MISSING_EXIT`] when the build has no probe,
+    /// [`remote::NOT_INSTALLED_EXIT`] when FramePlayer isn't installed).
+    pub async fn run_probe_headless(&self, device: &Device, sink: LineSink) -> Result<i32> {
+        self.remote(device)?
+            .run_script_streaming(&remote::probe_headless_script(GAME_DIR), sink)
+            .await
+    }
+
+    /// Report file times and whether a probe is running.
+    pub async fn probe_state(&self, device: &Device) -> Result<ProbeState> {
+        let out = self
+            .remote(device)?
+            .run_script(&remote::probe_state_script())
+            .await?;
+        Ok(remote::parse_probe_state(&out.stdout_str()))
+    }
+
+    /// Copy the probe's report files from the headset (missing ones are
+    /// `None`).
+    pub async fn fetch_reports(&self, device: &Device) -> Result<FetchedReports> {
+        let remote = self.remote(device)?;
+        let dir = self.paths.dir.join("reports");
+        std::fs::create_dir_all(&dir)?;
+        let mut out = FetchedReports::default();
+        for (name, slot) in [
+            (crate::report::REMOTE_REPORT_JSON, &mut out.json),
+            (crate::report::REMOTE_REPORT_TXT, &mut out.txt),
+        ] {
+            let local = dir.join(name);
+            match remote.download(name, &local).await {
+                Ok(()) => *slot = Some(std::fs::read_to_string(&local)?),
+                Err(e) => tracing::info!("no {name}: {e:#}"),
+            }
+        }
+        Ok(out)
+    }
+
+    /// Start the self-test through Steam (it needs the XR environment Steam
+    /// provides), creating its library entry if needed.
+    // [verify] A non-Steam shortcut started via SteamClient.Apps.RunGame gets
+    // the OpenXR runtime environment on the Frame, and the probe's window /
+    // XR session appears in the headset.
+    pub async fn launch_probe(&self, device: &Device) -> Result<()> {
+        let remote = self.remote(device)?;
+        let home = remote
+            .run_script("echo \"$HOME\"\n")
+            .await?
+            .stdout_str()
+            .trim()
+            .to_string();
+        let tunnel = remote.open_tunnel("127.0.0.1", CEF_DEBUG_PORT).await?;
+        let mut cdp = SteamCdp::connect(tunnel.local_port).await?;
+        let appid = self
+            .ensure_probe_shortcut(&remote, &mut cdp, &home, &TarballInfo::default())
+            .await?;
+        cdp.run(appid).await?;
+        self.say(Event::Info(format!(
+            "Started {PROBE_DISPLAY_NAME} on the headset"
+        )));
+        Ok(())
+    }
+
+    /// Find and download the newest GitHub release (pre-releases included).
+    /// Returns the tarball path.
+    pub async fn fetch_github_latest(&self) -> Result<PathBuf> {
+        self.say(Event::Step(
+            "Checking GitHub for the newest FramePlayer build…".into(),
+        ));
+        let http =
+            download::http_client(concat!("frameplayer-install/", env!("CARGO_PKG_VERSION")))?;
+        let sel = crate::github::latest_release(&http, "aarch64").await?;
+        self.say(Event::Step(format!(
+            "Downloading FramePlayer {}{} ({:.1} MB)…",
+            sel.version,
+            if sel.prerelease { " (test build)" } else { "" },
+            sel.tarball.size as f64 / 1e6
+        )));
+        let rep = self.reporter.clone();
+        let (path, verified) = crate::github::download_release(
+            &http,
+            &sel,
+            &self.paths.downloads(),
+            &mut |done, total| rep.event(Event::Progress { done, total }),
+        )
+        .await?;
+        if verified {
+            self.say(Event::Info("Download checked (SHA-256 matches).".into()));
+        } else {
+            self.say(Event::Warn(
+                "this release has no .sha256 file; the download could not be verified".into(),
+            ));
+        }
+        Ok(path)
     }
 }
 

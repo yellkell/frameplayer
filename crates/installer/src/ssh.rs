@@ -47,27 +47,63 @@ pub fn find_binary(name: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
+/// Find the OpenSSH client: `ssh`/`scp` on PATH, else (Windows) the
+/// optional-feature install in `%SystemRoot%\System32\OpenSSH`, which is
+/// sometimes missing from PATH.
+pub fn locate_openssh() -> Option<(PathBuf, PathBuf)> {
+    if let (Some(s), Some(c)) = (find_binary("ssh"), find_binary("scp")) {
+        return Some((s, c));
+    }
+    if cfg!(windows) {
+        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        let dir = PathBuf::from(root).join("System32").join("OpenSSH");
+        let (s, c) = (dir.join("ssh.exe"), dir.join("scp.exe"));
+        if s.is_file() && c.is_file() {
+            return Some((s, c));
+        }
+    }
+    None
+}
+
+/// How to get OpenSSH when it is missing (shown to the user).
+pub const OPENSSH_MISSING_HELP: &str = "the OpenSSH client (ssh, scp) was not found.\n\
+     Windows: Settings > System > Optional features > View features / Add a feature > \"OpenSSH Client\" \
+     (or just use the built-in transport: --ssh native).\n\
+     Linux: install the openssh-client package.";
+
+/// `-o Key=Value` with the value double-quoted when it contains whitespace
+/// (OpenSSH splits e.g. `UserKnownHostsFile` values on spaces, which breaks
+/// Windows profiles like `C:\Users\Jane Doe`).
+fn opt_path(key: &str, p: &Path) -> String {
+    let v = p.display().to_string();
+    if v.chars().any(char::is_whitespace) {
+        format!("{key}=\"{v}\"")
+    } else {
+        format!("{key}={v}")
+    }
+}
+
 impl SshTarget {
     pub fn new(host: &str, user: &str, port: u16, key: &Path, known_hosts: &Path) -> Self {
+        let (ssh_bin, scp_bin) = match locate_openssh() {
+            Some((s, c)) if cfg!(windows) => (s, c),
+            _ => (PathBuf::from("ssh"), PathBuf::from("scp")),
+        };
         Self {
             host: host.to_string(),
             user: user.to_string(),
             port,
             key: key.to_path_buf(),
             known_hosts: known_hosts.to_path_buf(),
-            ssh_bin: PathBuf::from("ssh"),
-            scp_bin: PathBuf::from("scp"),
+            ssh_bin,
+            scp_bin,
         }
     }
 
     /// Fail early with a helpful message if OpenSSH is missing.
     pub fn ensure_client_available() -> Result<()> {
-        if find_binary("ssh").is_none() || find_binary("scp").is_none() {
-            bail!(
-                "the OpenSSH client (ssh, scp) was not found on PATH.\n\
-                 Windows: Settings > System > Optional features > add \"OpenSSH Client\".\n\
-                 Linux: install the openssh-client package."
-            );
+        if locate_openssh().is_none() {
+            bail!(OPENSSH_MISSING_HELP);
         }
         Ok(())
     }
@@ -78,7 +114,8 @@ impl SshTarget {
             "BatchMode=yes".to_string(),
             "IdentitiesOnly=yes".into(),
             "StrictHostKeyChecking=accept-new".into(),
-            format!("UserKnownHostsFile={}", self.known_hosts.display()),
+            "HashKnownHosts=no".into(),
+            opt_path("UserKnownHostsFile", &self.known_hosts),
             "ConnectTimeout=10".into(),
             "ServerAliveInterval=15".into(),
             "LogLevel=ERROR".into(),
@@ -131,6 +168,17 @@ impl SshTarget {
             .args(self.common_opts())
             .arg("-q");
         c.arg(local).arg(self.scp_destination(remote_path));
+        c
+    }
+
+    /// `scp … user@host:remote local` (remote path relative to $HOME).
+    pub fn scp_download_command(&self, remote_path: &str, local: &Path) -> Command {
+        let mut c = Command::new(&self.scp_bin);
+        c.arg("-P")
+            .arg(self.port.to_string())
+            .args(self.common_opts())
+            .arg("-q");
+        c.arg(self.scp_destination(remote_path)).arg(local);
         c
     }
 
@@ -213,18 +261,48 @@ impl SshTarget {
         Ok(c.wait()?)
     }
 
+    /// Copy a local file to `$HOME/<remote_path>` by streaming it into
+    /// `cat` over ssh. (Not scp: OpenSSH 9+ scp needs the SFTP subsystem,
+    /// and this keeps both transports identical.)
     pub fn upload(&self, local: &Path, remote_path: &str) -> Result<()> {
+        let file = std::fs::File::open(local).with_context(|| local.display().to_string())?;
+        let cmd = format!("cat > \"$HOME/\"{}", shell_quote(remote_path));
         let out = self
-            .scp_command(local, remote_path)
-            .stdin(Stdio::null())
+            .ssh_command(Some(&cmd))
+            .stdin(Stdio::from(file))
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
             .output()
-            .context("running scp")?;
+            .context("running ssh")?;
         if !out.status.success() {
             bail!(
                 "upload failed: {}",
                 String::from_utf8_lossy(&out.stderr).trim()
             );
         }
+        Ok(())
+    }
+
+    /// Copy `$HOME/<remote_path>` to a local file (via `cat` over ssh).
+    pub fn download(&self, remote_path: &str, local: &Path) -> Result<()> {
+        let tmp = local.with_extension("part");
+        let file = std::fs::File::create(&tmp).with_context(|| tmp.display().to_string())?;
+        let cmd = format!("cat \"$HOME/\"{}", shell_quote(remote_path));
+        let out = self
+            .ssh_command(Some(&cmd))
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(file))
+            .stderr(Stdio::piped())
+            .output()
+            .context("running ssh")?;
+        if !out.status.success() {
+            let _ = std::fs::remove_file(&tmp);
+            bail!(
+                "download of {remote_path} failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        std::fs::rename(&tmp, local)?;
         Ok(())
     }
 
@@ -326,6 +404,26 @@ mod tests {
         t.host = "fe80::1%en0".into();
         let a = args(&t.scp_command(Path::new("f"), "x"));
         assert_eq!(a.last().unwrap(), "steamos@[fe80::1%en0]:x");
+    }
+
+    #[test]
+    fn paths_with_spaces_are_quoted() {
+        let t = SshTarget::new(
+            "h",
+            "u",
+            22,
+            Path::new("/k/id"),
+            Path::new("C:/Users/Jane Doe/AppData/kh"),
+        );
+        let a = args(&t.ssh_command(None));
+        assert!(a.contains(&"UserKnownHostsFile=\"C:/Users/Jane Doe/AppData/kh\"".to_string()));
+        assert!(a.contains(&"HashKnownHosts=no".to_string()));
+        let d =
+            args(&t.scp_download_command("frameplayer-probe-report.json", Path::new("out.json")));
+        assert_eq!(
+            &d[d.len() - 2..],
+            ["u@h:frameplayer-probe-report.json", "out.json"]
+        );
     }
 
     #[test]

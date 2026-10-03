@@ -67,14 +67,41 @@ fn write_private(k: &PrivateKey, path: &Path) -> Result<()> {
     }
     #[cfg(not(unix))]
     {
-        // [verify] Windows OpenSSH rejects private keys readable by other
-        // users. Files under %APPDATA% inherit an ACL limited to the user,
-        // SYSTEM and Administrators, which OpenSSH accepts; confirm on a
-        // stock Windows 11 install.
         std::fs::write(path, pem.as_bytes())?;
+        restrict_to_owner(path);
     }
     Ok(())
 }
+
+/// Windows OpenSSH refuses private keys that other accounts can read
+/// ("UNPROTECTED PRIVATE KEY FILE"). Drop inherited ACEs and grant only the
+/// current user. Best effort: only the system-OpenSSH transport cares, and
+/// the built-in transport (the Windows default) never checks ACLs.
+// [verify] `icacls <key> /inheritance:r /grant:r <USERNAME>:F` satisfies
+// Win32-OpenSSH on a stock Windows 11 install (and with Microsoft accounts,
+// where %USERNAME% is the short local name).
+#[cfg(windows)]
+fn restrict_to_owner(path: &Path) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let Ok(user) = std::env::var("USERNAME") else {
+        return;
+    };
+    let r = std::process::Command::new("icacls")
+        .arg(path)
+        .args(["/inheritance:r", "/grant:r"])
+        .arg(format!("{user}:F"))
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
+    if !r.is_ok_and(|s| s.success()) {
+        tracing::warn!("could not restrict permissions on {}", path.display());
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn restrict_to_owner(_: &Path) {}
 
 /// Default key comment: `frameplayer-install@<hostname>`.
 pub fn default_comment() -> String {

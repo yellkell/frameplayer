@@ -134,6 +134,93 @@ exec tail -n {lines}{follow} "$D"/*.log
     )
 }
 
+/// The self-test launcher (`dist/frameplayer-probe.sh`), installed as
+/// `<root>/frameplayer-probe.sh`.
+pub const PROBE_LAUNCHER: &str = include_str!("../../../dist/frameplayer-probe.sh");
+/// File name of the self-test launcher inside the install dir.
+pub const PROBE_LAUNCHER_NAME: &str = "frameplayer-probe.sh";
+/// Exit code of the launcher when the probe binary is missing.
+pub const PROBE_MISSING_EXIT: i32 = 127;
+/// Exit code of [`probe_headless_script`] when FramePlayer isn't installed.
+pub const NOT_INSTALLED_EXIT: i32 = 3;
+
+/// (Re)write the self-test launcher into the install dir.
+fn write_probe_launcher(game_dir: &str) -> String {
+    let root = root(game_dir);
+    let delim = "FP_PROBE_LAUNCHER_EOF";
+    debug_assert!(!PROBE_LAUNCHER.contains(delim));
+    format!(
+        r#"ROOT={root}
+[ -d "$ROOT" ] || {{ echo "FramePlayer is not installed in $ROOT" >&2; exit {NOT_INSTALLED_EXIT}; }}
+cat > "$ROOT/.{PROBE_LAUNCHER_NAME}.tmp" <<'{delim}'
+{PROBE_LAUNCHER}{delim}
+chmod +x "$ROOT/.{PROBE_LAUNCHER_NAME}.tmp"
+mv -f "$ROOT/.{PROBE_LAUNCHER_NAME}.tmp" "$ROOT/{PROBE_LAUNCHER_NAME}"
+"#
+    )
+}
+
+/// Install the launcher and print `ok`.
+pub fn ensure_probe_launcher_script(game_dir: &str) -> String {
+    format!(
+        "set -eu
+{}echo ok
+",
+        write_probe_launcher(game_dir)
+    )
+}
+
+/// Run the self-test without the headset on: remove old reports, then run
+/// the probe in headless mode with the text summary on stdout. The exit
+/// code is the probe's ([`PROBE_MISSING_EXIT`] if it is not installed).
+pub fn probe_headless_script(game_dir: &str) -> String {
+    format!(
+        "set -u
+{}rm -f \"$HOME/{json}\" \"$HOME/{txt}\"
+exec \"$ROOT/{PROBE_LAUNCHER_NAME}\" --headless --summary-only
+",
+        write_probe_launcher(game_dir),
+        json = crate::report::REMOTE_REPORT_JSON,
+        txt = crate::report::REMOTE_REPORT_TXT,
+    )
+}
+
+/// Print `json_mtime=`, `txt_mtime=` (epoch seconds, 0 if missing) and
+/// `running=<pid>` of a running probe.
+pub fn probe_state_script() -> String {
+    format!(
+        r#"mt() {{ [ -f "$1" ] && stat -c %Y "$1" 2>/dev/null || echo 0; }}
+echo "json_mtime=$(mt "$HOME/{json}")"
+echo "txt_mtime=$(mt "$HOME/{txt}")"
+echo "running=$(pgrep -f 'bin/frameplayer-probe' 2>/dev/null | head -n1 || true)"
+"#,
+        json = crate::report::REMOTE_REPORT_JSON,
+        txt = crate::report::REMOTE_REPORT_TXT,
+    )
+}
+
+/// Parsed [`probe_state_script`] output.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ProbeState {
+    pub json_mtime: i64,
+    pub txt_mtime: i64,
+    pub running: bool,
+}
+
+pub fn parse_probe_state(out: &str) -> ProbeState {
+    let kv: BTreeMap<&str, &str> = out
+        .lines()
+        .filter_map(|l| l.split_once('='))
+        .map(|(k, v)| (k.trim(), v.trim()))
+        .collect();
+    let num = |k: &str| kv.get(k).and_then(|v| v.parse().ok()).unwrap_or(0);
+    ProbeState {
+        json_mtime: num("json_mtime"),
+        txt_mtime: num("txt_mtime"),
+        running: kv.get("running").is_some_and(|v| !v.is_empty()),
+    }
+}
+
 /// Parsed output of [`status_script`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RemoteStatus {
@@ -213,6 +300,30 @@ mod tests {
     fn logs_follow_flag() {
         assert!(logs_script(50, true).contains("tail -n 50 -F"));
         assert!(!logs_script(50, false).contains("-F"));
+    }
+
+    #[test]
+    fn probe_scripts() {
+        let s = probe_headless_script("frameplayer");
+        assert!(s.contains("<<'FP_PROBE_LAUNCHER_EOF'\n#!/bin/sh\n"));
+        assert!(
+            s.contains("\nFP_PROBE_LAUNCHER_EOF\n"),
+            "launcher ends with a newline"
+        );
+        assert!(s.contains(r#"rm -f "$HOME/frameplayer-probe-report.json""#));
+        assert!(s.ends_with("exec \"$ROOT/frameplayer-probe.sh\" --headless --summary-only\n"));
+        assert!(ensure_probe_launcher_script("frameplayer").ends_with("echo ok\n"));
+        assert!(probe_state_script().contains("stat -c %Y"));
+        let st = parse_probe_state("json_mtime=1700000000\ntxt_mtime=0\nrunning=4242\n");
+        assert_eq!(
+            st,
+            ProbeState {
+                json_mtime: 1700000000,
+                txt_mtime: 0,
+                running: true
+            }
+        );
+        assert_eq!(parse_probe_state("running=\n"), ProbeState::default());
     }
 
     #[test]
