@@ -1219,6 +1219,14 @@ impl App {
             });
             self.web_starting = Some(rx);
         }
+        // The browser went away (crashed, or was closed): offer a restart.
+        if let Some(w) = &self.web
+            && !w.connected()
+            && let Some(e) = w.error()
+        {
+            self.web_error = Some(format!("The browser stopped ({e})"));
+            self.web = None;
+        }
         if self.web.is_some() && !self.yield_to_web && crate::webview::xr_requested() {
             log::info!("a page in the web view asked for the headset");
             self.yield_to_web = true;
