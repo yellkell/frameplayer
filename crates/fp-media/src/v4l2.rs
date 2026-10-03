@@ -668,6 +668,8 @@ mod linux {
         eos_input: bool,
         stop_sent: bool,
         finished: bool,
+        /// A LAST buffer was dequeued; handled on the next receive.
+        last_seen: bool,
         pool: *mut ff::AVBufferPool,
         pool_size: usize,
         color: (
@@ -830,6 +832,7 @@ mod linux {
                 eos_input: false,
                 stop_sent: false,
                 finished: false,
+                last_seen: false,
                 pool: std::ptr::null_mut(),
                 pool_size: 0,
                 color: (p.color_range, p.color_space, p.color_trc, p.color_primaries),
@@ -875,7 +878,9 @@ mod linux {
             unsafe {
                 let f = ff::av_bsf_get_by_name(self.codec.annexb_filter().as_ptr());
                 if f.is_null() {
-                    return Err(Error::Unsupported("Annex B bitstream filter missing".into()));
+                    return Err(Error::Unsupported(
+                        "Annex B bitstream filter missing".into(),
+                    ));
                 }
                 crate::check(ff::av_bsf_alloc(f, &mut self.bsf), "bsf alloc")?;
                 crate::check(
@@ -1054,10 +1059,14 @@ mod linux {
                 }
                 crate::check(r, "bitstream filter")?;
                 // SAFETY: a valid packet from the filter.
-                let (pts, dts, duration) = unsafe {
+                let (pts, dts, duration, size) = unsafe {
                     let p = &*out.as_ptr();
-                    (p.pts, p.dts, p.duration)
+                    (p.pts, p.dts, p.duration, p.size)
                 };
+                if size <= 0 {
+                    // V4L2 would read an empty OUTPUT buffer as a full one.
+                    continue;
+                }
                 let pts = if pts == ff::AV_NOPTS_VALUE { dts } else { pts };
                 if self.arm_floor {
                     self.arm_floor = false;
@@ -1192,8 +1201,7 @@ mod linux {
             for i in 0..r.count {
                 let mut planes = [Plane::default(); 1];
                 let mut b = Buffer::new(BUF_TYPE_CAPTURE_MPLANE, i, &mut planes);
-                ioctl(&self.fd, VIDIOC_QUERYBUF, &mut b)
-                    .map_err(|e| err("QUERYBUF capture", e))?;
+                ioctl(&self.fd, VIDIOC_QUERYBUF, &mut b).map_err(|e| err("QUERYBUF capture", e))?;
                 bufs.push(
                     Mapping::new(
                         &self.fd,
@@ -1344,7 +1352,9 @@ mod linux {
             let src = &cap.bufs[index as usize];
             let size = l.copy_size();
             if l.end() > src.len {
-                return Err(Error::Unsupported("V4L2: picture exceeds its buffer".into()));
+                return Err(Error::Unsupported(
+                    "V4L2: picture exceeds its buffer".into(),
+                ));
             }
             // SAFETY: pool buffers hold `size` bytes; the source mapping holds
             // l.end() bytes; frame is a valid empty AVFrame we fill.
@@ -1376,12 +1386,7 @@ mod linux {
                 f.pts = pts;
                 f.best_effort_timestamp = pts;
                 f.duration = duration;
-                (
-                    f.color_range,
-                    f.colorspace,
-                    f.color_trc,
-                    f.color_primaries,
-                ) = self.color;
+                (f.color_range, f.colorspace, f.color_trc, f.color_primaries) = self.color;
             }
             Ok(())
         }
@@ -1394,41 +1399,48 @@ mod linux {
                 if self.finished {
                     return Ok(Some(false));
                 }
+                if self.last_seen {
+                    // The LAST buffer (its picture, if any, went out already).
+                    self.last_seen = false;
+                    // Pick up a source change signalled with it.
+                    self.dequeue_events()?;
+                    if self.stop_sent && !self.drc_pending {
+                        self.finished = true;
+                        return Ok(Some(false));
+                    }
+                    self.change_resolution()?;
+                    continue;
+                }
                 self.pump_output()?;
                 self.dequeue_events()?;
                 if let Some(d) = self.dequeue_capture()? {
                     idle_since = None;
-                    if d.flags & BUF_FLAG_LAST != 0 {
+                    let last = d.flags & BUF_FLAG_LAST != 0;
+                    let timing = self.ts.get(d.id).filter(|&(pts, _)| {
+                        d.bytesused > 0
+                            && d.flags & BUF_FLAG_ERROR == 0
+                            && self
+                                .pts_floor
+                                .is_none_or(|floor| pts == ff::AV_NOPTS_VALUE || pts >= floor)
+                    });
+                    let result = timing.map(|(pts, dur)| self.export(d.index, frame, pts, dur));
+                    if last {
+                        // Held until decoding resumes.
                         if let Some(c) = self.cap.as_mut() {
                             c.held = Some(d.index);
                         }
-                        // Pick up a source change signalled with this buffer.
-                        self.dequeue_events()?;
-                        if self.stop_sent && !self.drc_pending {
-                            self.finished = true;
-                            return Ok(Some(false));
-                        }
-                        self.change_resolution()?;
-                        continue;
+                        self.last_seen = true;
+                    } else {
+                        self.queue_capture(d.index)?;
                     }
-                    let timing = self.ts.get(d.id);
-                    let keep = d.bytesused > 0
-                        && d.flags & BUF_FLAG_ERROR == 0
-                        && timing.is_some_and(|(pts, _)| {
-                            self.pts_floor
-                                .is_none_or(|floor| pts == ff::AV_NOPTS_VALUE || pts >= floor)
-                        });
-                    let result = match (keep, timing) {
-                        (true, Some((pts, dur))) => self.export(d.index, frame, pts, dur),
-                        _ => {
-                            self.queue_capture(d.index)?;
-                            continue;
+                    match result {
+                        Some(r) => {
+                            r?;
+                            self.frames += 1;
+                            return Ok(Some(true));
                         }
-                    };
-                    self.queue_capture(d.index)?;
-                    result?;
-                    self.frames += 1;
-                    return Ok(Some(true));
+                        None => continue,
+                    }
                 }
                 // Nothing decoded yet. Return for more input unless the
                 // bitstream queue is full or we are draining.
@@ -1473,7 +1485,17 @@ mod linux {
             self.ts.invalidate();
             self.pts_floor = None;
             self.arm_floor = true;
-            if self.stop_sent && !self.finished {
+            if !self.stop_sent || self.drc_pending {
+                // Mid-stream (a pending resolution change is handled by the
+                // next receive): nothing to restart.
+                self.eos_input = false;
+                return;
+            }
+            if self.last_seen {
+                self.last_seen = false;
+                self.finished = true;
+            }
+            if !self.finished {
                 // Let the drain finish so decoding can be restarted.
                 let start = Instant::now();
                 while !self.finished && start.elapsed() < Duration::from_secs(2) {
@@ -1492,9 +1514,7 @@ mod linux {
                     }
                 }
             }
-            if self.stop_sent
-                && let Err(e) = self.resume()
-            {
+            if let Err(e) = self.resume() {
                 log::warn!("V4L2 restart after end of stream: {e}");
             }
             self.eos_input = false;
@@ -1564,7 +1584,14 @@ mod tests {
         assert!(can_reuse_capture(k8, 8, nv12_8k, k8, 7, nv12_8k));
         // A different coded size never reuses, even when the buffers are big
         // enough: the firmware's internal buffers would not match (it faults).
-        assert!(!can_reuse_capture(k8, 8, nv12_8k, (8192, 2304), 7, 8192 * 2304 * 3 / 2));
+        assert!(!can_reuse_capture(
+            k8,
+            8,
+            nv12_8k,
+            (8192, 2304),
+            7,
+            8192 * 2304 * 3 / 2
+        ));
         assert!(!can_reuse_capture((256, 128), 8, nv12_8k, k8, 7, nv12_8k));
         // Too small or too few: reallocate.
         assert!(!can_reuse_capture(k8, 8, 256 * 128 * 3 / 2, k8, 7, nv12_8k));

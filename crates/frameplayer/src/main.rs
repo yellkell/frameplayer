@@ -72,9 +72,7 @@ fn parse_args() -> Result<Args, String> {
                 )
             }
             "--info" => a.info = Some(it.next().ok_or("--info needs a file")?),
-            "--decode-bench" => {
-                a.bench = Some(it.next().ok_or("--decode-bench needs a file")?)
-            }
+            "--decode-bench" => a.bench = Some(it.next().ok_or("--decode-bench needs a file")?),
             "--frames" => {
                 a.bench_opts.frames = it
                     .next()
