@@ -88,23 +88,6 @@ pub enum HwDecode {
     Off,
 }
 
-pub struct Decoder {
-    ctx: *mut ff::AVCodecContext,
-    pub name: String,
-    pub hardware: bool,
-    pub time_base: ff::AVRational,
-}
-
-// SAFETY: one thread drives a decoder at a time.
-unsafe impl Send for Decoder {}
-
-impl Drop for Decoder {
-    fn drop(&mut self) {
-        // SAFETY: we own the context.
-        unsafe { ff::avcodec_free_context(&mut self.ctx) };
-    }
-}
-
 /// Hardware (V4L2 stateful) decoder name for a codec, if FFmpeg has one.
 fn v4l2_name(codec: ff::AVCodecID) -> Option<&'static CStr> {
     match codec {
@@ -117,40 +100,121 @@ fn v4l2_name(codec: ff::AVCodecID) -> Option<&'static CStr> {
     }
 }
 
+/// One way of decoding a stream, in the order [`candidates`] tries them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Candidate {
+    /// Our own V4L2 decoder ([`crate::v4l2`]).
+    NativeV4l2,
+    /// An FFmpeg decoder by name, and whether it is hardware.
+    Named(&'static CStr, bool),
+    /// FFmpeg's default decoder for the codec (software).
+    Default,
+}
+
+/// Decoders to try for a stream: the native V4L2 path, FFmpeg's V4L2
+/// wrapper, dav1d for AV1, then FFmpeg's default software decoder.
+fn candidates(video: bool, codec: ff::AVCodecID, hw: HwDecode, native: bool) -> Vec<Candidate> {
+    let mut c = Vec::new();
+    if video && hw == HwDecode::Auto {
+        if native && crate::v4l2::Codec::from_ffmpeg(codec).is_some() {
+            c.push(Candidate::NativeV4l2);
+        }
+        if let Some(n) = v4l2_name(codec) {
+            c.push(Candidate::Named(n, true));
+        }
+    }
+    if codec == ff::AV_CODEC_ID_AV1 {
+        c.push(Candidate::Named(c"libdav1d", false));
+    }
+    c.push(Candidate::Default);
+    c
+}
+
+/// Packets kept while the native decoder starts up, replayed into the
+/// fallback decoder if it fails before its first frame.
+#[cfg(target_os = "linux")]
+const STARTUP_PACKETS: usize = 240;
+
+#[cfg(target_os = "linux")]
+struct Native {
+    dec: crate::v4l2::V4l2Decoder,
+    /// Owned copy of the stream parameters, for opening a fallback.
+    par: *mut ff::AVCodecParameters,
+    hw: HwDecode,
+    /// Packets sent before the first frame (None once frames flow or the
+    /// startup window is exceeded).
+    startup: Option<Vec<Packet>>,
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for Native {
+    fn drop(&mut self) {
+        // SAFETY: we own the parameters copy.
+        unsafe { ff::avcodec_parameters_free(&mut self.par) };
+    }
+}
+
+pub struct Decoder {
+    /// FFmpeg decoder; null while the native decoder is active.
+    ctx: *mut ff::AVCodecContext,
+    #[cfg(target_os = "linux")]
+    native: Option<Box<Native>>,
+    /// Packets to feed the FFmpeg decoder before new ones (after a fallback).
+    replay: std::collections::VecDeque<Packet>,
+    pub name: String,
+    pub hardware: bool,
+    pub time_base: ff::AVRational,
+}
+
+// SAFETY: one thread drives a decoder at a time.
+unsafe impl Send for Decoder {}
+
+impl Drop for Decoder {
+    fn drop(&mut self) {
+        // SAFETY: we own the context (null-safe).
+        unsafe { ff::avcodec_free_context(&mut self.ctx) };
+    }
+}
+
 impl Decoder {
-    /// Opens a decoder for `stream`. Video tries the hardware decoder first
+    /// Opens a decoder for `stream`. Video tries the hardware decoders first
     /// when `hw` allows, and AV1 uses dav1d in software.
     pub(crate) fn open(stream: *mut ff::AVStream, hw: HwDecode) -> Result<Decoder> {
         // SAFETY: stream belongs to an open input.
         let (par, time_base) = unsafe { ((*stream).codecpar, (*stream).time_base) };
-        let codec_id = unsafe { (*par).codec_id };
-        let kind = unsafe { (*par).codec_type };
-        let mut candidates: Vec<(*const ff::AVCodec, bool)> = Vec::new();
-        // SAFETY: decoder lookups return static descriptors or null.
-        unsafe {
-            if kind == ff::AVMEDIA_TYPE_VIDEO
-                && hw == HwDecode::Auto
-                && let Some(n) = v4l2_name(codec_id)
-            {
-                let c = ff::avcodec_find_decoder_by_name(n.as_ptr());
-                if !c.is_null() {
-                    candidates.push((c, true));
-                }
-            }
-            if codec_id == ff::AV_CODEC_ID_AV1 {
-                let c = ff::avcodec_find_decoder_by_name(c"libdav1d".as_ptr());
-                if !c.is_null() {
-                    candidates.push((c, false));
-                }
-            }
-            let c = ff::avcodec_find_decoder(codec_id);
-            if !c.is_null() {
-                candidates.push((c, false));
-            }
-        }
+        Self::open_with(par, time_base, hw, crate::v4l2::enabled())
+    }
+
+    fn open_with(
+        par: *const ff::AVCodecParameters,
+        time_base: ff::AVRational,
+        hw: HwDecode,
+        native: bool,
+    ) -> Result<Decoder> {
+        // SAFETY: par is valid for the call.
+        let (codec_id, kind) = unsafe { ((*par).codec_id, (*par).codec_type) };
         let mut last_err = Error::Unsupported(format!("no decoder for codec id {codec_id}"));
-        for (codec, hardware) in candidates {
-            match Self::try_open(codec, par, time_base, hardware) {
+        for cand in candidates(kind == ff::AVMEDIA_TYPE_VIDEO, codec_id, hw, native) {
+            let r = match cand {
+                Candidate::NativeV4l2 => Self::open_native(par, time_base, hw),
+                Candidate::Named(name, hardware) => {
+                    // SAFETY: lookup returns a static descriptor or null.
+                    let c = unsafe { ff::avcodec_find_decoder_by_name(name.as_ptr()) };
+                    if c.is_null() {
+                        continue;
+                    }
+                    Self::try_open(c, par, time_base, hardware)
+                }
+                Candidate::Default => {
+                    // SAFETY: as above.
+                    let c = unsafe { ff::avcodec_find_decoder(codec_id) };
+                    if c.is_null() {
+                        continue;
+                    }
+                    Self::try_open(c, par, time_base, false)
+                }
+            };
+            match r {
                 Ok(d) => return Ok(d),
                 Err(e) => {
                     log::info!("decoder unavailable: {e}");
@@ -159,6 +223,47 @@ impl Decoder {
             }
         }
         Err(last_err)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn open_native(
+        par: *const ff::AVCodecParameters,
+        time_base: ff::AVRational,
+        hw: HwDecode,
+    ) -> Result<Decoder> {
+        let dec = crate::v4l2::V4l2Decoder::open(par, time_base)?;
+        // SAFETY: copies the parameters into a fresh allocation we own.
+        let own = unsafe {
+            let mut p = ff::avcodec_parameters_alloc();
+            if p.is_null() || ff::avcodec_parameters_copy(p, par) < 0 {
+                ff::avcodec_parameters_free(&mut p);
+                return Err(Error::Unsupported("codec parameters copy".into()));
+            }
+            p
+        };
+        let name = format!("v4l2 ({})", dec.device);
+        Ok(Decoder {
+            ctx: std::ptr::null_mut(),
+            native: Some(Box::new(Native {
+                dec,
+                par: own,
+                hw,
+                startup: Some(Vec::new()),
+            })),
+            replay: Default::default(),
+            name,
+            hardware: true,
+            time_base,
+        })
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn open_native(
+        _par: *const ff::AVCodecParameters,
+        _time_base: ff::AVRational,
+        _hw: HwDecode,
+    ) -> Result<Decoder> {
+        Err(Error::Unsupported("V4L2 needs Linux".into()))
     }
 
     fn try_open(
@@ -176,6 +281,9 @@ impl Decoder {
             }
             let mut dec = Decoder {
                 ctx,
+                #[cfg(target_os = "linux")]
+                native: None,
+                replay: Default::default(),
                 name,
                 hardware,
                 time_base,
@@ -191,9 +299,11 @@ impl Decoder {
             }
             let mut opts: *mut ff::AVDictionary = std::ptr::null_mut();
             if hardware {
-                // Enough capture buffers for smooth playback with a frame queue.
+                // An 8K capture buffer is 48 MiB and the player's frame queue
+                // holds its own copies, so a few beyond the driver's minimum
+                // are enough (24 used to exhaust the decoder's memory).
                 let k = CString::new("num_capture_buffers").unwrap_or_default();
-                let v = CString::new("24").unwrap_or_default();
+                let v = CString::new("8").unwrap_or_default();
                 ff::av_dict_set(&mut opts, k.as_ptr(), v.as_ptr(), 0);
             }
             let r = ff::avcodec_open2(ctx, codec, &mut opts);
@@ -215,9 +325,70 @@ impl Decoder {
         self.ctx
     }
 
+    /// Replaces a failed native decoder with the next candidates (FFmpeg's
+    /// V4L2 wrapper, then software), replaying startup packets into it.
+    #[cfg(target_os = "linux")]
+    fn fall_back(&mut self, why: &Error) -> Result<()> {
+        let Some(mut native) = self.native.take() else {
+            return Ok(());
+        };
+        log::warn!(
+            "{}: {why}; falling back to FFmpeg decoding{}",
+            self.name,
+            if native.startup.is_some() {
+                ""
+            } else {
+                " (resumes at the next keyframe)"
+            }
+        );
+        let mut next = Self::open_with(native.par, self.time_base, native.hw, false)?;
+        std::mem::swap(&mut self.ctx, &mut next.ctx);
+        self.name = std::mem::take(&mut next.name);
+        self.hardware = next.hardware;
+        self.replay = native.startup.take().unwrap_or_default().into();
+        log::info!("now decoding with {}", self.name);
+        Ok(())
+    }
+
     /// Sends a packet (or end of stream when `pkt` is null). Returns false if
     /// the decoder is full and frames must be received first.
     pub(crate) fn send(&mut self, pkt: *const ff::AVPacket) -> Result<bool> {
+        #[cfg(target_os = "linux")]
+        if let Some(n) = self.native.as_mut() {
+            match n.dec.send(pkt) {
+                Ok(accepted) => {
+                    if accepted
+                        && !pkt.is_null()
+                        && let Some(s) = n.startup.as_mut()
+                    {
+                        if s.len() < STARTUP_PACKETS {
+                            let copy = Packet::new();
+                            // SAFETY: adds a reference to the caller's packet.
+                            if unsafe { ff::av_packet_ref(copy.as_ptr(), pkt) } >= 0 {
+                                s.push(copy);
+                            }
+                        } else {
+                            n.startup = None;
+                        }
+                    }
+                    return Ok(accepted);
+                }
+                Err(e) => self.fall_back(&e)?,
+            }
+        }
+        while let Some(p) = self.replay.front() {
+            if !self.send_ffmpeg(p.as_ptr())? {
+                return Ok(false);
+            }
+            self.replay.pop_front();
+        }
+        self.send_ffmpeg(pkt)
+    }
+
+    fn send_ffmpeg(&mut self, pkt: *const ff::AVPacket) -> Result<bool> {
+        if self.ctx.is_null() {
+            return Err(Error::Unsupported("decoder closed after a failure".into()));
+        }
         // SAFETY: ctx is open; pkt valid or null.
         let r = unsafe { ff::avcodec_send_packet(self.ctx, pkt) };
         if r == ff::AVERROR_EAGAIN || r == ff::AVERROR_EOF_ {
@@ -234,6 +405,24 @@ impl Decoder {
     /// Receives a frame. `Ok(None)` means more input is needed, `Ok(Some(false))`
     /// means the decoder is fully drained.
     pub fn receive(&mut self, frame: &mut Frame) -> Result<Option<bool>> {
+        #[cfg(target_os = "linux")]
+        if let Some(n) = self.native.as_mut() {
+            match n.dec.receive(frame.0) {
+                Ok(r) => {
+                    if r == Some(true) {
+                        n.startup = None;
+                    }
+                    return Ok(r);
+                }
+                Err(e) => {
+                    self.fall_back(&e)?;
+                    return Ok(None);
+                }
+            }
+        }
+        if self.ctx.is_null() {
+            return Err(Error::Unsupported("decoder closed after a failure".into()));
+        }
         // SAFETY: ctx is open; frame valid.
         let r = unsafe { ff::avcodec_receive_frame(self.ctx, frame.0) };
         if r == ff::AVERROR_EAGAIN {
@@ -247,8 +436,19 @@ impl Decoder {
     }
 
     pub fn flush(&mut self) {
-        // SAFETY: ctx is open.
-        unsafe { ff::avcodec_flush_buffers(self.ctx) };
+        #[cfg(target_os = "linux")]
+        if let Some(n) = self.native.as_mut() {
+            n.dec.flush();
+            if n.startup.is_some() {
+                n.startup = Some(Vec::new());
+            }
+            return;
+        }
+        self.replay.clear();
+        if !self.ctx.is_null() {
+            // SAFETY: ctx is open.
+            unsafe { ff::avcodec_flush_buffers(self.ctx) };
+        }
     }
 
     /// Best-effort presentation time of a decoded frame in seconds.
@@ -321,6 +521,39 @@ mod tests {
             }
         }
         (dec.name.clone(), out)
+    }
+
+    #[test]
+    fn candidate_order_and_fallbacks() {
+        use Candidate::*;
+        let hevc = ff::AV_CODEC_ID_HEVC;
+        assert_eq!(
+            candidates(true, hevc, HwDecode::Auto, true),
+            vec![NativeV4l2, Named(c"hevc_v4l2m2m", true), Default]
+        );
+        // After the native decoder fails (or with it disabled).
+        assert_eq!(
+            candidates(true, hevc, HwDecode::Auto, false),
+            vec![Named(c"hevc_v4l2m2m", true), Default]
+        );
+        assert_eq!(
+            candidates(true, ff::AV_CODEC_ID_H264, HwDecode::Auto, true)[0],
+            NativeV4l2
+        );
+        assert_eq!(candidates(true, hevc, HwDecode::Off, true), vec![Default]);
+        // Codecs the native decoder does not handle go to FFmpeg directly.
+        assert_eq!(
+            candidates(true, ff::AV_CODEC_ID_VP9, HwDecode::Auto, true),
+            vec![Named(c"vp9_v4l2m2m", true), Default]
+        );
+        assert_eq!(
+            candidates(true, ff::AV_CODEC_ID_AV1, HwDecode::Auto, true),
+            vec![Named(c"libdav1d", false), Default]
+        );
+        assert_eq!(
+            candidates(false, ff::AV_CODEC_ID_AAC, HwDecode::Auto, true),
+            vec![Default]
+        );
     }
 
     #[test]
