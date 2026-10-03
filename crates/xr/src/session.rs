@@ -64,9 +64,47 @@ pub struct XrContext {
     _entry: xr::Entry,
 }
 
+/// Candidate OpenXR loader paths, most specific first: a copy bundled next to
+/// the binary (`<exe dir>/../lib`), then the system's versioned soname (the
+/// only name runtime packages ship), then the unversioned dev symlink.
+// [verify] Whether SteamOS on the Frame ships libopenxr_loader.so.1 at all, or
+// whether native apps must bundle it (frameplayer-probe reports this).
+pub fn loader_candidates(exe: Option<&std::path::Path>) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    if let Some(lib) = exe
+        .and_then(|e| e.parent())
+        .and_then(|bin| bin.parent())
+        .map(|root| root.join("lib"))
+    {
+        out.push(lib.join("libopenxr_loader.so.1"));
+        out.push(lib.join("libopenxr_loader.so"));
+    }
+    out.push("libopenxr_loader.so.1".into());
+    out.push("libopenxr_loader.so".into());
+    out
+}
+
+fn load_loader() -> Result<xr::Entry, XrError> {
+    let exe = std::env::current_exe().ok();
+    let mut errors = Vec::new();
+    for path in loader_candidates(exe.as_deref()) {
+        if path.is_absolute() && !path.exists() {
+            continue;
+        }
+        match unsafe { xr::Entry::load_from(&path) } {
+            Ok(entry) => {
+                tracing::info!("OpenXR loader: {}", path.display());
+                return Ok(entry);
+            }
+            Err(e) => errors.push(format!("{}: {e}", path.display())),
+        }
+    }
+    Err(XrError::Load(errors.join("; ")))
+}
+
 impl XrContext {
     pub fn new(config: XrConfig) -> Result<XrContext, XrError> {
-        let entry = unsafe { xr::Entry::load() }.map_err(|e| XrError::Load(e.to_string()))?;
+        let entry = load_loader()?;
         let available_set = entry.enumerate_extensions()?;
         let available = ExtensionReport::from_available(&available_set);
         tracing::info!("OpenXR runtime extensions: {}", available.summary());
@@ -797,4 +835,22 @@ fn quad<'a>(
             width: size.x,
             height: size.y,
         })
+}
+
+#[cfg(test)]
+mod loader_tests {
+    use super::loader_candidates;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn bundled_copy_first_then_versioned_soname() {
+        let c = loader_candidates(Some(Path::new("/opt/fp/versions/1/bin/frameplayer")));
+        assert_eq!(
+            c[0],
+            PathBuf::from("/opt/fp/versions/1/lib/libopenxr_loader.so.1")
+        );
+        assert_eq!(c[2], PathBuf::from("libopenxr_loader.so.1"));
+        assert_eq!(c.last().unwrap(), &PathBuf::from("libopenxr_loader.so"));
+        assert_eq!(loader_candidates(None).len(), 2);
+    }
 }
