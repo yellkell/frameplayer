@@ -5,6 +5,10 @@ use crate::{Error, Result, XrContextExt};
 use ash::vk::{self, Handle};
 use openxr as xr;
 
+/// Defines `/interaction_profiles/valve/frame_controller_valve`. Not in the
+/// Khronos registry yet; SteamVR on the Steam Frame provides it.
+pub const FRAME_CONTROLLER_EXTENSION: &[u8] = b"XR_VALVE_frame_controller_interaction\0";
+
 pub struct XrContext {
     pub instance: xr::Instance,
     pub system: xr::SystemId,
@@ -39,6 +43,14 @@ impl XrContext {
         e.khr_composition_layer_cylinder = avail.khr_composition_layer_cylinder;
         e.khr_composition_layer_equirect2 = avail.khr_composition_layer_equirect2;
         e.khr_visibility_mask = avail.khr_visibility_mask;
+        // The Steam Frame controller profile only exists with this enabled.
+        if avail
+            .other
+            .iter()
+            .any(|n| n.as_slice() == FRAME_CONTROLLER_EXTENSION)
+        {
+            e.other.push(FRAME_CONTROLLER_EXTENSION.to_vec());
+        }
         let mut instance = None;
         let mut last = None;
         for api in [xr::Version::new(1, 1, 0), xr::Version::new(1, 0, 0)] {

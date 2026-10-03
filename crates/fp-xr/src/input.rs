@@ -1,10 +1,10 @@
 //! Controller input as actions, bound per interaction profile.
 //!
-//! The Steam Frame controller's component paths are not documented
-//! publicly, so every candidate binding is offered to the runtime on its own
-//! and only the accepted ones are suggested together. Unknown paths cost
-//! nothing; known profiles (Index, Touch, simple controller, hand
-//! interaction) are bound the same way as fallbacks.
+//! Every candidate binding is offered to the runtime on its own and only the
+//! accepted ones are suggested together, so a path a runtime does not know
+//! costs nothing. The Steam Frame profile comes first; Touch (what SteamVR
+//! presents the Frame controllers as without the Frame extension), the simple
+//! controller and hand interaction are bound the same way as fallbacks.
 
 use crate::{Result, XrContextExt};
 use glam::{Quat, Vec2, Vec3};
@@ -66,32 +66,19 @@ type Candidate = (&'static str, Kind, u8);
 /// Candidate bindings per interaction profile.
 const PROFILES: &[(&str, &[Candidate])] = &[
     (
+        // Valve's published Frame profile (ValveSoftware/Unity,
+        // SteamFrameControllerProfile.cs); needs
+        // XR_VALVE_frame_controller_interaction, enabled in context.rs.
         "/interaction_profiles/valve/frame_controller_valve",
         &[
             ("input/aim/pose", Kind::Aim, 3),
             ("input/trigger/value", Kind::Trigger, 3),
             ("input/squeeze/value", Kind::Squeeze, 3),
-            ("input/grip/value", Kind::Squeeze, 3),
             ("input/thumbstick", Kind::Stick, 3),
             ("input/a/click", Kind::Primary, 2),
             ("input/b/click", Kind::Secondary, 2),
-            ("input/x/click", Kind::Primary, 1),
-            ("input/y/click", Kind::Secondary, 1),
-            ("input/menu/click", Kind::Menu, 3),
+            ("input/menu/click", Kind::Menu, 2),
             ("input/view/click", Kind::Menu, 1),
-            ("output/haptic", Kind::Haptic, 3),
-        ],
-    ),
-    (
-        "/interaction_profiles/valve/index_controller",
-        &[
-            ("input/aim/pose", Kind::Aim, 3),
-            ("input/trigger/value", Kind::Trigger, 3),
-            ("input/squeeze/value", Kind::Squeeze, 3),
-            ("input/thumbstick", Kind::Stick, 3),
-            ("input/a/click", Kind::Primary, 3),
-            ("input/b/click", Kind::Secondary, 3),
-            ("input/system/click", Kind::Menu, 3),
             ("output/haptic", Kind::Haptic, 3),
         ],
     ),
