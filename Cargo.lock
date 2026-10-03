@@ -1575,7 +1575,7 @@ dependencies = [
 
 [[package]]
 name = "fp-app"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1613,7 +1613,7 @@ dependencies = [
 
 [[package]]
 name = "fp-audio"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "cpal",
  "fp-core",
@@ -1626,7 +1626,7 @@ dependencies = [
 
 [[package]]
 name = "fp-core"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "glam",
  "serde",
@@ -1636,7 +1636,7 @@ dependencies = [
 
 [[package]]
 name = "fp-gfx"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "ash",
  "bytemuck",
@@ -1649,7 +1649,7 @@ dependencies = [
 
 [[package]]
 name = "fp-haptics"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "async-trait",
  "axum",
@@ -1671,7 +1671,7 @@ dependencies = [
 
 [[package]]
 name = "fp-installer"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1705,7 +1705,7 @@ dependencies = [
 
 [[package]]
 name = "fp-library"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "async-trait",
  "fp-core",
@@ -1728,7 +1728,7 @@ dependencies = [
 
 [[package]]
 name = "fp-probe"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "ash",
  "cpal",
@@ -1748,7 +1748,7 @@ dependencies = [
 
 [[package]]
 name = "fp-remote"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "async-trait",
  "axum",
@@ -1769,7 +1769,7 @@ dependencies = [
 
 [[package]]
 name = "fp-sources"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1801,7 +1801,7 @@ dependencies = [
 
 [[package]]
 name = "fp-ui"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "fontdue",
  "fp-core",
@@ -1813,7 +1813,7 @@ dependencies = [
 
 [[package]]
 name = "fp-updater"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -1839,7 +1839,7 @@ dependencies = [
 
 [[package]]
 name = "fp-video"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "crossbeam-channel",
  "dav1d",
@@ -1857,7 +1857,7 @@ dependencies = [
 
 [[package]]
 name = "fp-xr"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "ash",
  "fp-core",
