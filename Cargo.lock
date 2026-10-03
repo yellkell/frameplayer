@@ -1220,6 +1220,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
+ "ureq",
  "zip",
 ]
 
