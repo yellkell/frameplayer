@@ -1,10 +1,62 @@
 //! Network and local sources: list, browse, add.
 
-use super::{Action, SourceForm, View, big_button, fmt_size, fmt_time, theme};
+use super::theme::{self, Weight};
+use super::widgets::{self, Kind};
+use super::{Action, SourceForm, View, fmt_size, fmt_time, icons};
 use crate::playback::OpenRequest;
-use egui::{RichText, Sense, Vec2};
+use egui::{Align, Align2, Color32, Layout, RichText, Sense, Vec2};
 use fp_core::source::EntryKind;
 use fp_sources::{Credentials, SourceConfig, SourceKind};
+
+fn kind_icon(kind: SourceKind) -> &'static str {
+    match kind {
+        SourceKind::Local => icons::HARD_DRIVE,
+        SourceKind::Http => icons::GLOBE,
+        SourceKind::WebDav => icons::CLOUD,
+        SourceKind::Dlna => icons::BROADCAST,
+        SourceKind::DeoVr | SourceKind::HereSphere => icons::DATABASE,
+        SourceKind::Smb => icons::SHARE_NETWORK,
+    }
+}
+
+/// A page title with an optional line under it and actions on the right.
+fn page_header(
+    ui: &mut egui::Ui,
+    title: &str,
+    subtitle: Option<&str>,
+    actions: impl FnOnce(&mut egui::Ui),
+) {
+    ui.add_space(12.0);
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+            ui.label(
+                RichText::new(title)
+                    .font(theme::font(Weight::Bold, 30.0))
+                    .color(theme::TEXT),
+            );
+            if let Some(s) = subtitle {
+                ui.label(RichText::new(s).color(theme::TEXT_2));
+            }
+        });
+        ui.with_layout(Layout::right_to_left(Align::Center), actions);
+    });
+    ui.add_space(14.0);
+}
+
+/// A rounded square holding an icon, the leading mark of a list row.
+fn icon_tile(ui: &mut egui::Ui, icon: &str, size: f32, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    ui.painter()
+        .rect_filled(rect, egui::CornerRadius::same(12), theme::SURFACE_3);
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        icon,
+        theme::icon(size * 0.5),
+        color,
+    );
+}
 
 pub fn sources(ui: &mut egui::Ui, v: &mut View) {
     if v.state.source_form.is_some() {
@@ -15,63 +67,103 @@ pub fn sources(ui: &mut egui::Ui, v: &mut View) {
         browse(ui, v);
         return;
     }
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Sources").heading());
-        if big_button(ui, "+ Add source", false).clicked() {
-            v.state.source_form = Some(SourceForm::default());
-        }
-    });
-    ui.label(
-        RichText::new(
-            "Browse network servers and drives. Videos you play are remembered in the library.",
-        )
-        .color(theme::MUTED),
+    page_header(
+        ui,
+        "Sources",
+        Some("Browse network servers and drives. Videos you play are remembered in the library."),
+        |ui| {
+            if widgets::button(ui, Some(icons::PLUS), "Add source", Kind::Primary).clicked() {
+                v.state.source_form = Some(SourceForm::default());
+            }
+        },
     );
-    ui.add_space(6.0);
     egui::ScrollArea::vertical().show(ui, |ui| {
-        let all: Vec<(String, String, String, bool)> = crate::services::builtin_sources()
-            .iter()
-            .map(|c| (c.id().to_string(), c.name().to_string(), c.describe(), true))
-            .chain(v.services.source_configs.iter().map(|c| {
-                (
-                    c.id().to_string(),
-                    c.name().to_string(),
-                    format!("{} · {}", c.kind().label(), c.describe()),
-                    false,
-                )
-            }))
-            .collect();
-        for (id, name, desc, builtin) in all {
-            egui::Frame::new()
-                .fill(theme::CARD_BG)
-                .corner_radius(12.0)
-                .inner_margin(12.0)
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(&name).size(22.0).strong());
-                            ui.label(RichText::new(&desc).color(theme::MUTED));
-                        });
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if !builtin
-                                && ui
-                                    .button(RichText::new("Remove").color(theme::ERROR))
-                                    .clicked()
-                            {
-                                v.actions.push(Action::RemoveSource(id.clone()));
-                            }
-                            if big_button(ui, "Browse", false).clicked() {
-                                v.actions.push(Action::Browse {
-                                    source: id.clone(),
-                                    location: None,
-                                });
-                            }
+        let all: Vec<(String, String, String, &'static str, bool)> =
+            crate::services::builtin_sources()
+                .iter()
+                .map(|c| {
+                    let icon = if c.id() == crate::services::REMOVABLE_SOURCE {
+                        icons::USB
+                    } else {
+                        icons::HARD_DRIVE
+                    };
+                    (
+                        c.id().to_string(),
+                        c.name().to_string(),
+                        c.describe(),
+                        icon,
+                        true,
+                    )
+                })
+                .chain(v.services.source_configs.iter().map(|c| {
+                    (
+                        c.id().to_string(),
+                        c.name().to_string(),
+                        format!("{} · {}", c.kind().label(), c.describe()),
+                        kind_icon(c.kind()),
+                        false,
+                    )
+                }))
+                .collect();
+        widgets::section_label(ui, "On this device and your network");
+        ui.add_space(4.0);
+        widgets::card(ui, |ui| {
+            for (i, (id, name, desc, icon, builtin)) in all.into_iter().enumerate() {
+                if i > 0 {
+                    let x = ui.max_rect().x_range();
+                    ui.painter().hline(
+                        (x.min + 84.0)..=(x.max - 16.0),
+                        ui.cursor().top(),
+                        egui::Stroke::new(1.0_f32, theme::STROKE),
+                    );
+                }
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::symmetric(16, 12))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 16.0;
+                            icon_tile(ui, icon, 52.0, theme::ACCENT_HOVER);
+                            ui.vertical(|ui| {
+                                ui.spacing_mut().item_spacing.y = 2.0;
+                                ui.label(
+                                    RichText::new(&name)
+                                        .font(theme::font(Weight::SemiBold, 19.0))
+                                        .color(theme::TEXT),
+                                );
+                                ui.label(
+                                    RichText::new(&desc)
+                                        .font(theme::font(Weight::Regular, 15.0))
+                                        .color(theme::TEXT_2),
+                                );
+                            });
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if !builtin
+                                    && widgets::icon_button(ui, icons::TRASH, 44.0, false)
+                                        .on_hover_text("Remove")
+                                        .clicked()
+                                {
+                                    v.actions.push(Action::RemoveSource(id.clone()));
+                                }
+                                if widgets::button_sized(
+                                    ui,
+                                    Some(icons::FOLDER_OPEN),
+                                    "Browse",
+                                    Kind::Secondary,
+                                    44.0,
+                                )
+                                .clicked()
+                                {
+                                    v.actions.push(Action::Browse {
+                                        source: id.clone(),
+                                        location: None,
+                                    });
+                                }
+                            });
                         });
                     });
-                });
-            ui.add_space(4.0);
-        }
+            }
+        });
     });
 }
 
@@ -87,8 +179,13 @@ fn browse(ui: &mut egui::Ui, v: &mut View) {
         .source(&source)
         .map(|s| s.name().to_string())
         .unwrap_or_else(|| source.clone());
+    ui.add_space(12.0);
     ui.horizontal(|ui| {
-        if big_button(ui, "◀ Back", false).clicked() {
+        ui.spacing_mut().item_spacing.x = 12.0;
+        if widgets::icon_button(ui, icons::ARROW_LEFT, 48.0, false)
+            .on_hover_text("Back")
+            .clicked()
+        {
             match v.state.browse.as_mut().and_then(|b| b.stack.pop()) {
                 Some(parent) => {
                     if let Some(b) = v.state.browse.as_mut() {
@@ -103,22 +200,41 @@ fn browse(ui: &mut egui::Ui, v: &mut View) {
                 None => v.state.browse = None,
             }
         }
-        ui.label(RichText::new(&name).heading());
-        if let Some(l) = &location {
-            ui.label(RichText::new(short_location(l)).color(theme::MUTED));
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui
-                .button("Add folder to library")
-                .on_hover_text("Index every video here so it shows in Library")
-                .clicked()
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.label(
+                RichText::new(&name)
+                    .font(theme::font(Weight::Bold, 26.0))
+                    .color(theme::TEXT),
+            );
+            if let Some(l) = &location {
+                ui.label(
+                    RichText::new(short_location(l))
+                        .font(theme::font(Weight::Regular, 15.0))
+                        .color(theme::TEXT_3),
+                );
+            }
+        });
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if widgets::button_sized(
+                ui,
+                Some(icons::PLUS),
+                "Add to library",
+                Kind::Secondary,
+                44.0,
+            )
+            .on_hover_text("Index every video here so it shows in Library")
+            .clicked()
             {
                 v.actions.push(Action::ImportFolder {
                     source: source.clone(),
                     location: location.clone(),
                 });
             }
-            if ui.button("⟳").clicked() {
+            if widgets::icon_button(ui, icons::ARROWS_CLOCKWISE, 44.0, false)
+                .on_hover_text("Refresh")
+                .clicked()
+            {
                 v.actions.push(Action::Browse {
                     source: source.clone(),
                     location: location.clone(),
@@ -126,71 +242,88 @@ fn browse(ui: &mut egui::Ui, v: &mut View) {
             }
         });
     });
+    ui.add_space(12.0);
     let Some(b) = v.state.browse.as_ref() else {
         return;
     };
     if b.loading {
         ui.horizontal(|ui| {
             ui.spinner();
-            ui.label("Loading…");
+            ui.label(RichText::new("Loading…").color(theme::TEXT_2));
         });
     }
     if let Some(e) = &b.error {
-        ui.label(RichText::new(e).color(theme::ERROR));
+        ui.label(RichText::new(format!("{}  {e}", icons::WARNING_CIRCLE)).color(theme::ERROR));
     }
     let entries = b.entries.clone();
     let mut go: Option<String> = None;
     egui::ScrollArea::vertical().show(ui, |ui| {
         if entries.is_empty() && !b.loading && b.error.is_none() {
-            ui.label(RichText::new("No videos or folders here.").color(theme::MUTED));
+            ui.add_space(30.0);
+            ui.vertical_centered(|ui| {
+                ui.label(RichText::new("No videos or folders here.").color(theme::TEXT_2));
+            });
         }
         for e in &entries {
             if e.kind == EntryKind::Other {
                 continue;
             }
             let (rect, resp) =
-                ui.allocate_exact_size(Vec2::new(ui.available_width(), 74.0), Sense::click());
+                ui.allocate_exact_size(Vec2::new(ui.available_width(), 88.0), Sense::click());
+            let t = ui
+                .ctx()
+                .animate_bool_with_time(resp.id, resp.hovered(), 0.12);
             let painter = ui.painter_at(rect);
-            if resp.hovered() {
-                painter.rect_filled(rect, 10.0, theme::CARD_BG);
-            }
+            painter.rect_filled(
+                rect,
+                egui::CornerRadius::same(14),
+                theme::SURFACE.gamma_multiply(t),
+            );
             let thumb =
-                egui::Rect::from_min_size(rect.min + Vec2::new(6.0, 5.0), Vec2::new(114.0, 64.0));
+                egui::Rect::from_min_size(rect.min + Vec2::new(10.0, 8.0), Vec2::new(128.0, 72.0));
             match e.kind {
                 EntryKind::Directory => {
+                    painter.rect_filled(thumb, egui::CornerRadius::same(10), theme::SURFACE_2);
                     painter.text(
                         thumb.center(),
-                        egui::Align2::CENTER_CENTER,
-                        "📁",
-                        egui::FontId::proportional(36.0),
+                        Align2::CENTER_CENTER,
+                        icons::FOLDER_SIMPLE,
+                        theme::icon_fill(34.0),
                         theme::WARN,
                     );
                 }
-                _ => {
-                    painter.rect_filled(thumb, 6.0, egui::Color32::from_rgb(20, 22, 30));
-                    if let Some(tex) = e.thumbnail_url.as_deref().and_then(|u| v.thumbs.get(u)) {
-                        super::thumbs::paint_cover(&painter, thumb, &tex);
-                    } else {
+                _ => match e.thumbnail_url.as_deref().and_then(|u| v.thumbs.get(u)) {
+                    Some(tex) => super::thumbs::paint_cover_rounded(&painter, thumb, &tex, 10),
+                    None => {
+                        painter.rect_filled(thumb, egui::CornerRadius::same(10), theme::SURFACE_2);
                         painter.text(
                             thumb.center(),
-                            egui::Align2::CENTER_CENTER,
-                            "▶",
-                            egui::FontId::proportional(26.0),
-                            theme::MUTED,
+                            Align2::CENTER_CENTER,
+                            icons::FILM_STRIP,
+                            theme::icon(28.0),
+                            theme::TEXT_3,
                         );
                     }
-                }
+                },
             }
+            let title = if e.kind == EntryKind::Directory {
+                e.name.clone()
+            } else {
+                widgets::display_title(&e.name)
+            };
             painter.text(
-                thumb.right_top() + Vec2::new(14.0, 6.0),
-                egui::Align2::LEFT_TOP,
-                &e.name,
-                egui::FontId::proportional(20.0),
-                egui::Color32::WHITE,
+                thumb.right_center() + Vec2::new(18.0, -12.0),
+                Align2::LEFT_CENTER,
+                title,
+                theme::font(Weight::SemiBold, 18.0),
+                theme::TEXT,
             );
             let mut facts = Vec::new();
+            if e.kind == EntryKind::Directory {
+                facts.push("Folder".to_string());
+            }
             if let Some(f) = e.format {
-                facts.push(f.label());
+                facts.push(widgets::format_short(&f));
             }
             if let Some(d) = e.duration {
                 facts.push(fmt_time(d));
@@ -202,11 +335,22 @@ fn browse(ui: &mut egui::Ui, v: &mut View) {
                 facts.push("haptics".into());
             }
             painter.text(
-                thumb.right_bottom() + Vec2::new(14.0, -6.0),
-                egui::Align2::LEFT_BOTTOM,
-                facts.join(" · "),
-                egui::FontId::proportional(16.0),
-                theme::MUTED,
+                thumb.right_center() + Vec2::new(18.0, 13.0),
+                Align2::LEFT_CENTER,
+                facts.join("  ·  "),
+                theme::font(Weight::Regular, 15.0),
+                theme::TEXT_2,
+            );
+            painter.text(
+                rect.right_center() - Vec2::new(24.0, 0.0),
+                Align2::CENTER_CENTER,
+                if e.kind == EntryKind::Directory {
+                    icons::CARET_RIGHT
+                } else {
+                    icons::PLAY
+                },
+                theme::icon(22.0),
+                theme::TEXT_3.lerp_to_gamma(Color32::WHITE, t),
             );
             if resp.clicked() {
                 match e.kind {
@@ -305,15 +449,28 @@ fn add_form(ui: &mut egui::Ui, v: &mut View) {
     let Some(f) = v.state.source_form.as_mut() else {
         return;
     };
+    ui.add_space(12.0);
     ui.horizontal(|ui| {
-        if big_button(ui, "◀ Cancel", false).clicked() {
+        ui.spacing_mut().item_spacing.x = 12.0;
+        if widgets::icon_button(ui, icons::ARROW_LEFT, 48.0, false)
+            .on_hover_text("Cancel")
+            .clicked()
+        {
             cancel = true;
         }
-        ui.label(RichText::new("Add a source").heading());
+        ui.label(
+            RichText::new("Add a source")
+                .font(theme::font(Weight::Bold, 30.0))
+                .color(theme::TEXT),
+        );
     });
+    ui.add_space(12.0);
+    widgets::section_label(ui, "Type");
+    ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
         for (k, _) in KINDS {
-            if ui.selectable_label(f.kind == k, k.label()).clicked() {
+            if widgets::chip_icon(ui, Some(kind_icon(k)), k.label(), f.kind == k).clicked() {
                 f.kind = k;
             }
         }
@@ -323,18 +480,9 @@ fn add_form(ui: &mut egui::Ui, v: &mut View) {
         .find(|(k, _)| *k == f.kind)
         .map(|(_, h)| *h)
         .unwrap_or("");
-    ui.label(RichText::new(help).color(theme::MUTED));
-    ui.add_space(6.0);
-    let field = |ui: &mut egui::Ui, label: &str, value: &mut String, password: bool| {
-        ui.horizontal(|ui| {
-            ui.add_sized([150.0, 36.0], egui::Label::new(label));
-            ui.add(
-                egui::TextEdit::singleline(value)
-                    .password(password)
-                    .desired_width(520.0),
-            );
-        });
-    };
+    ui.add_space(4.0);
+    ui.label(RichText::new(help).color(theme::TEXT_2));
+    ui.add_space(12.0);
     let id = format!(
         "{}-{}",
         format!("{:?}", f.kind).to_lowercase(),
@@ -343,7 +491,15 @@ fn add_form(ui: &mut egui::Ui, v: &mut View) {
     if f.kind == SourceKind::Dlna {
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(!searching, egui::Button::new("Search the network"))
+                .add_enabled_ui(!searching, |ui| {
+                    widgets::button(
+                        ui,
+                        Some(icons::MAGNIFYING_GLASS),
+                        "Search the network",
+                        Kind::Primary,
+                    )
+                })
+                .inner
                 .clicked()
             {
                 v.actions.push(Action::DiscoverDlna);
@@ -352,51 +508,95 @@ fn add_form(ui: &mut egui::Ui, v: &mut View) {
                 ui.spinner();
             }
         });
-        for d in &dlna_found {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(&d.friendly_name).strong());
-                ui.label(RichText::new(&d.manufacturer).color(theme::MUTED));
-                if ui.button("Add").clicked() {
-                    save = Some(SourceConfig::Dlna(d.to_config(id.clone())));
+        ui.add_space(8.0);
+        if dlna_found.is_empty() {
+            if !searching {
+                ui.label(RichText::new("No servers found yet.").color(theme::TEXT_3));
+            }
+        } else {
+            widgets::rows(ui, |r| {
+                for d in &dlna_found {
+                    r.row(&d.friendly_name, Some(d.manufacturer.as_str()), |ui| {
+                        if widgets::button_sized(
+                            ui,
+                            Some(icons::PLUS),
+                            "Add",
+                            Kind::Secondary,
+                            44.0,
+                        )
+                        .clicked()
+                        {
+                            save = Some(SourceConfig::Dlna(d.to_config(id.clone())));
+                        }
+                    });
                 }
             });
         }
-        if dlna_found.is_empty() && !searching {
-            ui.label(RichText::new("No servers found yet.").color(theme::MUTED));
-        }
     } else {
-        field(ui, "Name", &mut f.name, false);
-        let addr_label = if f.kind == SourceKind::Local {
-            "Folder"
-        } else {
-            "Address"
+        let local = f.kind == SourceKind::Local;
+        let smb = f.kind == SourceKind::Smb;
+        let field = |ui: &mut egui::Ui, value: &mut String, hint: &str, password: bool| {
+            ui.add(
+                egui::TextEdit::singleline(value)
+                    .password(password)
+                    .hint_text(hint)
+                    .font(theme::font(Weight::Regular, 17.0))
+                    .desired_width(460.0),
+            );
         };
-        field(ui, addr_label, &mut f.address, false);
-        if f.kind != SourceKind::Local {
-            field(ui, "User name", &mut f.username, false);
-            field(ui, "Password", &mut f.password, true);
-            if f.kind != SourceKind::Smb {
-                ui.checkbox(&mut f.insecure_tls, "Accept self-signed certificates");
+        widgets::rows(ui, |r| {
+            r.row(
+                "Name",
+                Some("Optional; the server's name otherwise."),
+                |ui| field(ui, &mut f.name, "", false),
+            );
+            r.row(if local { "Folder" } else { "Address" }, None, |ui| {
+                field(
+                    ui,
+                    &mut f.address,
+                    if local {
+                        "/run/media/deck/SDCARD/Videos"
+                    } else {
+                        "http://192.168.1.10:9999/deovr"
+                    },
+                    false,
+                )
+            });
+            if !local {
+                r.row("User name", Some("If the server asks for one."), |ui| {
+                    field(ui, &mut f.username, "", false)
+                });
+                r.row("Password", None, |ui| field(ui, &mut f.password, "", true));
+                if !smb {
+                    r.switch(
+                        "Accept self-signed certificates",
+                        Some("For HTTPS servers on your own network."),
+                        &mut f.insecure_tls,
+                    );
+                }
             }
-        }
-        ui.add_space(8.0);
-        match build_config(f, id) {
+        });
+        ui.add_space(12.0);
+        ui.horizontal(|ui| match build_config(f, id) {
             Ok(cfg) => {
-                if big_button(ui, "Save", false).clicked() {
+                if widgets::button(ui, Some(icons::CHECK), "Save", Kind::Primary).clicked() {
                     save = Some(cfg);
                 }
             }
             Err(e) => {
-                ui.add_enabled(false, egui::Button::new("Save"));
+                ui.add_enabled_ui(false, |ui| {
+                    widgets::button(ui, Some(icons::CHECK), "Save", Kind::Primary)
+                });
                 if !f.address.is_empty() {
                     ui.label(RichText::new(e).color(theme::WARN));
                 }
             }
-        }
+        });
+        ui.add_space(8.0);
         ui.label(
             RichText::new("Passwords are stored on this device only, in a file only you can read.")
-                .small()
-                .color(theme::MUTED),
+                .font(theme::font(Weight::Regular, 15.0))
+                .color(theme::TEXT_3),
         );
     }
     if let Some(cfg) = save {

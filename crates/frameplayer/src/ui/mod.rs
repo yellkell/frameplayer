@@ -318,14 +318,6 @@ pub struct View<'a> {
     pub devices: &'a [fp_haptics::DeviceStatus],
 }
 
-/// A big square-ish button used in the navigation and transport rows.
-pub fn big_button(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response {
-    let b = egui::Button::new(egui::RichText::new(text).size(21.0))
-        .selected(selected)
-        .min_size(egui::vec2(56.0, 48.0));
-    ui.add(b)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
