@@ -291,20 +291,11 @@ fn play_button(ui: &mut egui::Ui, paused: bool) -> egui::Response {
             r,
             theme::TEXT.lerp_to_gamma(Color32::WHITE, t),
         );
-        let icon = if paused { icons::PLAY } else { icons::PAUSE };
-        // The play triangle's weight sits left of its box: nudge it right.
-        let nudge = if paused {
-            Vec2::new(2.5, 0.0)
+        if paused {
+            widgets::play_mark(p, rect.center(), 30.0, theme::BG);
         } else {
-            Vec2::ZERO
-        };
-        p.text(
-            rect.center() + nudge,
-            egui::Align2::CENTER_CENTER,
-            icon,
-            theme::icon_fill(32.0),
-            theme::BG,
-        );
+            widgets::pause_mark(p, rect.center(), 28.0, theme::BG);
+        }
     }
     resp
 }

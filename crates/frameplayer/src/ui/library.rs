@@ -301,11 +301,10 @@ fn card(ui: &mut egui::Ui, v: &mut View, r: &MediaRecord) -> (bool, bool) {
             28.0,
             Color32::from_black_alpha((t * 150.0) as u8),
         );
-        painter.text(
-            img.center() + Vec2::new(2.0, 0.0),
-            Align2::CENTER_CENTER,
-            icons::PLAY,
-            theme::icon_fill(26.0),
+        widgets::play_mark(
+            painter,
+            img.center(),
+            24.0,
             Color32::from_white_alpha((t * 255.0) as u8),
         );
     }

@@ -637,6 +637,38 @@ pub fn shadow(painter: &egui::Painter, rect: Rect, radius: u8, strength: f32) {
     painter.add(s.as_shape(rect, CornerRadius::same(radius)));
 }
 
+/// A play triangle `size` tall, its centroid on `center` so it looks
+/// centred in a circle (a glyph's box centre sits too far left).
+pub fn play_mark(painter: &egui::Painter, center: Pos2, size: f32, color: Color32) {
+    let h = size;
+    let w = h * 0.88;
+    let left = center.x - w / 3.0;
+    let pts = vec![
+        Pos2::new(left, center.y - h / 2.0),
+        Pos2::new(left + w, center.y),
+        Pos2::new(left, center.y + h / 2.0),
+    ];
+    // A hairline in the same colour softens the points a little.
+    painter.add(egui::Shape::convex_polygon(
+        pts,
+        color,
+        Stroke::new(2.0_f32, color),
+    ));
+}
+
+/// A pause mark (two rounded bars) `size` tall, centred on `center`.
+pub fn pause_mark(painter: &egui::Painter, center: Pos2, size: f32, color: Color32) {
+    let bar = Vec2::new(size * 0.28, size);
+    let gap = size * 0.22;
+    for dx in [-(gap / 2.0 + bar.x / 2.0), gap / 2.0 + bar.x / 2.0] {
+        painter.rect_filled(
+            Rect::from_center_size(center + Vec2::new(dx, 0.0), bar),
+            CornerRadius::same((bar.x * 0.3) as u8),
+            color,
+        );
+    }
+}
+
 /// A small label on a translucent dark pill, for badges over pictures.
 pub fn badge(painter: &egui::Painter, text: &str, anchor: Pos2, align: Align2) {
     let g = painter.layout_no_wrap(
