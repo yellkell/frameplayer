@@ -242,6 +242,19 @@ captures (`IVRScreenshots` stereo shots over SSH):
 (`?layers=1`, `?noproj=1`) and has the scenes used to rule out other causes
 (`?transmission=1`, `?heavy=N`, `?aa=0`, `?bounded=1`).
 
+### Controller vibration: patch 0008
+
+Chromium gave XR input sources no vibration actuator (crbug.com/955097) and
+its OpenXR device had no haptics. Patch 0008 gives each immersive session's
+`inputSource.gamepad` a `vibrationActuator` whose `playEffect("dual-rumble",
+…)` plays the stronger of the two magnitudes for the effect's duration on
+that hand's `/output/haptic` (`xrApplyHapticFeedback`, unspecified
+frequency); `reset()` stops it. The effect resolves `"complete"` after its
+duration, or `"preempted"` when another effect or `reset()` replaces it.
+`gamepad.hapticActuators[0].pulse()` (the older extension) is not
+implemented. Run with `--vmodule=openxr_input_helper=1` to log each
+`xrApplyHapticFeedback` result.
+
 ## 9. What this does not solve
 
 - Anything SteamVR needs beyond these two items will only show up once the
@@ -252,5 +265,5 @@ captures (`IVRScreenshots` stereo shots over SSH):
 - `lstat("/proc/self")` through the broker now reports a directory rather
   than a symlink. glibc's `realpath` uses `readlink`, not `lstat`, so this
   does not affect canonicalisation.
-- Controller haptics, Widevine and the other limitations in saphid's README
-  are unrelated to the sandbox.
+- Widevine and the other limitations in saphid's README are unrelated to the
+  sandbox (controller haptics: patch 0008).

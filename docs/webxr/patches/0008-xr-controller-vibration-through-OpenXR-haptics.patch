@@ -1,0 +1,761 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Sat, 3 Oct 2026 23:30:00 +0000
+Subject: [PATCH 8/8] xr: controller vibration through OpenXR haptics
+
+WebXR pages vibrate controllers with
+inputSource.gamepad.vibrationActuator.playEffect("dual-rumble", ...), as
+on Meta Quest's browser. Chromium returned no actuator for XR input
+sources (crbug.com/955097) and its OpenXR device had no haptic output.
+
+- Blink: GamepadHapticActuator can play through a Delegate instead of the
+  gamepad service. XRInputSource is that delegate for immersive sessions:
+  each controller's gamepad gets a "dual-rumble" actuator that plays the
+  stronger of the two magnitudes for the effect's duration (after its
+  start delay), resolves "complete" when the duration is over, and
+  "preempted" when another effect or reset() replaces it.
+- XRPresentationProvider.ApplyHapticFeedback(source_id, amplitude,
+  duration) carries it to the device; zero amplitude or duration stops.
+- OpenXR: one vibration output action per hand, bound to
+  /user/hand/{left,right}/output/haptic for every controller profile that
+  has it (not the hand-tracking profiles), played with
+  xrApplyHapticFeedback (unspecified frequency) and stopped with
+  xrStopHapticFeedback. --vmodule=openxr_input_helper=1 logs each result.
+- ARCore and Cardboard ignore it; the fake OpenXR runtime accepts
+  vibration actions.
+
+Applies on top of 0006 (and IWFDK's 0004).
+
+Bug: 955097
+---
+ device/vr/android/arcore/arcore_gl.h               |   4 +
+ .../vr/android/cardboard/cardboard_render_loop.h   |   4 +
+ device/vr/openxr/openxr_api_wrapper.cc             |   8 ++
+ device/vr/openxr/openxr_api_wrapper.h              |   3 +
+ device/vr/openxr/openxr_controller.cc              |  55 +++++++++++
+ device/vr/openxr/openxr_controller.h               |   6 ++
+ device/vr/openxr/openxr_input_helper.cc            |  14 +++
+ device/vr/openxr/openxr_input_helper.h             |   7 ++
+ device/vr/openxr/openxr_render_loop.cc             |   8 ++
+ device/vr/openxr/openxr_render_loop.h              |   3 +
+ device/vr/openxr/test/openxr_test_helper.cc        |  10 +-
+ device/vr/public/mojom/vr_service.mojom            |   7 ++
+ .../modules/gamepad/gamepad_haptic_actuator.cc     |  43 +++++++--
+ .../modules/gamepad/gamepad_haptic_actuator.h      |  23 +++++
+ third_party/blink/renderer/modules/xr/DEPS         |   1 +
+ .../blink/renderer/modules/xr/xr_frame_provider.cc |  12 +++
+ .../blink/renderer/modules/xr/xr_frame_provider.h  |   7 ++
+ .../blink/renderer/modules/xr/xr_input_source.cc   | 104 +++++++++++++++++++++
+ .../blink/renderer/modules/xr/xr_input_source.h    |  34 +++++--
+ 19 files changed, 335 insertions(+), 18 deletions(-)
+
+diff --git a/device/vr/android/arcore/arcore_gl.h b/device/vr/android/arcore/arcore_gl.h
+index 2959ab66c8..73bcb2f49d 100644
+--- a/device/vr/android/arcore/arcore_gl.h
++++ b/device/vr/android/arcore/arcore_gl.h
+@@ -162,6 +162,10 @@ class ArCoreGl : public mojom::XRFrameDataProvider,
+                          const gfx::RectF& left_bounds,
+                          const gfx::RectF& right_bounds,
+                          const gfx::Size& source_size) override;
++  // Handheld AR has no controllers to vibrate.
++  void ApplyHapticFeedback(uint32_t source_id,
++                           float amplitude,
++                           base::TimeDelta duration) override {}
+ 
+   // XREnvironmentIntegrationProvider
+   void SubscribeToHitTest(
+diff --git a/device/vr/android/cardboard/cardboard_render_loop.h b/device/vr/android/cardboard/cardboard_render_loop.h
+index 9679f881cb..420ba9fa74 100644
+--- a/device/vr/android/cardboard/cardboard_render_loop.h
++++ b/device/vr/android/cardboard/cardboard_render_loop.h
+@@ -82,6 +82,10 @@ class CardboardRenderLoop : public base::android::JavaHandlerThread,
+       std::vector<device::mojom::XRLayerUpdatePtr> layer_updates,
+       gpu::SharedImageExportResult camera_export_multi_result,
+       base::TimeDelta time_waited) override;
++  // Cardboard has no controllers to vibrate.
++  void ApplyHapticFeedback(uint32_t source_id,
++                           float amplitude,
++                           base::TimeDelta duration) override {}
+ 
+   // mojom::XRSessionController
+   void SetFrameDataRestricted(bool restricted) override;
+diff --git a/device/vr/openxr/openxr_api_wrapper.cc b/device/vr/openxr/openxr_api_wrapper.cc
+index a763d965c3..1877559311 100644
+--- a/device/vr/openxr/openxr_api_wrapper.cc
++++ b/device/vr/openxr/openxr_api_wrapper.cc
+@@ -1480,6 +1480,14 @@ void OpenXrApiWrapper::OnHideInputSources() {
+   input_helper_->OnHideInputSources();
+ }
+ 
++void OpenXrApiWrapper::ApplyHapticFeedback(uint32_t source_id,
++                                           float amplitude,
++                                           base::TimeDelta duration) {
++  if (input_helper_) {
++    input_helper_->ApplyHapticFeedback(source_id, amplitude, duration);
++  }
++}
++
+ void OpenXrApiWrapper::PollFuture(
+     XrFutureEXT future,
+     base::OnceCallback<void(XrFutureEXT)> on_ready_callback) {
+diff --git a/device/vr/openxr/openxr_api_wrapper.h b/device/vr/openxr/openxr_api_wrapper.h
+index 79040c1962..ddc5e50eff 100644
+--- a/device/vr/openxr/openxr_api_wrapper.h
++++ b/device/vr/openxr/openxr_api_wrapper.h
+@@ -113,6 +113,9 @@ class OpenXrApiWrapper {
+   mojom::VRPosePtr GetViewerPose() const;
+   std::vector<mojom::XRInputSourceStatePtr> GetInputState();
+   void OnHideInputSources();
++  void ApplyHapticFeedback(uint32_t source_id,
++                           float amplitude,
++                           base::TimeDelta duration);
+ 
+   std::vector<mojom::XRViewPtr> GetDefaultViews() const;
+   float RecommendedViewportScale() const;
+diff --git a/device/vr/openxr/openxr_controller.cc b/device/vr/openxr/openxr_controller.cc
+index b5dd891ad3..fbf148541f 100644
+--- a/device/vr/openxr/openxr_controller.cc
++++ b/device/vr/openxr/openxr_controller.cc
+@@ -6,6 +6,8 @@
+ 
+ #include <stdint.h>
+ 
++#include <algorithm>
++
+ #include "base/check.h"
+ #include "base/compiler_specific.h"
+ #include "base/containers/span.h"
+@@ -141,6 +143,29 @@ const char* GetStringFromInteractionProfile(
+   }
+ }
+ 
++// Whether the interaction profile has an "/output/haptic" path on each hand.
++// A runtime rejects all of a profile's suggested bindings if one of them is
++// not part of the profile, so only these get a haptic binding.
++bool HasHapticOutput(mojom::OpenXrInteractionProfileType profile) {
++  switch (profile) {
++    case mojom::OpenXrInteractionProfileType::kMicrosoftMotion:
++    case mojom::OpenXrInteractionProfileType::kKHRSimple:
++    case mojom::OpenXrInteractionProfileType::kOculusTouch:
++    case mojom::OpenXrInteractionProfileType::kValveIndex:
++    case mojom::OpenXrInteractionProfileType::kHTCVive:
++    case mojom::OpenXrInteractionProfileType::kSamsungOdyssey:
++    case mojom::OpenXrInteractionProfileType::kHPReverbG2:
++    case mojom::OpenXrInteractionProfileType::kViveCosmos:
++    case mojom::OpenXrInteractionProfileType::kValveFrame:
++      return true;
++    case mojom::OpenXrInteractionProfileType::kInvalid:
++    case mojom::OpenXrInteractionProfileType::kHandSelectGrasp:
++    case mojom::OpenXrInteractionProfileType::kExtHand:
++    case mojom::OpenXrInteractionProfileType::kMetaHandAim:
++      return false;
++  }
++}
++
+ // Gamepad slots 4 onwards of a Steam Frame controller, after the xr-standard
+ // trigger, squeeze, touchpad (placeholder) and thumbstick. Slots 4-6 follow
+ // the Meta Touch layout ("oculus-touch-v3", the profile reported after
+@@ -283,6 +308,10 @@ XrResult OpenXrController::InitializeControllerActions() {
+                                    name_prefix + "aim_pose",
+                                    &pointer_pose_action_));
+ 
++  // Haptic Action
++  RETURN_IF_XR_FAILED(CreateAction(XR_ACTION_TYPE_VIBRATION_OUTPUT,
++                                   name_prefix + "haptic", &haptic_action_));
++
+   return XR_SUCCESS;
+ }
+ 
+@@ -327,6 +356,11 @@ XrResult OpenXrController::SuggestBindings(
+     RETURN_IF_XR_FAILED(SuggestActionBinding(
+         bindings, interaction_profile_path, pointer_pose_action_,
+         binding_prefix + "/input/aim/pose"));
++    if (HasHapticOutput(interaction_profile.type)) {
++      RETURN_IF_XR_FAILED(SuggestActionBinding(
++          bindings, interaction_profile_path, haptic_action_,
++          binding_prefix + "/output/haptic"));
++    }
+ 
+     RETURN_IF_XR_FAILED(SuggestBindingsForButtonMaps(
+         bindings, interaction_profile.common_button_maps,
+@@ -766,6 +800,27 @@ XrResult OpenXrController::CreateActionsForButton(
+   return XR_SUCCESS;
+ }
+ 
++XrResult OpenXrController::ApplyHapticFeedback(float amplitude,
++                                               base::TimeDelta duration) {
++  if (haptic_action_ == XR_NULL_HANDLE) {
++    return XR_ERROR_HANDLE_INVALID;
++  }
++
++  XrHapticActionInfo action_info = {XR_TYPE_HAPTIC_ACTION_INFO};
++  action_info.action = haptic_action_;
++  if (amplitude <= 0.0f || !duration.is_positive()) {
++    return xrStopHapticFeedback(session_, &action_info);
++  }
++
++  XrHapticVibration vibration = {XR_TYPE_HAPTIC_VIBRATION};
++  vibration.duration = duration.InNanoseconds();
++  vibration.frequency = XR_FREQUENCY_UNSPECIFIED;
++  vibration.amplitude = std::min(amplitude, 1.0f);
++  return xrApplyHapticFeedback(
++      session_, &action_info,
++      reinterpret_cast<const XrHapticBaseHeader*>(&vibration));
++}
++
+ XrResult OpenXrController::CreateAction(XrActionType type,
+                                         const std::string& action_name,
+                                         XrAction* action) {
+diff --git a/device/vr/openxr/openxr_controller.h b/device/vr/openxr/openxr_controller.h
+index 9e58392d75..87da6f834e 100644
+--- a/device/vr/openxr/openxr_controller.h
++++ b/device/vr/openxr/openxr_controller.h
+@@ -14,6 +14,7 @@
+ #include <vector>
+ 
+ #include "base/memory/raw_ptr.h"
++#include "base/time/time.h"
+ #include "device/gamepad/public/cpp/gamepad.h"
+ #include "device/vr/openxr/openxr_hand_tracker.h"
+ #include "device/vr/openxr/openxr_interaction_profiles.h"
+@@ -79,6 +80,10 @@ class OpenXrController {
+ 
+   void Update(XrSpace base_space, XrTime predicted_display_time);
+ 
++  // Vibrates the controller at |amplitude| (0 to 1) for |duration|, replacing
++  // any vibration already playing; a zero |amplitude| or |duration| stops it.
++  XrResult ApplyHapticFeedback(float amplitude, base::TimeDelta duration);
++
+  private:
+   XrResult InitializeControllerActions();
+   XrResult InitializeControllerSpaces();
+@@ -169,6 +174,7 @@ class OpenXrController {
+   XrSpace grip_pose_space_;
+   XrAction pointer_pose_action_;
+   XrSpace pointer_pose_space_;
++  XrAction haptic_action_ = XR_NULL_HANDLE;
+ 
+   std::unique_ptr<OpenXrHandTracker> hand_tracker_;
+ 
+diff --git a/device/vr/openxr/openxr_input_helper.cc b/device/vr/openxr/openxr_input_helper.cc
+index b353f9f798..027860fba6 100644
+--- a/device/vr/openxr/openxr_input_helper.cc
++++ b/device/vr/openxr/openxr_input_helper.cc
+@@ -131,6 +131,20 @@ void OpenXRInputHelper::OnHideInputSources() {
+   ResetControllerButtonState();
+ }
+ 
++void OpenXRInputHelper::ApplyHapticFeedback(uint32_t source_id,
++                                            float amplitude,
++                                            base::TimeDelta duration) {
++  // Source ids are the controller index plus one; see GetInputState().
++  if (source_id == 0 || source_id > controller_states_.size()) {
++    return;
++  }
++  XrResult result =
++      controller_states_[source_id - 1].controller.ApplyHapticFeedback(
++          amplitude, duration);
++  VLOG(1) << __func__ << " source " << source_id << " amplitude " << amplitude
++          << " duration " << duration << ": " << result;
++}
++
+ void OpenXRInputHelper::ResetControllerButtonState() {
+   for (OpenXrControllerState& state : controller_states_) {
+     state.primary_button_pressed = false;
+diff --git a/device/vr/openxr/openxr_input_helper.h b/device/vr/openxr/openxr_input_helper.h
+index dbf5538580..9c67f65689 100644
+--- a/device/vr/openxr/openxr_input_helper.h
++++ b/device/vr/openxr/openxr_input_helper.h
+@@ -10,6 +10,7 @@
+ #include <optional>
+ #include <vector>
+ 
++#include "base/time/time.h"
+ #include "device/vr/openxr/openxr_controller.h"
+ #include "device/vr/openxr/openxr_interaction_profiles.h"
+ #include "device/vr/public/mojom/vr_service.mojom-forward.h"
+@@ -52,6 +53,12 @@ class OpenXRInputHelper {
+   // Called when the device is going to hide input sources from the page.
+   void OnHideInputSources();
+ 
++  // Vibrates the controller of the input source |source_id| (as reported by
++  // GetInputState); a zero |amplitude| or |duration| stops it.
++  void ApplyHapticFeedback(uint32_t source_id,
++                           float amplitude,
++                           base::TimeDelta duration);
++
+   std::optional<XrLocation> GetXrLocationFromHandJoint(
+       XrSpace mojo_space,
+       const mojom::XRHandJointSpaceInfo& hand_joint_space_info,
+diff --git a/device/vr/openxr/openxr_render_loop.cc b/device/vr/openxr/openxr_render_loop.cc
+index 32b0eeb353..c73003e4a8 100644
+--- a/device/vr/openxr/openxr_render_loop.cc
++++ b/device/vr/openxr/openxr_render_loop.cc
+@@ -604,6 +604,14 @@ void OpenXrRenderLoop::UpdateLayerBounds(int16_t frame_id,
+   }
+ }
+ 
++void OpenXrRenderLoop::ApplyHapticFeedback(uint32_t source_id,
++                                           float amplitude,
++                                           base::TimeDelta duration) {
++  if (openxr_) {
++    openxr_->ApplyHapticFeedback(source_id, amplitude, duration);
++  }
++}
++
+ void OpenXrRenderLoop::SubmitOverlayTexture(
+     int16_t frame_id,
+     gfx::GpuMemoryBufferHandle texture,
+diff --git a/device/vr/openxr/openxr_render_loop.h b/device/vr/openxr/openxr_render_loop.h
+index d06f622229..7c60d74790 100644
+--- a/device/vr/openxr/openxr_render_loop.h
++++ b/device/vr/openxr/openxr_render_loop.h
+@@ -166,6 +166,9 @@ class OpenXrRenderLoop : public XRThread,
+                          const gfx::RectF& left_bounds,
+                          const gfx::RectF& right_bounds,
+                          const gfx::Size& source_size) override;
++  void ApplyHapticFeedback(uint32_t source_id,
++                           float amplitude,
++                           base::TimeDelta duration) override;
+ 
+   // ImmersiveOverlay:
+   void SubmitOverlayTexture(int16_t frame_id,
+diff --git a/device/vr/openxr/test/openxr_test_helper.cc b/device/vr/openxr/test/openxr_test_helper.cc
+index 2ffce45007..53ed7218d4 100644
+--- a/device/vr/openxr/test/openxr_test_helper.cc
++++ b/device/vr/openxr/test/openxr_test_helper.cc
+@@ -644,6 +644,10 @@ XrResult OpenXrTestHelper::CreateAction(XrActionSet action_set,
+       pose_action_state_[cur_action];
+       break;
+     }
++    case XR_ACTION_TYPE_VIBRATION_OUTPUT: {
++      // Output only: there is no state to report.
++      break;
++    }
+     default: {
+       LOG(ERROR)
+           << __FUNCTION__
+@@ -1081,8 +1085,10 @@ XrResult OpenXrTestHelper::UpdateAction(XrAction action) {
+   XrPath interaction_profile_path = GetPath(interaction_profile_);
+ 
+   if (cur_action_properties.profile_binding_map.count(
+-          interaction_profile_path) == 0) {
+-    // Only update actions that have binding for current interaction_profile_
++          interaction_profile_path) == 0 ||
++      cur_action_properties.type == XR_ACTION_TYPE_VIBRATION_OUTPUT) {
++    // Only update input actions that have binding for current
++    // interaction_profile_
+     return XR_SUCCESS;
+   }
+ 
+diff --git a/device/vr/public/mojom/vr_service.mojom b/device/vr/public/mojom/vr_service.mojom
+index 82e0c5da97..e118c76cac 100644
+--- a/device/vr/public/mojom/vr_service.mojom
++++ b/device/vr/public/mojom/vr_service.mojom
+@@ -1246,6 +1246,13 @@ interface XRPresentationProvider {
+       array<XRLayerUpdate> layer_updates,
+       gpu.mojom.SharedImageExportResult camera_export_multi_result,
+       mojo_base.mojom.TimeDelta time_waited);
++
++  // Vibrates the controller of the input source |source_id| (the id from its
++  // XRInputSourceState) at |amplitude|, 0 to 1, for |duration|, replacing any
++  // vibration already playing on it. A zero amplitude or duration stops it.
++  // Runtimes without controller haptics ignore this.
++  ApplyHapticFeedback(uint32 source_id, float amplitude,
++                      mojo_base.mojom.TimeDelta duration);
+ };
+ 
+ // After submitting a frame, the XRPresentationProvider will notify the client
+diff --git a/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.cc b/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.cc
+index 93bd6dd26e..4e23fdaba0 100644
+--- a/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.cc
++++ b/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.cc
+@@ -64,6 +64,15 @@ GamepadHapticActuator::GamepadHapticActuator(
+   SetType(type);
+ }
+ 
++GamepadHapticActuator::GamepadHapticActuator(
++    ExecutionContext& context,
++    Delegate* delegate,
++    device::GamepadHapticActuatorType type)
++    : ExecutionContextClient(&context), pad_index_(-1), delegate_(delegate) {
++  DCHECK(delegate_);
++  SetType(type);
++}
++
+ GamepadHapticActuator::~GamepadHapticActuator() = default;
+ 
+ void GamepadHapticActuator::SetType(device::GamepadHapticActuatorType type) {
+@@ -120,13 +129,18 @@ ScriptPromise<V8GamepadHapticsResult> GamepadHapticActuator::playEffect(
+   auto callback = BindOnce(&GamepadHapticActuator::OnPlayEffectCompleted,
+                            WrapPersistent(this), WrapPersistent(resolver));
+ 
+-  gamepad_dispatcher_->PlayVibrationEffectOnce(
+-      pad_index_, EffectTypeFromEnum(type.AsEnum()),
+-      device::mojom::blink::GamepadEffectParameters::New(
+-          params->duration(), params->startDelay(), params->strongMagnitude(),
+-          params->weakMagnitude(), params->leftTrigger(),
+-          params->rightTrigger()),
+-      std::move(callback));
++  auto effect_params = device::mojom::blink::GamepadEffectParameters::New(
++      params->duration(), params->startDelay(), params->strongMagnitude(),
++      params->weakMagnitude(), params->leftTrigger(), params->rightTrigger());
++  if (delegate_) {
++    delegate_->PlayVibrationEffectOnce(EffectTypeFromEnum(type.AsEnum()),
++                                       std::move(effect_params),
++                                       std::move(callback));
++  } else {
++    gamepad_dispatcher_->PlayVibrationEffectOnce(
++        pad_index_, EffectTypeFromEnum(type.AsEnum()),
++        std::move(effect_params), std::move(callback));
++  }
+ 
+   return promise;
+ }
+@@ -163,7 +177,12 @@ void GamepadHapticActuator::OnPlayEffectCompleted(
+ void GamepadHapticActuator::ResetVibrationIfNotPreempted() {
+   if (should_reset_) {
+     should_reset_ = false;
+-    gamepad_dispatcher_->ResetVibrationActuator(pad_index_, base::DoNothing());
++    if (delegate_) {
++      delegate_->ResetVibrationActuator(base::DoNothing());
++    } else {
++      gamepad_dispatcher_->ResetVibrationActuator(pad_index_,
++                                                  base::DoNothing());
++    }
+   }
+ }
+ 
+@@ -176,7 +195,12 @@ ScriptPromise<V8GamepadHapticsResult> GamepadHapticActuator::reset(
+   auto callback = BindOnce(&GamepadHapticActuator::OnResetCompleted,
+                            WrapPersistent(this), WrapPersistent(resolver));
+ 
+-  gamepad_dispatcher_->ResetVibrationActuator(pad_index_, std::move(callback));
++  if (delegate_) {
++    delegate_->ResetVibrationActuator(std::move(callback));
++  } else {
++    gamepad_dispatcher_->ResetVibrationActuator(pad_index_,
++                                                std::move(callback));
++  }
+ 
+   return resolver->Promise();
+ }
+@@ -193,6 +217,7 @@ void GamepadHapticActuator::OnResetCompleted(
+ 
+ void GamepadHapticActuator::Trace(Visitor* visitor) const {
+   visitor->Trace(gamepad_dispatcher_);
++  visitor->Trace(delegate_);
+   ScriptWrappable::Trace(visitor);
+   ExecutionContextClient::Trace(visitor);
+ }
+diff --git a/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.h b/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.h
+index ac1abf9f64..d36ea926d5 100644
+--- a/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.h
++++ b/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.h
+@@ -5,6 +5,7 @@
+ #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_GAMEPAD_GAMEPAD_HAPTIC_ACTUATOR_H_
+ #define THIRD_PARTY_BLINK_RENDERER_MODULES_GAMEPAD_GAMEPAD_HAPTIC_ACTUATOR_H_
+ 
++#include "base/functional/callback.h"
+ #include "device/gamepad/public/cpp/gamepad.h"
+ #include "device/gamepad/public/mojom/gamepad.mojom-blink-forward.h"
+ #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
+@@ -32,9 +33,29 @@ class GamepadHapticActuator final : public ScriptWrappable,
+   DEFINE_WRAPPERTYPEINFO();
+ 
+  public:
++  // Plays effects on a device the gamepad service doesn't manage: the
++  // controllers of an immersive WebXR session (see XRInputSource).
++  class Delegate : public GarbageCollectedMixin {
++   public:
++    using Callback =
++        base::OnceCallback<void(device::mojom::GamepadHapticsResult)>;
++
++    virtual void PlayVibrationEffectOnce(
++        device::mojom::GamepadHapticEffectType,
++        device::mojom::blink::GamepadEffectParametersPtr,
++        Callback) = 0;
++    virtual void ResetVibrationActuator(Callback) = 0;
++
++   protected:
++    virtual ~Delegate() = default;
++  };
++
+   GamepadHapticActuator(ExecutionContext& context,
+                         int pad_index,
+                         device::GamepadHapticActuatorType type);
++  GamepadHapticActuator(ExecutionContext& context,
++                        Delegate* delegate,
++                        device::GamepadHapticActuatorType type);
+   ~GamepadHapticActuator() override;
+ 
+   const Vector<V8GamepadHapticEffectType>& effects() const {
+@@ -67,7 +88,9 @@ class GamepadHapticActuator final : public ScriptWrappable,
+   bool should_reset_ = false;
+   Vector<V8GamepadHapticEffectType> supported_effects_;
+ 
++  // Exactly one of these is set.
+   Member<GamepadDispatcher> gamepad_dispatcher_;
++  Member<Delegate> delegate_;
+ };
+ 
+ typedef HeapVector<Member<GamepadHapticActuator>> GamepadHapticActuatorVector;
+diff --git a/third_party/blink/renderer/modules/xr/DEPS b/third_party/blink/renderer/modules/xr/DEPS
+index 085eff78a7..9cb851a44d 100644
+--- a/third_party/blink/renderer/modules/xr/DEPS
++++ b/third_party/blink/renderer/modules/xr/DEPS
+@@ -1,4 +1,5 @@
+ include_rules = [
++    "+device/gamepad/public/mojom/gamepad.mojom-blink.h",
+     "+mojo/public/cpp/system/platform_handle.h",
+     "+device/vr/buildflags/buildflags.h",
+     "+device/vr/public/cpp/features.h",
+diff --git a/third_party/blink/renderer/modules/xr/xr_frame_provider.cc b/third_party/blink/renderer/modules/xr/xr_frame_provider.cc
+index 9801d3d02b..9e3901c42d 100644
+--- a/third_party/blink/renderer/modules/xr/xr_frame_provider.cc
++++ b/third_party/blink/renderer/modules/xr/xr_frame_provider.cc
+@@ -811,6 +811,18 @@ void XRFrameProvider::UpdateLayerViewports(XRProjectionLayer* layer) {
+       frame_id_, left_coords, right_coords, gfx::Size(width, height));
+ }
+ 
++void XRFrameProvider::ApplyHapticFeedback(XRSession* session,
++                                          uint32_t source_id,
++                                          float amplitude,
++                                          base::TimeDelta duration) {
++  if (session != immersive_session_ ||
++      !immersive_presentation_provider_.is_bound()) {
++    return;
++  }
++  immersive_presentation_provider_->ApplyHapticFeedback(source_id, amplitude,
++                                                        duration);
++}
++
+ void XRFrameProvider::ClearCachedLayersData() {
+   any_layer_changed_ = false;
+   layers_.clear();
+diff --git a/third_party/blink/renderer/modules/xr/xr_frame_provider.h b/third_party/blink/renderer/modules/xr/xr_frame_provider.h
+index bc339c619a..6086072682 100644
+--- a/third_party/blink/renderer/modules/xr/xr_frame_provider.h
++++ b/third_party/blink/renderer/modules/xr/xr_frame_provider.h
+@@ -83,6 +83,13 @@ class XRFrameProvider final : public GarbageCollected<XRFrameProvider> {
+   void Dispose();
+   void OnFocusChanged();
+ 
++  // Vibrates the controller of input source |source_id| of the immersive
++  // |session|; see XRPresentationProvider::ApplyHapticFeedback.
++  void ApplyHapticFeedback(XRSession* session,
++                           uint32_t source_id,
++                           float amplitude,
++                           base::TimeDelta duration);
++
+   device::mojom::blink::XRFrameDataProvider* GetImmersiveDataProvider() {
+     return immersive_data_provider_.get();
+   }
+diff --git a/third_party/blink/renderer/modules/xr/xr_input_source.cc b/third_party/blink/renderer/modules/xr/xr_input_source.cc
+index e5c3695318..60d8dcb788 100644
+--- a/third_party/blink/renderer/modules/xr/xr_input_source.cc
++++ b/third_party/blink/renderer/modules/xr/xr_input_source.cc
+@@ -4,8 +4,13 @@
+ 
+ #include "third_party/blink/renderer/modules/xr/xr_input_source.h"
+ 
++#include <algorithm>
++
++#include "base/task/single_thread_task_runner.h"
+ #include "base/time/time.h"
++#include "device/gamepad/public/mojom/gamepad.mojom-blink.h"
+ #include "third_party/blink/public/mojom/frame/user_activation_notification_type.mojom-blink.h"
++#include "third_party/blink/public/platform/task_type.h"
+ #include "third_party/blink/renderer/bindings/core/v8/frozen_array.h"
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_xr_handedness.h"
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_xr_target_ray_mode.h"
+@@ -19,6 +24,7 @@
+ #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
+ #include "third_party/blink/renderer/core/input/event_handling_util.h"
+ #include "third_party/blink/renderer/core/layout/hit_test_location.h"
++#include "third_party/blink/renderer/modules/xr/xr_frame_provider.h"
+ #include "third_party/blink/renderer/modules/xr/xr_grip_space.h"
+ #include "third_party/blink/renderer/modules/xr/xr_hand.h"
+ #include "third_party/blink/renderer/modules/xr/xr_input_source_event.h"
+@@ -28,7 +34,9 @@
+ #include "third_party/blink/renderer/modules/xr/xr_system.h"
+ #include "third_party/blink/renderer/modules/xr/xr_target_ray_space.h"
+ #include "third_party/blink/renderer/modules/xr/xr_utils.h"
++#include "third_party/blink/renderer/platform/heap/persistent.h"
+ #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
++#include "third_party/blink/renderer/platform/wtf/functional.h"
+ 
+ namespace blink {
+ 
+@@ -248,6 +256,101 @@ void XRInputSource::UpdateGamepad(
+   }
+ }
+ 
++GamepadHapticActuator* XRInputSource::GetVibrationActuatorForGamepad(
++    const Gamepad&) {
++  // Only immersive sessions talk to a device that can vibrate controllers.
++  if (!session_->immersive()) {
++    return nullptr;
++  }
++  if (!vibration_actuator_) {
++    LocalDOMWindow* window = session_->xr()->DomWindow();
++    if (!window) {
++      return nullptr;
++    }
++    vibration_actuator_ = MakeGarbageCollected<GamepadHapticActuator>(
++        *window, this, device::GamepadHapticActuatorType::kDualRumble);
++  }
++  return vibration_actuator_.Get();
++}
++
++void XRInputSource::PlayVibrationEffectOnce(
++    device::mojom::GamepadHapticEffectType type,
++    device::mojom::blink::GamepadEffectParametersPtr params,
++    GamepadHapticActuator::Delegate::Callback callback) {
++  if (pending_haptic_callback_) {
++    // The new effect replaces the one playing.
++    std::move(pending_haptic_callback_)
++        .Run(device::mojom::GamepadHapticsResult::GamepadHapticsResultPreempted);
++  }
++  LocalDOMWindow* window = session_->xr()->DomWindow();
++  if (type != device::mojom::GamepadHapticEffectType::
++                  GamepadHapticEffectTypeDualRumble ||
++      session_->ended() || !window) {
++    std::move(callback).Run(
++        device::mojom::GamepadHapticsResult::GamepadHapticsResultNotSupported);
++    return;
++  }
++
++  // XR controllers have a single actuator: play the stronger of the two
++  // rumble magnitudes.
++  const float amplitude = static_cast<float>(
++      std::max(params->strong_magnitude, params->weak_magnitude));
++  const base::TimeDelta start_delay = base::Milliseconds(params->start_delay);
++  const base::TimeDelta duration = base::Milliseconds(params->duration);
++  const uint32_t effect_id = ++haptic_effect_id_;
++  pending_haptic_callback_ = std::move(callback);
++
++  scoped_refptr<base::SingleThreadTaskRunner> task_runner =
++      window->GetTaskRunner(TaskType::kMiscPlatformAPI);
++  task_runner->PostDelayedTask(
++      FROM_HERE,
++      blink::BindOnce(&XRInputSource::StartHapticEffect,
++                      WrapWeakPersistent(this), effect_id, amplitude, duration),
++      start_delay);
++  task_runner->PostDelayedTask(
++      FROM_HERE,
++      blink::BindOnce(&XRInputSource::OnHapticEffectEnded,
++                      WrapWeakPersistent(this), effect_id),
++      start_delay + duration);
++}
++
++void XRInputSource::ResetVibrationActuator(
++    GamepadHapticActuator::Delegate::Callback callback) {
++  if (pending_haptic_callback_) {
++    // Cancel the pending tasks of the effect, and stop it.
++    ++haptic_effect_id_;
++    std::move(pending_haptic_callback_)
++        .Run(device::mojom::GamepadHapticsResult::GamepadHapticsResultPreempted);
++    SendHapticFeedback(0.0f, base::TimeDelta());
++  }
++  std::move(callback).Run(
++      device::mojom::GamepadHapticsResult::GamepadHapticsResultComplete);
++}
++
++void XRInputSource::StartHapticEffect(uint32_t effect_id,
++                                      float amplitude,
++                                      base::TimeDelta duration) {
++  if (effect_id == haptic_effect_id_) {
++    SendHapticFeedback(amplitude, duration);
++  }
++}
++
++void XRInputSource::OnHapticEffectEnded(uint32_t effect_id) {
++  if (effect_id == haptic_effect_id_ && pending_haptic_callback_) {
++    std::move(pending_haptic_callback_)
++        .Run(device::mojom::GamepadHapticsResult::GamepadHapticsResultComplete);
++  }
++}
++
++void XRInputSource::SendHapticFeedback(float amplitude,
++                                       base::TimeDelta duration) {
++  if (session_->ended()) {
++    return;
++  }
++  session_->xr()->frameProvider()->ApplyHapticFeedback(
++      session_, source_id(), amplitude, duration);
++}
++
+ void XRInputSource::UpdateHand(
+     const device::mojom::blink::XRHandTrackingData* hand_tracking_data) {
+   if (hand_tracking_data) {
+@@ -661,6 +764,7 @@ void XRInputSource::Trace(Visitor* visitor) const {
+   visitor->Trace(target_ray_space_);
+   visitor->Trace(grip_space_);
+   visitor->Trace(gamepad_);
++  visitor->Trace(vibration_actuator_);
+   visitor->Trace(hand_);
+   visitor->Trace(profiles_);
+   ScriptWrappable::Trace(visitor);
+diff --git a/third_party/blink/renderer/modules/xr/xr_input_source.h b/third_party/blink/renderer/modules/xr/xr_input_source.h
+index a8c9a3c475..54f79b9046 100644
+--- a/third_party/blink/renderer/modules/xr/xr_input_source.h
++++ b/third_party/blink/renderer/modules/xr/xr_input_source.h
+@@ -37,7 +37,9 @@ class XRTargetRaySpace;
+ template <typename IDLType>
+ class FrozenArray;
+ 
+-class XRInputSource : public ScriptWrappable, public Gamepad::Client {
++class XRInputSource : public ScriptWrappable,
++                      public Gamepad::Client,
++                      public GamepadHapticActuator::Delegate {
+   DEFINE_WRAPPERTYPEINFO();
+ 
+  public:
+@@ -78,12 +80,15 @@ class XRInputSource : public ScriptWrappable, public Gamepad::Client {
+ 
+   // Gamepad::Client
+   GamepadHapticActuator* GetVibrationActuatorForGamepad(
+-      const Gamepad&) override {
+-    // TODO(https://crbug.com/955097): XRInputSource implementation of
+-    // Gamepad::Client must manage vibration actuator state in a similar way to
+-    // NavigatorGamepad.
+-    return nullptr;
+-  }
++      const Gamepad&) override;
++
++  // GamepadHapticActuator::Delegate
++  void PlayVibrationEffectOnce(
++      device::mojom::GamepadHapticEffectType,
++      device::mojom::blink::GamepadEffectParametersPtr,
++      GamepadHapticActuator::Delegate::Callback) override;
++  void ResetVibrationActuator(
++      GamepadHapticActuator::Delegate::Callback) override;
+ 
+   device::mojom::XRTargetRayMode TargetRayMode() const {
+     return state_.target_ray_mode;
+@@ -166,6 +171,21 @@ class XRInputSource : public ScriptWrappable, public Gamepad::Client {
+ 
+   XRInputSourceEvent* CreateInputSourceEvent(const AtomicString& type);
+ 
++  void StartHapticEffect(uint32_t effect_id,
++                         float amplitude,
++                         base::TimeDelta duration);
++  void OnHapticEffectEnded(uint32_t effect_id);
++  void SendHapticFeedback(float amplitude, base::TimeDelta duration);
++
++  // The gamepad's vibration actuator, created on first use. Gamepad::Client
++  // calls only reach the XRInputSource that created the gamepad, so this and
++  // the effect state below are not copied to newer XRInputSource objects.
++  Member<GamepadHapticActuator> vibration_actuator_;
++  // Completes the effect that is playing (or waiting for its start delay).
++  GamepadHapticActuator::Delegate::Callback pending_haptic_callback_;
++  // Identifies the latest effect, so that tasks of earlier ones do nothing.
++  uint32_t haptic_effect_id_ = 0;
++
+   // These member variables all require special behavior when being copied or
+   // are Member<T> type variables.  When adding another one, be sure to keep the
+   // deep-copy constructor updated, when adding any new variable.
+-- 
+2.43.0
+
