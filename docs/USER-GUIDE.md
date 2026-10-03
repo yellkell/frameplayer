@@ -97,7 +97,7 @@ phone through the web remote.
 
 ## Web XR games and experiences
 
-The **Web XR** tab opens WebXR pages (for example the game at
+The **Web XR** tab opens WebXR pages (for example Factory Fight at
 `https://yellkell.com/fac`, already in the list) in a browser that can do
 immersive VR on the Frame:
 
@@ -108,6 +108,12 @@ immersive VR on the Frame:
 2. In FramePlayer, **Web XR › Launch**. FramePlayer closes its VR view and
    the page opens; press the page's **Enter VR** button.
 3. Close the browser to return to FramePlayer's library.
+
+Mixed-reality pages (WebXR `immersive-ar`, such as Factory Fight) also
+need the headset to offer passthrough to apps: Chromium only offers AR when
+SteamVR reports an alpha-blend or additive blend mode. The Web XR tab (and
+Settings › About) says whether this headset does; if not, such pages report
+XR as unavailable while `immersive-vr` pages still work.
 
 Add your own pages with a name and address, or type one and press **Open
 now**. Only `http://` and `https://` pages open.

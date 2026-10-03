@@ -235,6 +235,15 @@ fn run_xr(args: &Args) -> Result<(), Error> {
             format!("{} ({})", gpu.device_name, gpu.driver),
         ),
         (
+            "Passthrough for apps".into(),
+            if session.supports_passthrough_blend() {
+                "yes (WebXR immersive-ar possible)"
+            } else {
+                "no (VR only)"
+            }
+            .into(),
+        ),
+        (
             "Eye resolution".into(),
             format!("{}×{}", session.extent.width, session.extent.height),
         ),

@@ -45,6 +45,21 @@ pub fn web(ui: &mut egui::Ui, v: &mut View) {
             });
         }
     }
+    // Chromium offers immersive-ar only when the runtime can blend with the
+    // real world (ALPHA_BLEND or ADDITIVE), the same check as FramePlayer's
+    // own passthrough.
+    if v.passthrough_available {
+        ui.label(RichText::new("This headset offers passthrough to apps: immersive-ar (mixed reality) pages can run.").small().color(theme::OK));
+    } else {
+        ui.label(
+            RichText::new(
+                "This headset's runtime does not offer passthrough to apps, so pages that need immersive-ar \
+                 (mixed reality) will report XR as unavailable; immersive-vr pages work.",
+            )
+            .small()
+            .color(theme::WARN),
+        );
+    }
     ui.add_space(8.0);
     let mut remove = None;
     egui::ScrollArea::vertical()

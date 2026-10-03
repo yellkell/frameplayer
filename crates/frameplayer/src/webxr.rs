@@ -29,7 +29,7 @@ pub struct WebApp {
 
 pub fn default_apps() -> Vec<WebApp> {
     vec![WebApp {
-        name: "FAC".into(),
+        name: "Factory Fight".into(),
         url: "https://yellkell.com/fac".into(),
     }]
 }
