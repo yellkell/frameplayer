@@ -341,7 +341,10 @@ mod tests {
         );
         assert_eq!(
             l,
-            vec!["/home/deck/.local/bin/chromium-xr", "https://yellkell.com/fac"]
+            vec![
+                "/home/deck/.local/bin/chromium-xr",
+                "https://yellkell.com/fac"
+            ]
         );
         let c = command(
             &Browser::Chrome("/home/deck/chromium-xr/chrome".into()),
