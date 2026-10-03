@@ -363,9 +363,6 @@ mod sys {
         pub fn set_field(&mut self, f: u32) {
             self.set_u32_at(12, f);
         }
-        pub fn set_sizeimage(&mut self, plane: usize, v: u32) {
-            self.set_u32_at(20 + 20 * plane, v);
-        }
         pub fn set_num_planes(&mut self, n: u8) {
             self.raw[180] = n;
         }
