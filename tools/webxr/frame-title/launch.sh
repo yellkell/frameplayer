@@ -54,10 +54,19 @@ flags=(
   --no-first-run --no-default-browser-check
   --password-store=basic         # a keyring prompt would be invisible in the headset
   --enable-logging=stderr
+  # The Linux OpenXR backend can't composite WebXR layers, but pages are still
+  # offered XRWebGLBinding.createProjectionLayer, and three.js (r16x+) always
+  # draws into a projection layer when offered one: the headset stayed black.
+  # Without the API three.js falls back to an XRWebGLLayer, which works.
+  --disable-blink-features=WebXRLayers
 )
 # Without the FramePlayer sandbox patches working, SteamVR refuses the session
 # with the seccomp filter on; the non-sandboxed title keeps it off.
 [[ $sandboxed == 1 ]] || flags+=(--disable-seccomp-filter-sandbox)
+# DevTools on loopback only while ~/.config/chromium-xr-frame-devtools exists,
+# for remote debugging over SSH (ssh -L 9223:127.0.0.1:9223). It has no
+# authentication, so remove the file when done.
+[[ -f $HOME/.config/chromium-xr-frame-devtools ]] && flags+=(--remote-debugging-port=9223)
 
 echo "flags: ${flags[*]} $*"
 status=0

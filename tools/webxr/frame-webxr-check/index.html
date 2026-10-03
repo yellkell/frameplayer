@@ -124,6 +124,15 @@ function renderEnv() {
 }
 
 async function probe() {
+  // Chromium's reduced user agent says "Linux x86_64" on every Linux CPU, so
+  // ask for the real architecture (the Frame reports "arm").
+  try {
+    const ua = await navigator.userAgentData?.getHighEntropyValues(['architecture', 'bitness', 'platform']);
+    if (ua) {
+      report.uaArchitecture = `${ua.platform} ${ua.architecture}${ua.bitness ? ' ' + ua.bitness : ''}`;
+      if (ua.platform === 'Linux' && ua.architecture === 'arm') isFrameBrowser = true;
+    }
+  } catch {}
   report.isSteamFrameBrowser = isFrameBrowser;
   report.navigatorXr = 'xr' in navigator;
   if (report.navigatorXr) {

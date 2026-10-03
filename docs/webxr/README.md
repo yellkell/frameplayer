@@ -216,6 +216,31 @@ that Menu no longer ends the session, and produces a JSON report. On a
 desktop, `?emulate=frame` or `?emulate=touch` runs it against IWER's emulated
 controllers.
 
+### Rendering fixes (found on the headset, 2026-10-03)
+
+Two bugs made three.js games (Fish & Chips: IWSDK 0.4.2, three.js r184)
+unusable even with the session running. Both were confirmed with headset
+captures (`IVRScreenshots` stereo shots over SSH):
+
+- **Black headset: projection layers.** The Linux Vulkan binding reports
+  `SupportsLayers() == false`, so the session gets no layer manager, yet
+  Blink still offers `XRWebGLBinding.createProjectionLayer` (the `WebXRLayers`
+  runtime feature is stable). three.js draws into a projection layer whenever
+  that method exists, so every frame was submitted empty. The launcher passes
+  `--disable-blink-features=WebXRLayers`, and three.js falls back to an
+  `XRWebGLLayer`.
+- **Right eye black or flickering, water missing: patch 0005.** Recording the
+  game's WebGL calls showed both eyes drawn correctly into the XR framebuffer,
+  so the loss happened after the page. Blink's end-of-frame
+  `DiscardFramebufferEXT(depth, stencil)` on the shared buffer also lost
+  in-flight colour rendering on ANGLE/GL/zink/Turnip. Patch 0005 skips the
+  discard on Linux: both eyes and the water render in 8 of 8 captures, where
+  before the right eye was black in 7 of 8.
+
+`tools/webxr/frame-webxr-check/xrtest.html` reproduces the first bug
+(`?layers=1`, `?noproj=1`) and has the scenes used to rule out other causes
+(`?transmission=1`, `?heavy=N`, `?aa=0`, `?bounded=1`).
+
 ## 9. What this does not solve
 
 - Anything SteamVR needs beyond these two items will only show up once the

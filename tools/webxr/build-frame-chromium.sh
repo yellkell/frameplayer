@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build the Steam Frame WebXR browser: arm64 Chromium with immersive WebXR
-# through SteamVR, plus FramePlayer's sandbox patches (docs/webxr/patches
-# 0001-0003) and IWFDK's Frame controller patch (0004).
+# through SteamVR, plus FramePlayer's patches (docs/webxr/patches: 0001-0003
+# sandbox, 0005 rendering) and IWFDK's Frame controller patch (0004).
 #
 # Adapted from saphid/chromium-webxr-steam-frame build/build.sh (BSD-3).
 # Differences: the OpenXR-on-Linux CL it pinned (8132979) has merged, so this
@@ -42,11 +42,12 @@ guard() {
   done
 }
 
-# Patches, in apply order: FramePlayer 0001-0003 from this checkout, IWFDK 0004.
+# Patches, in file-name order: FramePlayer's from this checkout (0001-0003
+# sandbox, 0005 rendering), IWFDK's 0004 (Frame controllers).
 P="$W/patches"
 rm -rf "$P" "$W/iwfdk"
 mkdir -p "$P"
-cp "$FP"/docs/webxr/patches/000[1-3]-*.patch "$P/"
+cp "$FP"/docs/webxr/patches/*.patch "$P/"
 git clone -q --depth 1 --filter=blob:none --sparse -b "$IWFDK_REF" "$IWFDK_REPO" "$W/iwfdk"
 git -C "$W/iwfdk" sparse-checkout set platform/chromium/patches
 cp "$W"/iwfdk/platform/chromium/patches/*.patch "$P/"

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>XR Render Test</title>
+<style>body{margin:0;background:#111;color:#eee;font:20px system-ui;padding:24px}button{font:inherit;padding:16px 28px}</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<p>Render test. <code>?layers=1</code> asks for the WebXR <code>layers</code> feature (what IWSDK does by default).</p>
+<button id="go">Enter VR</button>
+<pre id="out"></pre>
+<script type="module">
+// Minimal three.js WebXR scene that is obviously not black: magenta sky, a
+// green cube in front. Records how three.js renders (projection layer or
+// XRWebGLLayer) in window.xrResult, for driving over DevTools.
+import * as THREE from 'three';
+const q = new URLSearchParams(location.search);
+const wantLayers = q.get('layers') === '1';
+// ?noproj=1 hides XRWebGLBinding.createProjectionLayer so three.js falls back
+// to an XRWebGLLayer (its path for browsers without the WebXR Layers API).
+if (q.get('noproj') === '1' && window.XRWebGLBinding) delete XRWebGLBinding.prototype.createProjectionLayer;
+const result = window.xrResult = { three: THREE.REVISION, wantLayers, hasXRWebGLBinding: 'XRWebGLBinding' in window };
+const out = (o) => (document.getElementById('out').textContent = JSON.stringify(o, null, 2));
+out(result);
+
+// ?aa=0 creates the renderer without antialiasing (so the XRWebGLLayer has none).
+const renderer = new THREE.WebGLRenderer({ antialias: q.get('aa') !== '0' });
+renderer.xr.enabled = true;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xff00ff);
+const cube = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshBasicMaterial({ color: 0x00ff00 }));
+cube.position.set(0, 1.4, -1.5);
+scene.add(cube);
+const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 100);
+// ?transmission=1 adds a transmissive sphere, which makes three.js render an
+// extra transmission pass per eye (like see-through water does).
+if (q.get('transmission') === '1') {
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 3));
+  const glass = new THREE.Mesh(new THREE.SphereGeometry(0.3, 48, 24),
+    new THREE.MeshPhysicalMaterial({ color: 0xffffff, transmission: 1, roughness: 0.05, thickness: 0.3 }));
+  // Attached to the camera so it is always in view (three.js culls the
+  // transmission pass when no transmissive object is visible).
+  glass.position.set(0.15, 0, -1);
+  scene.add(camera);
+  camera.add(glass);
+}
+// ?heavy=N adds a large plane in front of the viewer whose fragment shader
+// loops N times, to make each eye expensive for the GPU (the game is heavy).
+if (q.get('heavy')) {
+  const iters = Number(q.get('heavy'));
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { t: { value: 0 } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `uniform float t; varying vec2 vUv;
+      void main(){ float a = 0.0; for (int i = 0; i < ${iters}; i++) { a += sin(vUv.x * float(i) + t) * cos(vUv.y * float(i)); }
+        gl_FragColor = vec4(0.1 + 0.0001 * a, 0.6, 0.9, 1.0); }`,
+  });
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(3, 2), mat);
+  plane.position.set(0, 0, -1.2);
+  scene.add(camera);
+  camera.add(plane);
+  window.__heavyMat = mat;
+}
+let frames = 0;
+renderer.setAnimationLoop((t, frame) => {
+  if (!frame) return;
+  frames++;
+  cube.rotation.y = t / 1000;
+  if (window.__heavyMat) window.__heavyMat.uniforms.t.value = t / 1000;
+  renderer.render(scene, camera);
+  if (frames === 30) {
+    const layer = renderer.xr.getBaseLayer();
+    const s = renderer.xr.getSession();
+    Object.assign(result, {
+      frames,
+      enabledFeatures: s.enabledFeatures ?? null,
+      baseLayer: layer?.constructor?.name ?? null,
+      layerAntialias: layer?.antialias ?? null,
+      renderStateLayers: s.renderState.layers?.map((l) => l.constructor.name) ?? null,
+      glError: renderer.getContext().getError(),
+    });
+    out(result);
+  }
+});
+
+document.getElementById('go').onclick = async () => {
+  try {
+    const opts = { optionalFeatures: wantLayers ? ['local-floor', 'layers'] : ['local-floor'] };
+    // ?bounded=1 also asks for bounded-floor, as the IWSDK game does.
+    if (q.get('bounded') === '1') opts.optionalFeatures.push('bounded-floor');
+    const session = await navigator.xr.requestSession('immersive-vr', opts);
+    result.started = true;
+    window.xrSession = session;
+    session.addEventListener('end', () => { result.ended = true; result.framesAtEnd = frames; out(result); });
+    await renderer.xr.setSession(session);
+  } catch (e) {
+    result.error = String(e);
+    out(result);
+  }
+};
+</script>
+</body>
+</html>
