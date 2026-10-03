@@ -353,7 +353,7 @@ pub fn run(args: &Args, out: &Path) -> Result<(), Error> {
     }
     println!("{} frames rendered", sim.frames);
     let Sim {
-        mut app,
+        app,
         renderer,
         mut eyes,
         ..
