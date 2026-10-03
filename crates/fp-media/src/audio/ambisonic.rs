@@ -39,8 +39,7 @@ pub fn render_stereo(foa: &[f32], head: Quat) -> Vec<f32> {
     // Two virtual cardioid microphones at ±60° from the front.
     let (c, s) = (60f32.to_radians().cos(), 60f32.to_radians().sin());
     let mut out = Vec::with_capacity(foa.len() / 2);
-    for f in foa.chunks_exact(4) {
-        let (w, y, z, x) = (f[0], f[1], f[2], f[3]);
+    for &[w, y, z, x] in foa.as_chunks::<4>().0 {
         let [x, y, _z] = rot([x, y, z]);
         out.push(0.5 * (w + c * x + s * y));
         out.push(0.5 * (w + c * x - s * y));
