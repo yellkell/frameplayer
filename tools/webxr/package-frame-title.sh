@@ -59,6 +59,12 @@ P
 manifest "Chromium XR" chromium-xr.sh chromium-xr.json
 manifest "Chromium XR Sandboxed" chromium-xr-sandboxed.sh chromium-xr-sandboxed.json
 
+# The patches' unit tests, for tools/webxr/frame-install.sh or an arm64 runner.
+if [[ -x $B/device_unittests && -x $B/sandbox_linux_unittests ]]; then
+  (cd "$B" && tar -cf - device_unittests sandbox_linux_unittests | xz -T0 -6 > "$OUT/chromium-xr-tests-arm64.tar.xz")
+fi
+cp "$W/chromium-xr-arm64.tar.xz" "$OUT/"
+
 link() { python3 -c 'import sys, urllib.parse as u; print("frame-control://install?manifest=" + u.quote(sys.argv[1], safe=""))' "$1"; }
 base="https://github.com/$REPO/releases/download/$TAG"
 cat > "$OUT/INSTALL.md" <<EOF

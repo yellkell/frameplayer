@@ -1,0 +1,80 @@
+name: frame-chromium-smoke
+
+# Smoke-tests a Steam Frame WebXR Chromium release on real arm64 hardware:
+# the published zip matches its install manifests, the browser starts, the
+# bundled start page runs offline, and the patches' unit tests pass. Runs on
+# publishing a chromium-xr-frame-* release (tools/webxr/package-frame-title.sh).
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (chromium-xr-frame-...)
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'chromium-xr-frame-')
+    runs-on: ubuntu-24.04-arm
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download the release
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" \
+            -p 'ChromiumXR-Frame-arm64.zip' -p '*.json' -p 'chromium-xr-tests-arm64.tar.xz'
+          ls -la
+
+      - name: Zip matches the install manifests
+        run: |
+          python3 - <<'P'
+          import hashlib, json, os, zipfile
+          zip_name = 'ChromiumXR-Frame-arm64.zip'
+          digest = hashlib.sha256(open(zip_name, 'rb').read()).hexdigest()
+          names = zipfile.ZipFile(zip_name).namelist()
+          for m in ('chromium-xr.json', 'chromium-xr-sandboxed.json'):
+              f = json.load(open(m))['files'][0]
+              assert f['url'].endswith('/' + os.environ['TAG'] + '/' + zip_name), f['url']
+              assert f['sha256'] == digest, (m, 'sha256')
+              assert f['size'] == os.path.getsize(zip_name), (m, 'size')
+              assert f['exe'] in names, (m, f['exe'])
+              print(m, 'ok:', f['exe'])
+          P
+          unzip -q ChromiumXR-Frame-arm64.zip -d title
+          mkdir tests && tar -xJf chromium-xr-tests-arm64.tar.xz -C tests
+
+      - name: Runtime libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libnss3 libgbm1 libasound2t64 libxkbcommon0 libxcomposite1 \
+            libxdamage1 libxrandr2 libxfixes3 libgtk-3-0t64 libcups2t64 libdrm2 libxshmfence1 >/dev/null
+          missing=$(ldd title/chromium/chrome | grep 'not found' || true)
+          [ -z "$missing" ] || { echo "$missing"; exit 1; }
+
+      - name: Browser starts
+        run: title/chromium/chrome --version
+
+      - name: Start page runs offline (headless)
+        run: |
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory title/chromium/start >/dev/null 2>&1 &
+          sleep 1
+          title/chromium/chrome --headless=new --no-sandbox --disable-gpu --virtual-time-budget=5000 \
+            --enable-features=OpenXR --dump-dom 'http://localhost:8765/?title=chromium-xr-frame' > dom.html
+          # The table only renders once the module script (and its local
+          # three.js import) has run.
+          grep -q 'Secure context</td><td class="ok">yes' dom.html
+          grep -o -E '(Launched as|navigator.xr|immersive-vr supported)</td><td[^>]*>[^<]*' dom.html
+          ! grep -q 'cdn.jsdelivr.net/npm/three' dom.html
+
+      - name: Patch 0004 unit tests (Frame controller profile)
+        working-directory: tests
+        run: ./device_unittests --gtest_filter='OpenXrInteractionProfilesTest.*'
+
+      - name: Patch 0001 unit tests (broker answers for /proc/self)
+        working-directory: tests
+        run: ./sandbox_linux_unittests --gtest_filter='BrokerProcess.RewriteProcSelf*'

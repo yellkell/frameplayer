@@ -17,9 +17,11 @@ QEMU=$(command -v qemu-aarch64-static || command -v qemu-aarch64) ||
 
 run() {  # binary filter
   echo "== $1 --gtest_filter=$2"
-  (cd "$B" && "$QEMU" -L "$SYSROOT" "./$1" --gtest_filter="$2" --single-process-tests 2>&1) |
-    grep -E '^\[ *(RUN|OK|FAILED|PASSED|SKIPPED|==========) *\]|Failure|error' | tail -n 40
-  return "${PIPESTATUS[0]}"
+  local out rc=0
+  out=$(cd "$B" && "$QEMU" -L "$SYSROOT" "./$1" --gtest_filter="$2" --single-process-tests 2>&1) || rc=$?
+  grep -E '^\[ *(RUN|OK|FAILED|PASSED|SKIPPED|==========) *\]|Failure|error' <<<"$out" | tail -n 40
+  (( rc == 0 )) || echo "exit $rc"
+  return "$rc"
 }
 status=0
 run device_unittests 'OpenXrInteractionProfilesTest.*' || status=1
