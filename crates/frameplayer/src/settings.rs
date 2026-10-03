@@ -112,8 +112,11 @@ impl Settings {
     /// file is missing or unreadable.
     pub fn load(path: &Path) -> Settings {
         match std::fs::read_to_string(path) {
-            Ok(text) => match serde_json::from_str(&text) {
-                Ok(s) => s,
+            Ok(text) => match serde_json::from_str::<Settings>(&text) {
+                Ok(mut s) => {
+                    crate::webxr::migrate_apps(&mut s.web_apps);
+                    s
+                }
                 Err(e) => {
                     log::warn!("settings {}: {e}; using defaults", path.display());
                     Settings::default()

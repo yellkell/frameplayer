@@ -7,9 +7,11 @@
 //! waits for it to close and starts FramePlayer again. Started without the
 //! launcher, FramePlayer starts the browser itself and quits.
 //!
-//! The browser is the WebXR Chromium build for the Steam Frame
-//! (github.com/saphid/chromium-webxr-steam-frame), installed as
-//! `~/.local/bin/chromium-xr`.
+//! The browser is FramePlayer's WebXR Chromium build for the Steam Frame
+//! (tools/webxr, released as chromium-xr-frame-* with FramePlayer), installed
+//! in `~/chromium-xr-frame`. saphid's build
+//! (github.com/saphid/chromium-webxr-steam-frame, `~/.local/bin/chromium-xr`)
+//! also works, without the Frame rendering and controller fixes.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -18,7 +20,9 @@ use std::path::{Path, PathBuf};
 pub const HANDOFF_EXIT_CODE: i32 = 75;
 /// Set by `frameplayer.sh`, so FramePlayer knows it will be restarted.
 pub const LAUNCHER_ENV: &str = "FRAMEPLAYER_LAUNCHER";
-pub const BROWSER_PROJECT: &str = "https://github.com/saphid/chromium-webxr-steam-frame";
+pub const BROWSER_PROJECT: &str = "https://github.com/yellkell/frameplayer/releases";
+/// Where FramePlayer's Chromium XR build is installed, under `$HOME`.
+pub const FRAME_BROWSER: &str = "chromium-xr-frame/chromium-xr.sh";
 
 /// A web page with WebXR content, as listed in the Web XR tab.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -29,9 +33,19 @@ pub struct WebApp {
 
 pub fn default_apps() -> Vec<WebApp> {
     vec![WebApp {
-        name: "Factory Fight".into(),
+        name: "Fish & Chips".into(),
         url: "https://yellkell.com/fac".into(),
     }]
+}
+
+/// Fixes entries saved by earlier versions: the default app was listed as
+/// "Factory Fight".
+pub fn migrate_apps(apps: &mut [WebApp]) {
+    for app in apps {
+        if app.name == "Factory Fight" && app.url == "https://yellkell.com/fac" {
+            app.name = "Fish & Chips".into();
+        }
+    }
 }
 
 /// A WebXR-capable browser found on this device.
@@ -57,9 +71,9 @@ fn is_executable(p: &Path) -> bool {
     std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 
-/// Looks for a WebXR browser: `$FP_WEBXR_BROWSER`, `~/.local/bin/chromium-xr`,
-/// `chromium-xr` on `PATH`, then the bare build in `$CHROMIUM_XR_HOME` or
-/// `~/chromium-xr`.
+/// Looks for a WebXR browser: `$FP_WEBXR_BROWSER`, FramePlayer's build in
+/// `~/chromium-xr-frame`, `~/.local/bin/chromium-xr`, `chromium-xr` on
+/// `PATH`, then the bare build in `$CHROMIUM_XR_HOME` or `~/chromium-xr`.
 pub fn find_browser() -> Option<Browser> {
     find_browser_in(
         std::env::var_os("HOME").map(PathBuf::from).as_deref(),
@@ -76,6 +90,12 @@ fn find_browser_in(
     path: Option<std::ffi::OsString>,
 ) -> Option<Browser> {
     if let Some(p) = explicit.filter(|p| is_executable(p)) {
+        return Some(Browser::Launcher(p));
+    }
+    if let Some(p) = home
+        .map(|h| h.join(FRAME_BROWSER))
+        .filter(|p| is_executable(p))
+    {
         return Some(Browser::Launcher(p));
     }
     if let Some(p) = home
@@ -251,12 +271,35 @@ mod tests {
             find_browser_in(Some(&home), None, None, None),
             Some(Browser::Launcher(home.join(".local/bin/chromium-xr")))
         );
+        exe(&home.join(FRAME_BROWSER));
+        assert_eq!(
+            find_browser_in(Some(&home), None, None, None),
+            Some(Browser::Launcher(home.join(FRAME_BROWSER)))
+        );
         exe(&tmp.join("other"));
         assert_eq!(
             find_browser_in(Some(&home), Some(tmp.join("other")), None, None),
             Some(Browser::Launcher(tmp.join("other")))
         );
         std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn renames_the_old_default_app() {
+        let mut apps = vec![
+            WebApp {
+                name: "Factory Fight".into(),
+                url: "https://yellkell.com/fac".into(),
+            },
+            WebApp {
+                name: "Factory Fight".into(),
+                url: "https://example.com/".into(),
+            },
+        ];
+        migrate_apps(&mut apps);
+        assert_eq!(apps[0].name, "Fish & Chips");
+        assert_eq!(apps[1].name, "Factory Fight");
+        assert_eq!(default_apps()[0].name, "Fish & Chips");
     }
 
     #[test]

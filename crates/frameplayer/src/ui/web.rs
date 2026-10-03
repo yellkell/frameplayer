@@ -38,7 +38,7 @@ pub fn web(ui: &mut egui::Ui, v: &mut View) {
                 ui.label("WebXR needs a browser built for the Steam Frame. Install it once from a PC or Desktop Mode:");
                 ui.label(RichText::new(webxr::BROWSER_PROJECT).monospace());
                 ui.label(
-                    RichText::new("Download its arm64 release, then run frame/install.sh on the headset. FramePlayer finds it in ~/.local/bin/chromium-xr.")
+                    RichText::new("Install the Chromium XR for Steam Frame release (ChromiumXR-Frame-arm64.zip) into ~/chromium-xr-frame. FramePlayer finds it there, or saphid's build in ~/.local/bin/chromium-xr.")
                         .small()
                         .color(theme::MUTED),
                 );
