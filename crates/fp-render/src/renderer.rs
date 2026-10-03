@@ -443,7 +443,6 @@ impl Renderer {
                 uniform,
                 scene_set,
                 scene_set_dirty: true,
-                video: None,
                 video_bound: None,
                 has_video: false,
                 quad_vb: cpu(64 << 10, vk::BufferUsageFlags::VERTEX_BUFFER, "quads")?,
