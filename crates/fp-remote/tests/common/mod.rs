@@ -212,7 +212,11 @@ impl FakeLibrary {
     pub fn new() -> FakeLibrary {
         let dir = std::env::temp_dir().join(format!("fp-remote-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let thumb = dir.join("thumb-1.jpg");
+        // One file per instance: tests run in parallel in one process, and
+        // rewriting a shared file truncates it under a concurrent reader.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let thumb = dir.join(format!("thumb-1-{n}.jpg"));
         std::fs::write(&thumb, JPEG).unwrap();
         let item = |id: i64, title: &str, thumb: bool| RemoteItem {
             id,

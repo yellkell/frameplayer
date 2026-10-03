@@ -31,12 +31,15 @@ struct Args {
     preview: Option<PathBuf>,
     script: Option<PathBuf>,
     size: Option<u32>,
+    exit_after: Option<f64>,
+    info: Option<String>,
     verbose: bool,
     open: Option<String>,
 }
 
-const USAGE: &str = "usage: frameplayer [--verbose] [FILE|URL]
+const USAGE: &str = "usage: frameplayer [--verbose] [--exit-after SECONDS] [FILE|URL]
        frameplayer --preview OUT_DIR [--script FILE] [--size PIXELS] [FILE|URL]
+       frameplayer --info FILE      (print what FramePlayer detects about a video)
        frameplayer --version";
 
 fn parse_args() -> Result<Args, String> {
@@ -53,6 +56,14 @@ fn parse_args() -> Result<Args, String> {
                         .ok_or("--size needs a number")?,
                 )
             }
+            "--exit-after" => {
+                a.exit_after = Some(
+                    it.next()
+                        .and_then(|s| s.parse().ok())
+                        .ok_or("--exit-after needs seconds")?,
+                )
+            }
+            "--info" => a.info = Some(it.next().ok_or("--info needs a file")?),
             "-v" | "--verbose" => a.verbose = true,
             "--version" => {
                 println!("FramePlayer {}", env!("CARGO_PKG_VERSION"));
@@ -94,7 +105,17 @@ fn main() {
         }
     };
     logger::init(args.verbose);
+    fp_media::init_logging();
     log::info!("FramePlayer {} starting", env!("CARGO_PKG_VERSION"));
+    if let Some(f) = &args.info {
+        std::process::exit(match info(f) {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("{e}");
+                1
+            }
+        });
+    }
     let r = match &args.preview {
         Some(dir) => preview::run(&args, dir),
         None => run_xr(&args),
@@ -104,6 +125,57 @@ fn main() {
         eprintln!("FramePlayer: {e}");
         std::process::exit(1);
     }
+}
+
+/// Prints container, streams and the detected VR format, and decodes the
+/// first frame, without needing a headset or GPU.
+fn info(file: &str) -> Result<(), Error> {
+    let path = std::path::Path::new(file);
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let src = || -> Result<Arc<dyn fp_core::ByteSource>, Error> {
+        Ok(Arc::new(fp_core::source::FileSource::open(path)?))
+    };
+    let i = fp_media::thumb::probe(src()?, &name)?;
+    println!("{name}: {} · {:.1} s", i.container, i.duration);
+    for s in &i.streams {
+        let lang = s
+            .language
+            .as_deref()
+            .map(|l| format!(" [{l}]"))
+            .unwrap_or_default();
+        match s.kind {
+            fp_media::info::StreamKind::Video => {
+                println!(
+                    "  #{} video {} {}x{} {:.3} fps {}-bit {:?}{lang}",
+                    s.index, s.codec, s.width, s.height, s.fps, s.bit_depth, s.transfer
+                )
+            }
+            fp_media::info::StreamKind::Audio => println!(
+                "  #{} audio {} {} Hz {} ch{}{lang}",
+                s.index,
+                s.codec,
+                s.sample_rate,
+                s.channels,
+                if s.ambisonic { " ambisonic" } else { "" }
+            ),
+            _ => println!("  #{} {:?} {}{lang}", s.index, s.kind, s.codec),
+        }
+    }
+    let (w, h) = i
+        .video_stream()
+        .map(|v| (v.width, v.height))
+        .unwrap_or((0, 0));
+    let d = fp_core::format::resolve(None, i.hints, &name, w, h);
+    println!("  format: {} ({})", d.format.label(), d.evidence.label());
+    let f = fp_media::thumb::decode_first_frame(src()?, &name)?;
+    println!(
+        "  first frame: {}x{} {:?} decoded",
+        f.width, f.height, f.layout
+    );
+    Ok(())
 }
 
 fn run_xr(args: &Args) -> Result<(), Error> {
@@ -152,6 +224,7 @@ fn run_xr(args: &Args) -> Result<(), Error> {
     let start = Instant::now();
     let mut last = Instant::now();
     let mut quitting = false;
+    let (mut frames, mut video_frames) = (0u64, 0u64);
     loop {
         match session.poll()? {
             SessionEvent::Exit => break,
@@ -176,6 +249,8 @@ fn run_xr(args: &Args) -> Result<(), Error> {
                 passthrough_available: session.supports_passthrough_blend(),
             },
         );
+        frames += 1;
+        video_frames += out.frame.is_some() as u64;
         renderer.set_video(out.frame.as_ref())?;
         if let (Some(targets), Some(eyes)) = (frame.targets, frame.eyes) {
             renderer.draw(&targets, &eyes, &out.video, &out.quads)?;
@@ -186,11 +261,15 @@ fn run_xr(args: &Args) -> Result<(), Error> {
             session.buzz(hand, amp, ms);
         }
         session.end_frame(frame)?;
-        if out.quit && !quitting {
+        let timed_out = args
+            .exit_after
+            .is_some_and(|t| start.elapsed().as_secs_f64() > t);
+        if (out.quit || timed_out) && !quitting {
             quitting = true;
             session.request_exit();
         }
     }
+    log::info!("{frames} frames, {} with video", video_frames);
     renderer.wait_idle();
     app.shutdown();
     drop(renderer);

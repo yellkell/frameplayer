@@ -55,7 +55,13 @@ impl Opener {
         location: &str,
     ) -> Result<Arc<dyn ByteSource>, String> {
         if location.starts_with('/') {
-            return FileSource::open(std::path::Path::new(location))
+            let path = std::path::Path::new(location);
+            if !path.exists() && location.starts_with(&format!("{REMOVABLE_ROOT}/")) {
+                return Err(
+                    "This video is on a microSD card or USB drive that is not inserted.".into(),
+                );
+            }
+            return FileSource::open(path)
                 .map(|f| Arc::new(f) as Arc<dyn ByteSource>)
                 .map_err(|e| format!("{location}: {e}"));
         }
@@ -117,47 +123,72 @@ pub fn builtin_sources() -> Vec<SourceConfig> {
             root: home,
         }));
     }
-    let media = PathBuf::from("/run/media");
-    if media.is_dir() {
-        out.push(SourceConfig::Local(fp_sources::LocalConfig {
-            id: "device-removable".into(),
-            name: "microSD and USB drives".into(),
-            root: media,
-        }));
-    }
+    // Always offered, so a card inserted later shows up without a restart.
+    out.push(SourceConfig::Local(fp_sources::LocalConfig {
+        id: REMOVABLE_SOURCE.into(),
+        name: "microSD and USB drives".into(),
+        root: PathBuf::from(REMOVABLE_ROOT),
+    }));
     out
 }
 
-/// Video folders worth offering for the library that are not in it yet:
-/// ~/Videos, ~/Downloads and the top of each mounted removable drive.
+pub const REMOVABLE_SOURCE: &str = "device-removable";
+/// Where SteamOS (udisks) mounts microSD cards and USB drives:
+/// `/run/media/deck/<label>` (older images: `/run/media/<device>`).
+pub const REMOVABLE_ROOT: &str = "/run/media";
+
+/// Mount points of removable drives, from a `/proc/mounts` listing.
+pub fn parse_removable_mounts(mounts: &str) -> Vec<PathBuf> {
+    let prefix = format!("{REMOVABLE_ROOT}/");
+    let mut out: Vec<PathBuf> = mounts
+        .lines()
+        .filter_map(|l| l.split_whitespace().nth(1))
+        .map(unescape_mount)
+        .filter(|p| p.starts_with(&prefix))
+        .map(PathBuf::from)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// `/proc/mounts` writes spaces and a few other bytes as `\ooo` octal.
+fn unescape_mount(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        let octal = b[i] == b'\\'
+            && i + 3 < b.len()
+            && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c));
+        if octal {
+            out.push((b[i + 1] - b'0') * 64 + (b[i + 2] - b'0') * 8 + (b[i + 3] - b'0'));
+            i += 4;
+        } else {
+            out.push(b[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Currently mounted microSD cards and USB drives.
+pub fn removable_mounts() -> Vec<PathBuf> {
+    std::fs::read_to_string("/proc/mounts")
+        .map(|m| parse_removable_mounts(&m))
+        .unwrap_or_default()
+}
+
+/// Video folders worth offering for the library that are not in it yet
+/// (removable drives are indexed automatically).
 pub fn suggested_folders(existing: &[PathBuf]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-        for d in ["Videos", "Downloads"] {
+        for d in ["Videos", "Downloads", "Movies"] {
             out.push(home.join(d));
         }
     }
-    // /run/media/<user>/<label> (SteamOS) and /run/media/<label>.
-    if let Ok(rd) = std::fs::read_dir("/run/media") {
-        for e in rd.flatten() {
-            let p = e.path();
-            let children: Vec<PathBuf> = std::fs::read_dir(&p)
-                .map(|r| {
-                    r.flatten()
-                        .map(|c| c.path())
-                        .filter(|c| c.is_dir())
-                        .collect()
-                })
-                .unwrap_or_default();
-            if p.join("steamapps").exists() || children.is_empty() {
-                out.push(p);
-            } else {
-                out.extend(children);
-            }
-        }
-    }
     out.retain(|p| p.is_dir() && !existing.iter().any(|e| p.starts_with(e)));
-    out.truncate(6);
     out
 }
 
@@ -346,5 +377,27 @@ impl Services {
             .as_ref()
             .map(|r| r.events().try_iter().collect())
             .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn removable_mounts_from_proc() {
+        let m = "/dev/nvme0n1p8 /home ext4 rw 0 0\n\
+                 /dev/mmcblk0p1 /run/media/deck/SD\\040Card ext4 rw,nosuid 0 0\n\
+                 /dev/sda1 /run/media/deck/USB exfat rw 0 0\n\
+                 /dev/mmcblk0p1 /run/media/mmcblk0p1 ext4 rw 0 0\n\
+                 tmpfs /run/user/1000 tmpfs rw 0 0\n";
+        assert_eq!(
+            parse_removable_mounts(m),
+            vec![
+                PathBuf::from("/run/media/deck/SD Card"),
+                PathBuf::from("/run/media/deck/USB"),
+                PathBuf::from("/run/media/mmcblk0p1")
+            ]
+        );
     }
 }

@@ -37,6 +37,8 @@ impl HapticDeviceConfig {
 pub struct Settings {
     /// Local folders indexed into the library.
     pub library_folders: Vec<PathBuf>,
+    /// Also index microSD cards and USB drives when they are mounted.
+    pub index_removable: bool,
     /// Use the V4L2 hardware decoder when available.
     pub hardware_decoding: bool,
     /// ALSA device ("default" routes to PipeWire on SteamOS).
@@ -75,6 +77,7 @@ impl Default for Settings {
         }
         Settings {
             library_folders,
+            index_removable: true,
             hardware_decoding: true,
             audio_device: "default".into(),
             volume: 1.0,

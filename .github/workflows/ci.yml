@@ -17,24 +17,65 @@ jobs:
           components: clippy, rustfmt
           targets: aarch64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm pkg-config mesa-vulkan-drivers zip
+          pip install ziglang
+          cargo install --locked cargo-zigbuild
+      - name: Cache FFmpeg builds
+        id: ffmpeg-cache
+        uses: actions/cache@v4
+        with:
+          path: third_party/ffmpeg
+          key: ffmpeg-${{ hashFiles('tools/build-ffmpeg.sh') }}
+      - name: Build FFmpeg (x86_64 for tests, aarch64 for the Frame)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: tools/build-ffmpeg.sh x86_64 aarch64
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
-      - name: Unit tests
-        run: cargo test
-      - name: Install cross toolchain (zig + cargo-zigbuild)
-        run: |
-          pip install ziglang
-          cargo install --locked cargo-zigbuild
-      - name: Build for Steam Frame (aarch64, glibc 2.28)
-        run: tools/build-frame.sh -p frame-probe
-      - name: Check glibc baseline
-        run: |
-          v=$(readelf -V target/aarch64-unknown-linux-gnu/release/frame-probe | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1)
-          echo "highest glibc symbol: $v"
-          test "$(printf '%s\nGLIBC_2.28\n' "$v" | sort -V | tail -1)" = "GLIBC_2.28"
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/third_party/ffmpeg/x86_64/lib
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+        run: cargo test --workspace
+      - name: Package for the Steam Frame (aarch64, glibc 2.28)
+        run: tools/package.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: frame-probe-aarch64
-          path: target/aarch64-unknown-linux-gnu/release/frame-probe
+          name: frameplayer-aarch64
+          path: dist/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: frameplayer-aarch64
+          path: dist
+      - uses: actions/checkout@v4
+        with:
+          path: src
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Sign the update manifest
+        env:
+          FP_RELEASE_KEY: ${{ secrets.FP_RELEASE_KEY }}
+        run: |
+          if [ -z "$FP_RELEASE_KEY" ]; then
+            echo "::warning::FP_RELEASE_KEY secret not set; manifest.json is unsigned and in-app updates will refuse it"
+            exit 0
+          fi
+          umask 077
+          printf '%s\n' "$FP_RELEASE_KEY" > "$RUNNER_TEMP/release.key"
+          cargo run --manifest-path src/Cargo.toml --release -p fp-updater --bin fp-release -- sign dist/manifest.json --key "$RUNNER_TEMP/release.key"
+          rm -f "$RUNNER_TEMP/release.key"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

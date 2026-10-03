@@ -8,11 +8,24 @@ Also here: [docs/webxr/README.md](docs/webxr/README.md), an analysis and Chromiu
 
 ## Status
 
-Milestone 0 (platform de-risking) is in progress. `frame-probe` answers every open platform question in one run on a headset:
+The player is feature-complete for a first release and runs end to end
+against a simulated OpenXR headset (Monado) and in the headless preview
+harness; it has not yet run on Steam Frame hardware.
 
-```
-tools/frame-probe.sh --build     # cross-builds, copies to a paired Frame, runs, fetches the report
-```
+- Plays flat, 180°, 360°, fisheye (190/200/220°) and EAC video, mono or
+  stereo, with per-video format overrides and adjustments
+- Library with thumbnails, search, filters, favorites, ratings, resume and
+  history; ~/Videos, ~/Downloads, microSD cards and USB drives are indexed
+  automatically
+- Network sources: DeoVR/HereSphere feeds (XBVR, Stash), SMB, WebDAV, DLNA,
+  HTTP folders
+- Haptics: funscripts with Intiface, TCode devices and The Handy
+- Phone web remote and DeoVR remote API
+- Signed self-updates; install via Frame Control/FrameDrop or
+  `frameplayer-install`
 
-Results are recorded in [docs/platform-notes.md](docs/platform-notes.md). Building needs Rust, `zig` and `cargo-zigbuild`; see `tools/build-frame.sh`.
+Guides: [user guide](docs/USER-GUIDE.md), [development](docs/DEVELOPMENT.md).
 
+`frame-probe` (Milestone 0) answers the remaining platform questions in one
+run on a headset (`tools/frame-probe.sh --build`); results go in
+[docs/platform-notes.md](docs/platform-notes.md).

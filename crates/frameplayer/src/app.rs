@@ -86,6 +86,9 @@ pub struct App {
     stick_latch: [bool; 2],
     last_status: Option<PlaybackStatus>,
     update: Option<fp_updater::Update>,
+    /// Removable drives seen at the last check, and when that was.
+    mounts: Vec<std::path::PathBuf>,
+    mounts_checked: Instant,
     quit: bool,
 }
 
@@ -133,6 +136,8 @@ impl App {
             stick_latch: [false; 2],
             last_status: None,
             update: None,
+            mounts: crate::services::removable_mounts(),
+            mounts_checked: Instant::now(),
             quit: false,
         };
         app.rescan(false);
@@ -174,7 +179,18 @@ impl App {
     // ---- background jobs -------------------------------------------------
 
     fn rescan(&mut self, force: bool) {
-        let folders = self.settings.library_folders.clone();
+        let mut folders = self.settings.library_folders.clone();
+        if self.settings.index_removable {
+            // Each drive on its own, so an absent card never marks videos
+            // on another drive missing.
+            let extra: Vec<_> = self
+                .mounts
+                .iter()
+                .filter(|m| !folders.iter().any(|f| m.starts_with(f)))
+                .cloned()
+                .collect();
+            folders.extend(extra);
+        }
         let lib = self.services.library.clone();
         let tx = self.jobs.sender();
         self.ui.scan_status = Some("Scanning…".into());
@@ -227,15 +243,32 @@ impl App {
         b.location = location.clone();
         b.loading = true;
         b.error = None;
+        let lib = self.services.library.clone();
         self.jobs.spawn("list", move || {
             let result = src.list(location.as_deref()).map(|mut e| {
                 fp_sources::sort_entries(&mut e);
+                // Thumbnails the library already made for these videos.
+                for entry in e.iter_mut().filter(|e| {
+                    e.thumbnail_url.is_none() && e.kind == fp_core::source::EntryKind::Video
+                }) {
+                    if let Ok(Some(r)) = lib.get_by_location(&entry.location) {
+                        entry.thumbnail_url = r.thumbnail.map(|p| p.display().to_string());
+                    }
+                }
                 e
+            });
+            let result = result.map_err(|e| {
+                let removable = source == crate::services::REMOVABLE_SOURCE;
+                if removable && crate::services::removable_mounts().is_empty() {
+                    "No microSD card or USB drive is inserted.".to_string()
+                } else {
+                    e.to_string()
+                }
             });
             Job::Listed {
                 source,
                 location,
-                result: result.map_err(|e| e.to_string()),
+                result,
             }
         });
     }
@@ -475,6 +508,47 @@ impl App {
                     _ => {}
                 }
             }
+        }
+    }
+
+    /// Notices microSD cards and USB drives being inserted or removed.
+    fn check_mounts(&mut self) {
+        if self.mounts_checked.elapsed() < Duration::from_secs(3) {
+            return;
+        }
+        self.mounts_checked = Instant::now();
+        let now = crate::services::removable_mounts();
+        if now == self.mounts {
+            return;
+        }
+        let added: Vec<_> = now
+            .iter()
+            .filter(|m| !self.mounts.contains(m))
+            .cloned()
+            .collect();
+        self.mounts = now;
+        if let Some(m) = added.first() {
+            let name = m
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            log::info!("drive mounted: {}", m.display());
+            self.ui.toast(format!("Found drive \"{name}\""));
+            if self.settings.index_removable {
+                self.rescan(false);
+            }
+        } else {
+            log::info!("a drive was removed");
+        }
+        self.ui.invalidate();
+        if let Some(b) = self
+            .ui
+            .browse
+            .as_ref()
+            .filter(|b| b.source == crate::services::REMOVABLE_SOURCE)
+        {
+            let loc = b.location.clone();
+            self.browse(crate::services::REMOVABLE_SOURCE.into(), loc);
         }
     }
 
@@ -904,6 +978,7 @@ impl App {
 
     pub fn frame(&mut self, renderer: &mut Renderer, input: FrameInput) -> FrameOutput {
         self.poll_jobs();
+        self.check_mounts();
         self.remote_events();
         if let Some(p) = &mut self.playback {
             p.save_progress(&self.services.library, false);

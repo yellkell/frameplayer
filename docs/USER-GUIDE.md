@@ -1,0 +1,116 @@
+# FramePlayer user guide
+
+FramePlayer plays flat, 180°, 360°, fisheye and YouTube-style (EAC) videos,
+2D or 3D, on the Steam Frame, from the headset, a microSD card, a USB drive
+or your network.
+
+## Install
+
+You need a Steam Frame with **Developer Mode** on, paired once with your PC
+by Frame Control, FrameDrop or Valve's SteamOS Devkit Client.
+
+**One click (Frame Control / FrameDrop).** Open the install link from the
+release page. It points the tool at `framedrop.json`, which downloads the
+release, checks its SHA-256 and unpacks it into `~/frameplayer`.
+
+**From a PC with the installer.** Download `frameplayer-install` for your
+PC from the release page and run it:
+
+```
+frameplayer-install                         # latest release
+frameplayer-install --zip frameplayer-0.1.0-aarch64.zip
+frameplayer-install status | uninstall
+```
+
+It reuses the `frame` SSH alias created when pairing, installs into
+`~/frameplayer` (keeping the previous version as `~/frameplayer.old`) and
+adds **FramePlayer** to the Steam library with artwork. Add
+`--restart-steam` to make it show up right away.
+
+**By hand.** Copy the zip to the headset, unzip it into your home folder
+and add `~/frameplayer/frameplayer.sh` to Steam as a non-Steam game.
+
+FramePlayer then updates itself from the Settings › Updates page.
+
+## Where your videos can be
+
+| Where | How |
+|---|---|
+| `~/Videos`, `~/Downloads` | Added to the library automatically |
+| microSD card / USB drive | Added automatically when inserted (Settings › Library) |
+| Other folders on the headset | Settings › Library › Add folder |
+| XBVR, Stash and other DeoVR / HereSphere servers | Sources › Add source › DeoVR feed or HereSphere API |
+| NAS / Windows share | Sources › Add source › SMB share (`smb://nas/videos`) |
+| Nextcloud and other WebDAV | Sources › Add source › WebDAV |
+| Plex, Jellyfin, Emby, Serviio | Sources › Add source › DLNA › Search the network |
+| A web server folder listing | Sources › Add source › HTTP |
+
+### microSD cards and USB drives
+
+SteamOS mounts cards and drives under `/run/media/deck/<name>`. FramePlayer
+notices when one is inserted (a "Found drive" message appears), adds its
+videos to the library and makes thumbnails. You can also browse a card
+directly under **Sources › microSD and USB drives**.
+
+- Steam game folders (`steamapps`) on a shared card are skipped.
+- When the card is removed its videos stay in the library with your
+  ratings, resume points and adjustments; they play again once it is back.
+- Use ext4 or exFAT. exFAT is readable from Windows and macOS too.
+- Large high-bitrate 8K files play best from a fast card (A2/V30 or better).
+
+## Video formats
+
+The format is picked automatically from, in order: your own choice for that
+file, the file's spherical/stereo metadata, the file name, and the picture's
+shape. File-name tags understood include `_180`, `_360`, `_LR`/`_SBS`,
+`_TB`/`_OU`, `_RL`, `_FISHEYE190`, `_MKX200`, `_MKX220`, `_VRCA220`,
+`_EAC`, `_2D`, `_3D`.
+
+To change it: open the video, press **⚙** on the control bar, **Format**.
+Overrides are remembered per video. The same panel has position, zoom,
+IPD/depth, stereo alignment, picture controls, subtitle depth and
+keyframes (adjustments that change smoothly along the video).
+
+Codecs: H.264, HEVC (8/10-bit, HDR10/HLG tone-mapped), AV1, VP9, VP8,
+MPEG-4, MPEG-2, ProRes. Audio: AAC, AC-3/E-AC-3, Opus, Vorbis, FLAC, MP3,
+DTS, TrueHD, PCM, and spatial (ambisonic) audio that follows your head.
+Subtitles: SRT, ASS/SSA, WebVTT, and embedded text or picture subtitles.
+
+## Controls
+
+| Control | Action |
+|---|---|
+| Trigger | Click; click empty space to show or hide the controls |
+| A / X | Play / pause |
+| B / Y | Show / hide the controls |
+| Thumbstick left / right | Seek back / forward (10 s, adjustable) |
+| Thumbstick up / down | Volume (or scroll a menu you point at) |
+| Both grips | Recenter |
+| Menu | Library |
+
+Text fields bring up a keyboard in front of you; you can also type on your
+phone through the web remote.
+
+## Haptics
+
+Scripts (`.funscript`, including multi-axis `video.surge.funscript` etc.)
+are found next to the video, in `~/Interactive`, or supplied by the server.
+Add a device in **Settings › Haptics**: Intiface Central (Buttplug), TCode
+devices (OSR2/SR6 over USB serial, TCP or UDP), or The Handy (connection
+key). The seek bar shows the script's intensity.
+
+## Remote control
+
+**Settings › Remote control › Phone / browser remote** shows a QR code; scan
+it to control playback, browse the library and type from your phone. The
+**DeoVR remote API** (port 23554) works with apps that speak DeoVR's
+protocol. Both only answer devices on your local network.
+
+## Troubleshooting
+
+- Log: `~/.local/share/frameplayer/frameplayer.log`
+- Settings: `~/.config/frameplayer/settings.json` (delete to reset)
+- Network source passwords: `~/.config/frameplayer/sources.json`
+  (readable only by you)
+- "Is SteamVR running?": FramePlayer needs the headset's OpenXR runtime;
+  start it from the Steam library, not a desktop terminal.

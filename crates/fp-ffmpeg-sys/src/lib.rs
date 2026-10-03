@@ -31,6 +31,13 @@ mod bindings {
 }
 pub use bindings::*;
 
+/// The `va_list` argument of `av_log_set_callback` callbacks, whose Rust
+/// spelling differs per architecture. Pass it through untouched.
+#[cfg(target_arch = "x86_64")]
+pub type LogVaList = *mut bindings::__va_list_tag;
+#[cfg(target_arch = "aarch64")]
+pub type LogVaList = bindings::va_list;
+
 /// `AV_NOPTS_VALUE`: no timestamp.
 pub const AV_NOPTS_VALUE: i64 = i64::MIN;
 /// `AV_TIME_BASE` as a rational.

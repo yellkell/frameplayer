@@ -204,8 +204,19 @@ fn match_side_files(stems: &[&str], side: &[String]) -> Vec<(Vec<String>, Vec<St
         .collect()
 }
 
-fn is_hidden(name: &std::ffi::OsStr) -> bool {
+/// Folders never searched for videos: hidden ones, Steam game libraries
+/// (common on a microSD card shared with SteamOS) and filesystem
+/// housekeeping folders on removable drives.
+fn is_skipped(name: &std::ffi::OsStr) -> bool {
+    const SKIP: [&str; 5] = [
+        "steamapps",
+        "lost+found",
+        "$RECYCLE.BIN",
+        "System Volume Information",
+        "compatdata",
+    ];
     name.as_encoded_bytes().first() == Some(&b'.')
+        || SKIP.iter().any(|s| name.eq_ignore_ascii_case(s))
 }
 
 fn mtime_secs(meta: &std::fs::Metadata) -> Option<i64> {
@@ -286,7 +297,7 @@ impl Library {
         let walker = WalkDir::new(&root)
             .follow_links(options.follow_links)
             .into_iter()
-            .filter_entry(|e| e.depth() == 0 || !is_hidden(e.file_name()));
+            .filter_entry(|e| e.depth() == 0 || !is_skipped(e.file_name()));
         for entry in walker {
             let entry = match entry {
                 Ok(e) => e,
@@ -580,6 +591,7 @@ mod tests {
         touch(&root.join("sub/deeper/Trip_360.MKV"), b"video2");
         touch(&root.join("sub/Other.mp4"), b"video3");
         touch(&root.join(".hidden/secret.mp4"), b"no");
+        touch(&root.join("steamapps/common/Game/intro.mp4"), b"no");
         touch(&root.join("._Scene_180_LR.mp4"), b"appledouble");
         let interactive = tmp.path().join("Interactive");
         touch(&interactive.join("Other.funscript"), b"{}");

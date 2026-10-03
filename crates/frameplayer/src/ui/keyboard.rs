@@ -15,7 +15,7 @@ pub fn keyboard(ctx: &egui::Context, shift: &mut bool) -> (Vec<Event>, bool) {
         .inner_margin(10.0);
     egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
         ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
-        let key_w = (ui.available_width() - 6.0 * 11.0) / 12.0;
+        let key_w = (ui.available_width() - 6.0 * 13.0) / 13.2;
         let key = |ui: &mut egui::Ui, label: &str, w: f32| {
             ui.add(egui::Button::new(RichText::new(label).size(24.0)).min_size(Vec2::new(w, 56.0)))
                 .clicked()

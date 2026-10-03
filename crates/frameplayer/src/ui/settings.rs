@@ -149,6 +149,19 @@ fn library(ui: &mut egui::Ui, v: &mut View) {
             v.state.new_folder.clear();
         }
     });
+    ui.checkbox(
+        &mut v.settings.index_removable,
+        "Add videos on microSD cards and USB drives automatically",
+    );
+    let mounts = crate::services::removable_mounts();
+    if !mounts.is_empty() {
+        let names: Vec<String> = mounts.iter().map(|m| m.display().to_string()).collect();
+        ui.label(
+            RichText::new(format!("Drives: {}", names.join(", ")))
+                .small()
+                .color(theme::MUTED),
+        );
+    }
     let suggestions = crate::services::suggested_folders(&v.settings.library_folders);
     if !suggestions.is_empty() {
         ui.horizontal_wrapped(|ui| {
