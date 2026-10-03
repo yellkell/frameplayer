@@ -1783,6 +1783,7 @@ dependencies = [
  "ffmpeg-next",
  "fp-audio",
  "fp-core",
+ "glam",
  "libc",
  "parking_lot",
  "symphonia-codec-aac",

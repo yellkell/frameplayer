@@ -1,8 +1,31 @@
 [package]
 name = "fp-video"
+description = "FramePlayer video: demux (MP4/MOV, Matroska/WebM, optional ffmpeg), V4L2 hardware decode with DMA-BUF export, software fallback, playback engine, subtitles, thumbnails."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = ["aac"]
+# Pure-Rust AAC-LC decoding (symphonia) so MP4/MKV audio plays without ffmpeg.
+aac = ["dep:symphonia-core", "dep:symphonia-codec-aac"]
+# libavformat demuxer (TS, AVI, …) + libavcodec software video/audio decode.
+# Needs system FFmpeg (>= 7) development libraries.
+ffmpeg = ["dep:ffmpeg-next"]
+# dav1d software AV1 decoder. Needs system libdav1d.
+dav1d = ["dep:dav1d"]
+
 [dependencies]
 fp-core.workspace = true
+fp-audio.workspace = true
+crossbeam-channel.workspace = true
+glam.workspace = true
+libc.workspace = true
+parking_lot.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+symphonia-core = { version = "0.5", optional = true }
+symphonia-codec-aac = { version = "0.5", optional = true }
+ffmpeg-next = { version = "7", optional = true }
+dav1d = { version = "0.10", optional = true }
