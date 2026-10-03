@@ -31,7 +31,9 @@ pub struct Rgba {
 /// Used for photo viewing and by renderer tests.
 pub fn decode_first_frame(src: Arc<dyn ByteSource>, name: &str) -> Result<crate::VideoFrame> {
     let mut input = Input::open(src, name, Arc::new(AtomicBool::new(false)))?;
-    let vi = input.best_stream(ff::AVMEDIA_TYPE_VIDEO).ok_or(Error::NoStream("video"))?;
+    let vi = input
+        .best_stream(ff::AVMEDIA_TYPE_VIDEO)
+        .ok_or(Error::NoStream("video"))?;
     let mut dec = Decoder::open(input.streams()[vi], HwDecode::Off)?;
     let pkt = Packet::new();
     let mut frame = Frame::new();
@@ -150,7 +152,7 @@ fn scale(frame: &Frame, max_w: u32, max_h: u32, crop: Crop) -> Result<Rgba> {
             dw,
             dh,
             ff::AV_PIX_FMT_RGBA,
-            ff::SWS_AREA as i32,
+            (ff::SWS_AREA | ff::SWS_ACCURATE_RND | ff::SWS_FULL_CHR_H_INT) as i32,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
             std::ptr::null(),

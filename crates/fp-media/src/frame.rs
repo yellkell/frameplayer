@@ -68,7 +68,15 @@ pub struct VideoFrame {
     pub color: ColorInfo,
     /// Seek generation this frame belongs to.
     pub serial: u64,
+    /// Unique per decoded frame in this process, for upload caching.
+    pub id: u64,
     frame: *mut ff::AVFrame,
+}
+
+static NEXT_FRAME_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_id() -> u64 {
+    NEXT_FRAME_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 // SAFETY: the AVFrame is immutable after construction and only freed on drop;
@@ -128,6 +136,80 @@ impl VideoFrame {
                     }
                 })
                 .collect()
+        }
+    }
+
+    /// Builds a frame from tightly packed RGBA pixels (photos decoded in Rust,
+    /// test images). Converted to full-range BT.709 I420.
+    pub fn from_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<VideoFrame> {
+        if width == 0 || height == 0 || rgba.len() < (width * height * 4) as usize {
+            return Err(Error::Unsupported(
+                "RGBA buffer does not match its size".into(),
+            ));
+        }
+        let (w, h) = (width as i32, height as i32);
+        // SAFETY: a fresh frame is allocated with av_frame_get_buffer and
+        // filled by swscale from the caller's buffer, which holds w*h*4 bytes.
+        unsafe {
+            let ctx = ff::sws_getContext(
+                w,
+                h,
+                ff::AV_PIX_FMT_RGBA,
+                w,
+                h,
+                ff::AV_PIX_FMT_YUV420P,
+                (ff::SWS_BICUBIC | ff::SWS_ACCURATE_RND | ff::SWS_FULL_CHR_H_INP) as i32,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            );
+            if ctx.is_null() {
+                return Err(Error::Unsupported("swscale RGBA -> YUV".into()));
+            }
+            let coeffs = ff::sws_getCoefficients(ff::SWS_CS_ITU709 as i32);
+            ff::sws_setColorspaceDetails(ctx, coeffs, 1, coeffs, 1, 0, 1 << 16, 1 << 16);
+            let mut dst = ff::av_frame_alloc();
+            (*dst).format = ff::AV_PIX_FMT_YUV420P;
+            (*dst).width = w;
+            (*dst).height = h;
+            (*dst).colorspace = ff::AVCOL_SPC_BT709;
+            (*dst).color_range = ff::AVCOL_RANGE_JPEG;
+            (*dst).color_trc = ff::AVCOL_TRC_BT709;
+            (*dst).color_primaries = ff::AVCOL_PRI_BT709;
+            if ff::av_frame_get_buffer(dst, 0) < 0 {
+                ff::av_frame_free(&mut dst);
+                ff::sws_freeContext(ctx);
+                return Err(Error::Unsupported("frame allocation failed".into()));
+            }
+            let src = [
+                rgba.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+            ];
+            let stride = [w * 4, 0, 0, 0];
+            ff::sws_scale(
+                ctx,
+                src.as_ptr(),
+                stride.as_ptr(),
+                0,
+                h,
+                (*dst).data.as_ptr(),
+                (*dst).linesize.as_ptr(),
+            );
+            ff::sws_freeContext(ctx);
+            let color = color_info(&*dst);
+            Ok(VideoFrame {
+                pts: 0.0,
+                duration: 0.0,
+                width,
+                height,
+                layout: PixelLayout::I420 { bits: 8 },
+                color,
+                serial: 0,
+                id: next_id(),
+                frame: dst,
+            })
         }
     }
 
@@ -239,6 +321,7 @@ impl FrameConverter {
                 layout,
                 color,
                 serial,
+                id: next_id(),
                 frame: src,
             });
         }
@@ -263,7 +346,9 @@ impl FrameConverter {
                     f.width,
                     f.height,
                     dst_fmt,
-                    ff::SWS_BILINEAR as i32,
+                    // The fast paths produce wrong chroma in some builds;
+                    // accurate rounding with full chroma input is exact.
+                    (ff::SWS_BILINEAR | ff::SWS_ACCURATE_RND | ff::SWS_FULL_CHR_H_INP) as i32,
                     std::ptr::null_mut(),
                     std::ptr::null_mut(),
                     std::ptr::null(),
@@ -309,8 +394,42 @@ impl FrameConverter {
                 layout: PixelLayout::I420 { bits },
                 color,
                 serial,
+                id: next_id(),
                 frame: dst,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_rgba_grey_has_neutral_chroma() {
+        let rgba: Vec<u8> = (0..64 * 32).flat_map(|_| [128u8, 128, 128, 255]).collect();
+        let f = VideoFrame::from_rgba(64, 32, &rgba).unwrap();
+        let p = f.packed_planes();
+        assert_eq!(p.len(), 3);
+        assert_eq!(
+            (p[0].len(), p[1].len(), p[2].len()),
+            (64 * 32, 32 * 16, 32 * 16)
+        );
+        let avg = |v: &[u8]| v.iter().map(|&x| x as u32).sum::<u32>() / v.len() as u32;
+        assert!((avg(&p[0]) as i32 - 128).abs() <= 2, "Y {}", avg(&p[0]));
+        assert!((avg(&p[1]) as i32 - 128).abs() <= 2, "U {}", avg(&p[1]));
+        assert!((avg(&p[2]) as i32 - 128).abs() <= 2, "V {}", avg(&p[2]));
+        assert!(f.color.full_range);
+        // Saturated colours survive the round trip's chroma.
+        let red: Vec<u8> = (0..16 * 16).flat_map(|_| [255u8, 0, 0, 255]).collect();
+        let r = VideoFrame::from_rgba(16, 16, &red).unwrap().packed_planes();
+        // BT.709 full range red: Y ~54, Cb ~99, Cr 255.
+        assert!(
+            (r[0][0] as i32 - 54).abs() <= 3 && (r[1][0] as i32 - 99).abs() <= 3 && r[2][0] >= 250,
+            "{} {} {}",
+            r[0][0],
+            r[1][0],
+            r[2][0]
+        );
     }
 }
