@@ -287,15 +287,19 @@ pub fn run(args: &Args, out: &Path) -> Result<(), Error> {
     }
     println!("{} frames rendered", sim.frames);
     let Sim {
-        app,
+        mut app,
         renderer,
         mut eyes,
         ..
     } = sim;
     renderer.wait_idle();
     eyes.destroy(&renderer);
+    let handoff = app.handoff.take();
     app.shutdown();
     renderer.wait_idle();
     drop(renderer);
+    if let Some(argv) = handoff {
+        crate::hand_off(&argv)?;
+    }
     Ok(())
 }

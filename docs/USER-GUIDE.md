@@ -45,7 +45,7 @@ FramePlayer then updates itself from the Settings › Updates page.
 | Plex, Jellyfin, Emby, Serviio | Sources › Add source › DLNA › Search the network |
 | A web server folder listing | Sources › Add source › HTTP |
 
-### microSD cards and USB drives
+### microSD cards and USB drives (VR180 and everything else)
 
 SteamOS mounts cards and drives under `/run/media/deck/<name>`. FramePlayer
 notices when one is inserted (a "Found drive" message appears), adds its
@@ -56,6 +56,10 @@ directly under **Sources › microSD and USB drives**.
 - When the card is removed its videos stay in the library with your
   ratings, resume points and adjustments; they play again once it is back.
 - Use ext4 or exFAT. exFAT is readable from Windows and macOS too.
+- VR180 videos are recognised from their metadata (VR180 cameras, YouTube
+  VR180 downloads) or from names like `Trip_VR180.mp4`,
+  `Beach_180_LR.mp4` or `clip_180x180_3dh.mp4`. If one shows up wrong, set
+  the format once under ⚙ › Format; it is remembered for that file.
 - Large high-bitrate 8K files play best from a fast card (A2/V30 or better).
 
 ## Video formats
@@ -90,6 +94,30 @@ Subtitles: SRT, ASS/SSA, WebVTT, and embedded text or picture subtitles.
 
 Text fields bring up a keyboard in front of you; you can also type on your
 phone through the web remote.
+
+## Web XR games and experiences
+
+The **Web XR** tab opens WebXR pages (for example the game at
+`https://yellkell.com/fac`, already in the list) in a browser that can do
+immersive VR on the Frame:
+
+1. Install **Chromium XR** once: download the arm64 release from
+   <https://github.com/saphid/chromium-webxr-steam-frame> and run its
+   `frame/install.sh` on the headset (Desktop Mode terminal or SSH). The Web
+   XR tab shows the browser it found.
+2. In FramePlayer, **Web XR › Launch**. FramePlayer closes its VR view and
+   the page opens; press the page's **Enter VR** button.
+3. Close the browser to return to FramePlayer's library.
+
+Add your own pages with a name and address, or type one and press **Open
+now**. Only `http://` and `https://` pages open.
+
+Notes: Chromium XR currently runs with part of Chromium's sandbox switched
+off (its `--disable-seccomp-filter-sandbox` flag), because SteamVR refuses
+the sandboxed browser otherwise. Use it for VR pages you trust.
+[docs/webxr](webxr/README.md) has the patches that fix this properly. The
+hand-off needs FramePlayer started from Steam (it runs `frameplayer.sh`);
+started any other way, FramePlayer just opens the browser and quits.
 
 ## Haptics
 

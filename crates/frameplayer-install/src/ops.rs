@@ -1158,8 +1158,13 @@ mod tests {
         fn run(&mut self, script: &str) -> Result<crate::remote::CmdOutput> {
             use std::process::{Command, Stdio};
             let mut cmd = Command::new("/bin/sh");
+            // Only the fake home: inherited XDG directories would point
+            // the scripts (e.g. uninstall --purge) at the real user's files.
             cmd.arg("-s")
                 .env("HOME", &self.home)
+                .env_remove("XDG_CONFIG_HOME")
+                .env_remove("XDG_DATA_HOME")
+                .env_remove("XDG_CACHE_HOME")
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());

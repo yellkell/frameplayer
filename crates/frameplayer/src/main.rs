@@ -14,6 +14,7 @@ mod prober;
 mod services;
 mod settings;
 mod ui;
+mod webxr;
 mod world;
 
 use app::{App, FrameInput};
@@ -178,10 +179,42 @@ fn info(file: &str) -> Result<(), Error> {
     Ok(())
 }
 
+/// Gives the headset to a WebXR browser: through `frameplayer.sh` when it
+/// started us (it runs the browser, then restarts FramePlayer), else
+/// directly.
+fn hand_off(argv: &[String]) -> Result<(), Error> {
+    if std::env::var_os(webxr::LAUNCHER_ENV).is_some() {
+        webxr::write_handoff(&webxr::handoff_path(), argv)?;
+        log::info!("handing off to the launcher: {argv:?}");
+        std::process::exit(webxr::HANDOFF_EXIT_CODE);
+    }
+    log::info!("starting {argv:?}");
+    webxr::spawn_detached(argv)?;
+    Ok(())
+}
+
 fn run_xr(args: &Args) -> Result<(), Error> {
-    let ctx = Arc::new(XrContext::new("FramePlayer").map_err(|e| {
-        format!("{e}\nIs SteamVR running? FramePlayer needs an OpenXR runtime (the Steam Frame provides one).")
-    })?);
+    // Coming back from a WebXR browser, SteamVR may still be closing its
+    // session: keep trying for a while instead of quitting.
+    let attempts = if std::env::var_os("FRAMEPLAYER_RESUMED").is_some() {
+        20
+    } else {
+        1
+    };
+    let mut tries = 0;
+    let ctx = loop {
+        tries += 1;
+        match XrContext::new("FramePlayer") {
+            Ok(c) => break Arc::new(c),
+            Err(e) if tries < attempts => {
+                log::info!("OpenXR not ready yet ({e}); retrying");
+                std::thread::sleep(Duration::from_secs(1));
+            }
+            Err(e) => {
+                return Err(format!("{e}\nIs SteamVR running? FramePlayer needs an OpenXR runtime (the Steam Frame provides one).").into());
+            }
+        }
+    };
     log::info!("OpenXR runtime {} on {}", ctx.runtime, ctx.system_name);
     let gpu = Arc::new(Gpu::new(&ctx.creator(), "FramePlayer")?);
     log::info!("GPU {} ({})", gpu.device_name, gpu.driver);
@@ -271,9 +304,15 @@ fn run_xr(args: &Args) -> Result<(), Error> {
     }
     log::info!("{frames} frames, {} with video", video_frames);
     renderer.wait_idle();
+    let handoff = app.handoff.take();
     app.shutdown();
     drop(renderer);
     drop(session);
+    drop(gpu);
+    drop(ctx);
+    if let Some(argv) = handoff {
+        hand_off(&argv)?;
+    }
     log::info!("bye");
     Ok(())
 }

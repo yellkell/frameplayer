@@ -27,8 +27,19 @@ if command -v zig >/dev/null; then zig="$(command -v zig)"; else zig="python3 -m
 
 zig_wrappers() { # dir
   mkdir -p "$1"
-  printf '#!/bin/sh\nexec %s cc -target aarch64-linux-gnu.2.28 "$@"\n' "$zig" > "$1/cc"
-  printf '#!/bin/sh\nexec %s c++ -target aarch64-linux-gnu.2.28 "$@"\n' "$zig" > "$1/cxx"
+  # zig rejects a glibc-versioned target for preprocess-only runs (-E), used
+  # by meson to read compiler defines and by FFmpeg's configure for header
+  # checks. Preprocessing does not link anything, so drop the version there;
+  # compiles and links target glibc 2.28 (tools/package.sh verifies).
+  local tool
+  for tool in cc c++; do
+    cat > "$1/${tool/c++/cxx}" <<WRAP
+#!/bin/sh
+target=aarch64-linux-gnu.2.28
+for a in "\$@"; do [ "\$a" = -E ] && target=aarch64-linux-gnu; done
+exec $zig $tool -target "\$target" "\$@"
+WRAP
+  done
   printf '#!/bin/sh\nexec %s ar "$@"\n' "$zig" > "$1/ar"
   printf '#!/bin/sh\nexec %s ranlib "$@"\n' "$zig" > "$1/ranlib"
   printf '#!/bin/sh\nexec %s nm "$@"\n' "$zig" > "$1/nm"

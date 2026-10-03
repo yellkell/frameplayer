@@ -331,6 +331,17 @@ mod tests {
         );
     }
 
+    /// A VR180 camera/YouTube-style file: no hint in the name, only
+    /// Spherical Video V2 metadata (made by tools/make-vr180-fixture.py).
+    #[test]
+    fn vr180_spherical_metadata() {
+        let info = read_info(&open("camera_clip.mp4"));
+        assert_eq!(info.hints.stereo, Some(StereoLayout::SideBySide));
+        assert_eq!(info.hints.projection, Some(Projection::EQUIRECT_180));
+        let d = fp_core::format::resolve(None, info.hints, "camera_clip.mp4", 256, 128);
+        assert_eq!(d.evidence, fp_core::format::Evidence::Metadata);
+    }
+
     #[test]
     fn hevc10_mkv_stereo_metadata_and_subtitles() {
         let info = read_info(&open("hevc10_tb.mkv"));

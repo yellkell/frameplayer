@@ -89,6 +89,8 @@ pub struct App {
     /// Removable drives seen at the last check, and when that was.
     mounts: Vec<std::path::PathBuf>,
     mounts_checked: Instant,
+    /// Browser command to run after FramePlayer exits (WebXR hand-off).
+    pub handoff: Option<Vec<String>>,
     quit: bool,
 }
 
@@ -138,6 +140,7 @@ impl App {
             update: None,
             mounts: crate::services::removable_mounts(),
             mounts_checked: Instant::now(),
+            handoff: None,
             quit: false,
         };
         app.rescan(false);
@@ -787,6 +790,35 @@ impl App {
             }
             Action::CheckUpdates => self.check_updates(),
             Action::InstallUpdate => self.install_update(),
+            Action::LaunchWeb(url) => match (
+                crate::webxr::normalize_url(&url),
+                crate::webxr::find_browser(),
+            ) {
+                (Err(e), _) => self.ui.toast(e),
+                (Ok(_), None) => {
+                    self.ui.screen = ui::Screen::Web;
+                    self.ui
+                        .toast("Install Chromium XR first (see the Web XR tab)");
+                }
+                (Ok(url), Some(b)) => {
+                    let home = std::env::var_os("HOME")
+                        .map(std::path::PathBuf::from)
+                        .unwrap_or_default();
+                    log::info!("handing the headset to {} for {url}", b.path().display());
+                    self.handoff = Some(crate::webxr::command(&b, &url, &home));
+                    self.quit = true;
+                }
+            },
+            Action::AddWebApp(w) => {
+                if !self.settings.web_apps.iter().any(|a| a.url == w.url) {
+                    self.settings.web_apps.push(w);
+                }
+            }
+            Action::RemoveWebApp(i) => {
+                if i < self.settings.web_apps.len() {
+                    self.settings.web_apps.remove(i);
+                }
+            }
             Action::Recenter => self.reanchor = true,
             Action::TogglePassthrough => self.settings.passthrough = !self.settings.passthrough,
             Action::ShowBrowser(show) => {

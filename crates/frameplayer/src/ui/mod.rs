@@ -9,6 +9,7 @@ pub mod settings;
 pub mod sources;
 pub mod theme;
 pub mod thumbs;
+pub mod web;
 
 use crate::playback::OpenRequest;
 use crate::settings::HapticDeviceConfig;
@@ -89,6 +90,10 @@ pub enum Action {
     RegenerateToken,
     CheckUpdates,
     InstallUpdate,
+    /// Hand the headset to the WebXR browser at this page.
+    LaunchWeb(String),
+    AddWebApp(crate::webxr::WebApp),
+    RemoveWebApp(usize),
     Recenter,
     TogglePassthrough,
     /// Show the library/browser panel (during playback).
@@ -101,6 +106,7 @@ pub enum Screen {
     Home,
     Library,
     Sources,
+    Web,
     Settings,
 }
 
@@ -213,6 +219,8 @@ pub struct UiState {
     /// Hide the seek-preview while scrubbing has not moved.
     pub scrub: Option<f64>,
     pub keyboard_shift: bool,
+    pub web_name: String,
+    pub web_url: String,
     /// Facts for the About tab (runtime, GPU, decoder...).
     pub about: Vec<(String, String)>,
 }
@@ -255,6 +263,8 @@ impl Default for UiState {
             toast: None,
             scrub: None,
             keyboard_shift: false,
+            web_name: String::new(),
+            web_url: String::new(),
             about: Vec::new(),
         }
     }

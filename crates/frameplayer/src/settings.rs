@@ -62,6 +62,8 @@ pub struct Settings {
     pub check_updates: bool,
     /// UI text size multiplier.
     pub ui_scale: f32,
+    /// WebXR pages listed in the Web XR tab.
+    pub web_apps: Vec<crate::webxr::WebApp>,
 }
 
 impl Default for Settings {
@@ -92,6 +94,7 @@ impl Default for Settings {
             update_channel: "stable".into(),
             check_updates: true,
             ui_scale: 1.0,
+            web_apps: crate::webxr::default_apps(),
         }
     }
 }

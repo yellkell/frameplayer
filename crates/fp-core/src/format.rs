@@ -194,8 +194,15 @@ pub fn detect_from_name(name: &str) -> Option<VideoFormat> {
                 swapped = true;
             }
             "MONO" | "2D" => stereo = Some(StereoLayout::Mono),
-            "180" | "180X180" | "DOME" => projection = Some(Projection::EQUIRECT_180),
-            "360" | "360X180" | "SPHERE" => projection = Some(Projection::EQUIRECT_360),
+            "180" | "180X180" | "DOME" | "VR180" | "180VR" | "VR180SBS" | "VR180LR" => {
+                projection = Some(Projection::EQUIRECT_180);
+                if t.ends_with("SBS") || t.ends_with("LR") {
+                    stereo = Some(StereoLayout::SideBySide);
+                }
+            }
+            "360" | "360X180" | "SPHERE" | "VR360" | "360VR" => {
+                projection = Some(Projection::EQUIRECT_360)
+            }
             "FLAT" => projection = Some(Projection::Flat),
             "EAC" | "EAC360" => projection = Some(Projection::Eac { h_fov: 360.0 }),
             "EAC180" => projection = Some(Projection::Eac { h_fov: 180.0 }),
@@ -341,6 +348,30 @@ mod tests {
 
     fn d(name: &str) -> Option<(P, S, bool)> {
         detect_from_name(name).map(|f| (f.projection, f.stereo, f.eyes_swapped))
+    }
+
+    #[test]
+    fn vr180_names() {
+        let sbs180 = Some((P::EQUIRECT_180, S::SideBySide, false));
+        for n in [
+            "MyTrip_VR180.mp4",
+            "vr180_beach.mov",
+            "Beach.VR180.SBS.mp4",
+            "GoPro_VR180_8K.mp4",
+            "trip-vr180-3d.mp4",
+            "x_VR180SBS.mp4",
+        ] {
+            assert_eq!(d(n), sbs180, "{n}");
+        }
+        assert_eq!(
+            d("talk_VR180_2D.mp4"),
+            Some((P::EQUIRECT_180, S::Mono, false))
+        );
+        assert_eq!(
+            d("talk_VR180_TB.mp4"),
+            Some((P::EQUIRECT_180, S::TopBottom, false))
+        );
+        assert_eq!(d("tour_VR360.mp4"), Some((P::EQUIRECT_360, S::Mono, false)));
     }
 
     #[test]

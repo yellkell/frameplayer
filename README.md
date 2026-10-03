@@ -21,6 +21,8 @@ harness; it has not yet run on Steam Frame hardware.
   HTTP folders
 - Haptics: funscripts with Intiface, TCode devices and The Handy
 - Phone web remote and DeoVR remote API
+- Web XR tab: launches WebXR games and pages (e.g. yellkell.com/fac) in
+  the Frame's Chromium XR browser and returns to FramePlayer afterwards
 - Signed self-updates; install via Frame Control/FrameDrop or
   `frameplayer-install`
 
