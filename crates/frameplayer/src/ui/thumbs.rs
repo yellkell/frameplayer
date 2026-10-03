@@ -120,6 +120,24 @@ impl Thumbs {
 
 /// Paints `tex` covering `rect` (cropping to keep its aspect).
 pub fn paint_cover(painter: &egui::Painter, rect: egui::Rect, tex: &TextureHandle) {
+    painter.image(tex.id(), rect, cover_uv(rect, tex), egui::Color32::WHITE);
+}
+
+/// [`paint_cover`] with rounded corners.
+pub fn paint_cover_rounded(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    tex: &TextureHandle,
+    radius: u8,
+) {
+    painter.add(
+        egui::epaint::RectShape::filled(rect, radius, egui::Color32::WHITE)
+            .with_texture(tex.id(), cover_uv(rect, tex)),
+    );
+}
+
+/// The part of the texture that fills `rect`, cropped to its aspect.
+fn cover_uv(rect: egui::Rect, tex: &TextureHandle) -> egui::Rect {
     let [w, h] = tex.size();
     let r_aspect = rect.width() / rect.height().max(1.0);
     let t_aspect = w as f32 / (h as f32).max(1.0);
@@ -136,5 +154,5 @@ pub fn paint_cover(painter: &egui::Painter, rect: egui::Rect, tex: &TextureHandl
             egui::pos2(1.0, 0.5 + f / 2.0),
         )
     };
-    painter.image(tex.id(), rect, uv, egui::Color32::WHITE);
+    uv
 }

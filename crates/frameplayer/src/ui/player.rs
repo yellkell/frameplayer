@@ -54,7 +54,7 @@ pub fn format_choices() -> Vec<(&'static str, VideoFormat)> {
 pub fn control_bar(ctx: &egui::Context, v: &mut View) {
     let frame = egui::Frame::new()
         .fill(theme::BG)
-        .stroke(egui::Stroke::new(1.0, theme::STROKE))
+        .stroke(egui::Stroke::new(1.0_f32, theme::STROKE))
         .corner_radius(28)
         .inner_margin(egui::Margin::symmetric(28, 18));
     egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
@@ -246,10 +246,10 @@ pub fn control_bar(ctx: &egui::Context, v: &mut View) {
     });
 }
 
-const SPEEDS: [f32; 6] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+const SPEEDS: [f64; 6] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
 /// The next speed in [`SPEEDS`], wrapping round.
-fn next_speed(speed: f32) -> f32 {
+fn next_speed(speed: f64) -> f64 {
     SPEEDS
         .iter()
         .copied()
@@ -257,7 +257,7 @@ fn next_speed(speed: f32) -> f32 {
         .unwrap_or(SPEEDS[0])
 }
 
-fn fmt_speed(speed: f32) -> String {
+fn fmt_speed(speed: f64) -> String {
     let s = format!("{speed:.2}");
     format!("{}×", s.trim_end_matches('0').trim_end_matches('.'))
 }

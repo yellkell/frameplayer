@@ -170,7 +170,7 @@ fn visuals() -> Visuals {
     let mut v = Visuals::dark();
     v.panel_fill = BG;
     v.window_fill = SURFACE;
-    v.window_stroke = Stroke::new(1.0, STROKE);
+    v.window_stroke = Stroke::new(1.0_f32, STROKE);
     v.window_corner_radius = CornerRadius::same(16);
     v.window_shadow = Shadow {
         offset: [0, 10],
@@ -188,7 +188,7 @@ fn visuals() -> Visuals {
     v.warn_fg_color = WARN;
     v.error_fg_color = ERROR;
     v.selection.bg_fill = ACCENT;
-    v.selection.stroke = Stroke::new(1.5, Color32::WHITE);
+    v.selection.stroke = Stroke::new(1.5_f32, Color32::WHITE);
     v.slider_trailing_fill = true;
     v.handle_shape = egui::style::HandleShape::Circle;
     v.striped = false;
@@ -197,21 +197,21 @@ fn visuals() -> Visuals {
     let w = &mut v.widgets;
     w.noninteractive.bg_fill = SURFACE;
     w.noninteractive.weak_bg_fill = SURFACE;
-    w.noninteractive.bg_stroke = Stroke::new(1.0, STROKE);
-    w.noninteractive.fg_stroke = Stroke::new(1.0, Color32::from_rgb(214, 220, 228));
+    w.noninteractive.bg_stroke = Stroke::new(1.0_f32, STROKE);
+    w.noninteractive.fg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(214, 220, 228));
     w.inactive.bg_fill = SURFACE_3;
     w.inactive.weak_bg_fill = SURFACE_2;
     w.inactive.bg_stroke = Stroke::NONE;
-    w.inactive.fg_stroke = Stroke::new(1.5, TEXT);
+    w.inactive.fg_stroke = Stroke::new(1.5_f32, TEXT);
     w.hovered.bg_fill = SURFACE_3;
     w.hovered.weak_bg_fill = SURFACE_3;
-    w.hovered.bg_stroke = Stroke::new(1.5, Color32::from_white_alpha(70));
-    w.hovered.fg_stroke = Stroke::new(1.5, Color32::WHITE);
+    w.hovered.bg_stroke = Stroke::new(1.5_f32, Color32::from_white_alpha(70));
+    w.hovered.fg_stroke = Stroke::new(1.5_f32, Color32::WHITE);
     w.hovered.expansion = 1.0;
     w.active.bg_fill = ACCENT;
     w.active.weak_bg_fill = ACCENT_PRESSED;
-    w.active.bg_stroke = Stroke::new(1.5, ACCENT_HOVER);
-    w.active.fg_stroke = Stroke::new(1.5, Color32::WHITE);
+    w.active.bg_stroke = Stroke::new(1.5_f32, ACCENT_HOVER);
+    w.active.fg_stroke = Stroke::new(1.5_f32, Color32::WHITE);
     w.active.expansion = 1.0;
     w.open = w.hovered;
     for s in [

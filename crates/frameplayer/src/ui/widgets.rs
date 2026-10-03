@@ -86,7 +86,7 @@ pub fn button_sized(
             p.rect_stroke(
                 r,
                 radius,
-                Stroke::new(1.5, Color32::from_white_alpha((t * 60.0) as u8)),
+                Stroke::new(1.5_f32, Color32::from_white_alpha((t * 60.0) as u8)),
                 StrokeKind::Outside,
             );
         }
@@ -125,7 +125,7 @@ pub fn icon_button(ui: &mut Ui, icon: &str, size: f32, selected: bool) -> Respon
             p.circle_stroke(
                 c,
                 radius,
-                Stroke::new(1.5, Color32::from_white_alpha((t * 50.0) as u8)),
+                Stroke::new(1.5_f32, Color32::from_white_alpha((t * 50.0) as u8)),
             );
         }
         let fg = if selected {
@@ -237,7 +237,7 @@ pub fn section_label(ui: &mut Ui, text: &str) {
 pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     egui::Frame::new()
         .fill(theme::SURFACE)
-        .stroke(Stroke::new(1.0, theme::STROKE))
+        .stroke(Stroke::new(1.0_f32, theme::STROKE))
         .corner_radius(14)
         .inner_margin(egui::Margin::symmetric(4, 4))
         .show(ui, |ui| {
@@ -277,7 +277,7 @@ impl Rows<'_> {
             ui.painter().hline(
                 (x.min + 16.0)..=(x.max - 16.0),
                 y,
-                Stroke::new(1.0, theme::STROKE),
+                Stroke::new(1.0_f32, theme::STROKE),
             );
         }
         self.n += 1;
@@ -347,7 +347,7 @@ impl Rows<'_> {
             ui.painter().hline(
                 (x.min + 16.0)..=(x.max - 16.0),
                 y,
-                Stroke::new(1.0, theme::STROKE),
+                Stroke::new(1.0_f32, theme::STROKE),
             );
         }
         self.n += 1;
