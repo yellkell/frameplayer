@@ -15,6 +15,7 @@ mod prober;
 mod services;
 mod settings;
 mod ui;
+mod webview;
 mod webxr;
 mod world;
 
@@ -315,6 +316,7 @@ fn run_xr(args: &Args) -> Result<(), Error> {
     log::info!("{frames} frames, {} with video", video_frames);
     renderer.wait_idle();
     let handoff = app.handoff.take();
+    let yield_to_web = app.yield_to_web;
     app.shutdown();
     drop(renderer);
     drop(session);
@@ -322,6 +324,15 @@ fn run_xr(args: &Args) -> Result<(), Error> {
     drop(ctx);
     if let Some(argv) = handoff {
         hand_off(&argv)?;
+    }
+    if yield_to_web {
+        // The headset is free: let the embedded browser's page start its VR
+        // session. frameplayer.sh waits for it to end and starts us again.
+        webview::write_xr_ready()?;
+        log::info!("headset handed to the web view's page");
+        if std::env::var_os(webxr::LAUNCHER_ENV).is_some() {
+            std::process::exit(webview::YIELD_EXIT_CODE);
+        }
     }
     log::info!("bye");
     Ok(())

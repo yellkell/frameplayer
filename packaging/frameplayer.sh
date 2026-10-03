@@ -5,6 +5,9 @@
 # when FramePlayer exits with code 75 it has written a browser command to
 # ~/.local/share/frameplayer/handoff; that browser gets the headset, and
 # FramePlayer starts again when it closes. Steam sees one app throughout.
+# Exit code 76 is the Web XR tab's embedded browser: a page asked for the
+# headset, so wait for its VR session to end (the browser writes xr-ended)
+# and start FramePlayer again on the Web XR tab.
 here="$(cd "$(dirname "$0")" && pwd)"
 export LD_LIBRARY_PATH="$here/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export FRAMEPLAYER_LAUNCHER=1
@@ -53,10 +56,32 @@ without_steam_overlay() {
   fi
 }
 
+webxr="${XDG_DATA_HOME:-$HOME/.local/share}/frameplayer/web-xr"
+webpid="${XDG_DATA_HOME:-$HOME/.local/share}/frameplayer/web/frameplayer-browser.pid"
+
+# Until the embedded browser's VR session ends, or the browser is gone.
+wait_for_web_xr() {
+  local pid
+  pid=$(cat "$webpid" 2>/dev/null)
+  while [[ ! -e "$webxr/xr-ended" ]]; do
+    [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null && break
+    sleep 0.25
+  done
+  rm -f "$webxr/xr-ended" "$webxr/xr-ready"
+}
+
 while :; do
   rm -f "$handoff"
   "$here/frameplayer" "$@"
   rc=$?
+  if [[ $rc -eq 76 ]]; then
+    echo "$(date -Is) web view page has the headset" >>"$log"
+    wait_for_web_xr
+    echo "$(date -Is) web view page's VR session ended" >>"$log"
+    set --
+    export FRAMEPLAYER_RESUMED=web
+    continue
+  fi
   [[ $rc -eq 75 && -s "$handoff" ]] || exit $rc
   mapfile -d '' -t argv <"$handoff"
   rm -f "$handoff"
