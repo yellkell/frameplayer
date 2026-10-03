@@ -56,6 +56,16 @@ jobs:
           LD_LIBRARY_PATH: ${{ github.workspace }}/third_party/ffmpeg/x86_64/lib
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
         run: cargo test --workspace
+      # Every screen as a flat PNG, for design review (artifact ui-preview).
+      - name: UI preview
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/third_party/ffmpeg/x86_64/lib
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+        run: tools/ui-preview.sh ui-preview
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-preview
+          path: ui-preview/
       - name: Package for the Steam Frame (aarch64, glibc 2.28)
         run: tools/package.sh
       - uses: actions/upload-artifact@v4

@@ -1230,6 +1230,73 @@ impl Renderer {
     pub fn wait_idle(&self) {
         self.gpu.wait_idle();
     }
+
+    /// Reads a painted panel back as `(width, height, RGBA8)`: sRGB-encoded,
+    /// premultiplied alpha, as egui painted it. For screenshots of the UI
+    /// (the desktop preview); waits for the GPU.
+    pub fn read_panel(&self, panel: PanelId) -> Result<(u32, u32, Vec<u8>)> {
+        let Some(Some(p)) = self.panels.get(panel) else {
+            return Err(crate::Error::Unsupported("no such panel".into()));
+        };
+        let (image, extent) = (p.image.image, p.image.extent);
+        let mut readback = Buffer::new(
+            &self.gpu,
+            extent.width as u64 * extent.height as u64 * 4,
+            vk::BufferUsageFlags::TRANSFER_DST,
+            MemoryLocation::GpuToCpu,
+            "panel readback",
+        )?;
+        let buffer = readback.buffer;
+        self.wait_idle();
+        self.one_shot(|gpu, cmd| {
+            mem::barrier(
+                gpu,
+                cmd,
+                image,
+                mem::range(0, 1),
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                mem::SHADER_READ,
+                mem::TRANSFER_READ,
+            );
+            let region = vk::BufferImageCopy::default()
+                .image_subresource(vk::ImageSubresourceLayers {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    mip_level: 0,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                })
+                .image_extent(vk::Extent3D {
+                    width: extent.width,
+                    height: extent.height,
+                    depth: 1,
+                });
+            // SAFETY: level 0 is in TRANSFER_SRC; the buffer holds it.
+            unsafe {
+                gpu.device.cmd_copy_image_to_buffer(
+                    cmd,
+                    image,
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    buffer,
+                    &[region],
+                )
+            };
+            mem::barrier(
+                gpu,
+                cmd,
+                image,
+                mem::range(0, 1),
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                mem::TRANSFER_READ,
+                mem::SHADER_READ,
+            );
+        })?;
+        let n = (extent.width * extent.height * 4) as usize;
+        let px = readback.bytes()[..n].to_vec();
+        readback.destroy(&self.gpu);
+        Ok((extent.width, extent.height, px))
+    }
 }
 
 fn usage_sampled() -> vk::ImageUsageFlags {

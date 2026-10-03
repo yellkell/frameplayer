@@ -20,6 +20,8 @@
 //! | `open LOCATION` | open a file or URL |
 //! | `shot NAME` | save the left eye as OUT_DIR/NAME.png |
 //! | `sbs NAME` | save both eyes side by side |
+//! | `screen NAME [TAB]` | show a browser screen (`home`, `library`, `sources`, `web`, `settings` and its tab) |
+//! | `panel PANEL NAME` | save a panel's image flat, pixel for pixel, as OUT_DIR/NAME.png |
 
 use crate::app::{App, FrameInput};
 use crate::{Args, Error};
@@ -129,6 +131,28 @@ impl Sim {
         Ok(())
     }
 
+    fn save_panel(&mut self, panel: &str, name: &str) -> Result<(), Error> {
+        let id = self
+            .app
+            .panel_id(panel)
+            .ok_or(format!("panel {panel} is not visible"))?;
+        let (w, h, mut px) = self.renderer.read_panel(id)?;
+        // egui paints premultiplied alpha; PNG wants it straight.
+        for p in px.chunks_mut(4) {
+            let a = p[3] as u32;
+            if a > 0 && a < 255 {
+                for c in &mut p[..3] {
+                    *c = ((*c as u32 * 255 + a / 2) / a).min(255) as u8;
+                }
+            }
+        }
+        let img = image::RgbaImage::from_raw(w, h, px).ok_or("bad panel size")?;
+        let path = self.out.join(format!("{name}.png"));
+        img.save(&path)?;
+        println!("saved {}", path.display());
+        Ok(())
+    }
+
     fn command(&mut self, line: &str) -> Result<bool, Error> {
         let parts: Vec<&str> = line.split_whitespace().collect();
         let num = |i: usize| -> Result<f32, Error> {
@@ -171,6 +195,38 @@ impl Sim {
                     }
                     std::thread::sleep(Duration::from_millis(11));
                 }
+            }
+            Some("screen") => {
+                use crate::ui::{Screen, SettingsTab};
+                let screen = match parts.get(1).copied().unwrap_or("home") {
+                    "home" => Screen::Home,
+                    "library" => Screen::Library,
+                    "sources" => Screen::Sources,
+                    "web" => Screen::Web,
+                    "settings" => Screen::Settings,
+                    other => return Err(format!("no screen {other:?}").into()),
+                };
+                let ui = &mut self.app.ui;
+                ui.screen = screen;
+                ui.details = None;
+                if let Some(tab) = parts.get(2) {
+                    ui.settings_tab = match *tab {
+                        "playback" => SettingsTab::Playback,
+                        "library" => SettingsTab::Library,
+                        "haptics" => SettingsTab::Haptics,
+                        "remote" => SettingsTab::Remote,
+                        "updates" => SettingsTab::Updates,
+                        "about" => SettingsTab::About,
+                        other => return Err(format!("no settings tab {other:?}").into()),
+                    };
+                }
+                self.app.repaint_all();
+                self.run_frames(3)?;
+            }
+            Some("panel") => {
+                let name = parts.get(1).copied().unwrap_or("main");
+                let file = parts.get(2).copied().unwrap_or(name);
+                self.save_panel(name, file)?;
             }
             Some("look") => self.head = dir_quat(num(1)?, num(2)?),
             Some("aim") => {
@@ -221,7 +277,12 @@ impl Sim {
                 self.run_frames(2)?;
             }
             Some("open") => {
-                let loc = crate::location(parts.get(1).ok_or("open needs a location")?);
+                // The rest of the line, so paths may contain spaces.
+                let arg = line.trim().strip_prefix("open").unwrap_or("").trim();
+                if arg.is_empty() {
+                    return Err("open needs a location".into());
+                }
+                let loc = crate::location(arg);
                 self.app.open(crate::playback::OpenRequest {
                     location: loc,
                     ..Default::default()

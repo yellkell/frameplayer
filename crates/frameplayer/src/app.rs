@@ -209,14 +209,31 @@ impl App {
     }
 
     /// World position of a fractional point on a visible panel (tests).
-    pub fn panel_point(&self, name: &str, x: f32, y: f32) -> Option<Vec3> {
-        let i = match name {
+    fn panel_index(name: &str) -> Option<usize> {
+        Some(match name {
             "main" => MAIN,
             "bar" => BAR,
             "adjust" => ADJUST,
             "keyboard" => KEYBOARD,
             _ => return None,
-        };
+        })
+    }
+
+    /// Repaints every panel next frame (the preview changed the UI state).
+    pub fn repaint_all(&mut self) {
+        for p in self.panels.iter_mut() {
+            p.request_repaint();
+        }
+    }
+
+    /// The renderer's image of a visible panel, for preview screenshots.
+    pub fn panel_id(&self, name: &str) -> Option<fp_render::PanelId> {
+        let p = &self.panels[Self::panel_index(name)?];
+        p.visible.then_some(p.id).flatten()
+    }
+
+    pub fn panel_point(&self, name: &str, x: f32, y: f32) -> Option<Vec3> {
+        let i = Self::panel_index(name)?;
         let p = &self.panels[i];
         if !p.visible {
             return None;
