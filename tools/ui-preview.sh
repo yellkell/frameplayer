@@ -62,7 +62,7 @@ frames 8
 panel bar player-bar
 sbs player-scene
 # A hover label: the Hide button.
-point bar 0.898 0.626
+point bar 0.896 0.79
 frames 10
 panel bar player-bar-tip
 # The adjustments panel.
