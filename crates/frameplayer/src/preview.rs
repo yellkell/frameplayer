@@ -21,6 +21,7 @@
 //! | `shot NAME` | save the left eye as OUT_DIR/NAME.png |
 //! | `sbs NAME` | save both eyes side by side |
 //! | `screen NAME [TAB]` | show a browser screen (`home`, `library`, `sources`, `settings` and its tab) |
+//! | `adjust` | open the adjustments panel |
 //! | `panel PANEL NAME` | save a panel's image flat, pixel for pixel, as OUT_DIR/NAME.png |
 
 use crate::app::{App, FrameInput};
@@ -225,7 +226,15 @@ impl Sim {
             Some("panel") => {
                 let name = parts.get(1).copied().unwrap_or("main");
                 let file = parts.get(2).copied().unwrap_or(name);
-                self.save_panel(name, file)?;
+                // A missing panel shouldn't lose the rest of the shots.
+                if let Err(e) = self.save_panel(name, file) {
+                    log::warn!("{line}: {e}");
+                }
+            }
+            Some("adjust") => {
+                self.app.ui.adjust_open = true;
+                self.app.repaint_all();
+                self.run_frames(3)?;
             }
             Some("look") => self.head = dir_quat(num(1)?, num(2)?),
             Some("aim") => {

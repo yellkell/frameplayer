@@ -61,9 +61,8 @@ point bar 0.5 0.5
 frames 8
 panel bar player-bar
 sbs player-scene
-# The adjustments panel, from its button on the bar.
-point bar 0.684 0.626
-click
+# The adjustments panel.
+adjust
 frames 8
 panel adjust adjust
 panel bar player-bar-adjust
