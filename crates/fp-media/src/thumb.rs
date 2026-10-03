@@ -27,6 +27,41 @@ pub struct Rgba {
     pub pixels: Vec<u8>,
 }
 
+/// Decodes the first video frame (or a still image: PNG, JPEG) at full size.
+/// Used for photo viewing and by renderer tests.
+pub fn decode_first_frame(src: Arc<dyn ByteSource>, name: &str) -> Result<crate::VideoFrame> {
+    let mut input = Input::open(src, name, Arc::new(AtomicBool::new(false)))?;
+    let vi = input.best_stream(ff::AVMEDIA_TYPE_VIDEO).ok_or(Error::NoStream("video"))?;
+    let mut dec = Decoder::open(input.streams()[vi], HwDecode::Off)?;
+    let pkt = Packet::new();
+    let mut frame = Frame::new();
+    let mut conv = crate::frame::FrameConverter::default();
+    let mut eof = false;
+    for _ in 0..10_000 {
+        if !eof {
+            if input.read(pkt.as_ptr())? {
+                if pkt.stream_index() == vi {
+                    dec.send(pkt.as_ptr())?;
+                }
+                // SAFETY: valid packet.
+                unsafe { ff::av_packet_unref(pkt.as_ptr()) };
+            } else {
+                eof = true;
+                dec.send(std::ptr::null())?;
+            }
+        }
+        match dec.receive(&mut frame)? {
+            Some(true) => {
+                let t = dec.frame_time(&frame).unwrap_or(0.0);
+                return conv.convert(frame.take_raw(), t, 0.0, 0);
+            }
+            Some(false) => break,
+            None => {}
+        }
+    }
+    Err(Error::Unsupported("no frame decoded".into()))
+}
+
 /// Reads stream information without decoding.
 pub fn probe(src: Arc<dyn ByteSource>, name: &str) -> Result<MediaInfo> {
     let input = Input::open(src, name, Arc::new(AtomicBool::new(false)))?;
@@ -183,6 +218,12 @@ mod tests {
             .map(|p| (p[0] / 32, p[1] / 32, p[2] / 32))
             .collect();
         assert!(distinct.len() > 10, "image looks blank");
+    }
+
+    #[test]
+    fn decodes_first_frame_full_size() {
+        let f = decode_first_frame(src("h264_aac_180_LR.mp4"), "x.mp4").unwrap();
+        assert_eq!((f.width, f.height), (640, 320));
     }
 
     #[test]
