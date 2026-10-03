@@ -141,7 +141,7 @@ fn cover_uv(rect: egui::Rect, tex: &TextureHandle) -> egui::Rect {
     let [w, h] = tex.size();
     let r_aspect = rect.width() / rect.height().max(1.0);
     let t_aspect = w as f32 / (h as f32).max(1.0);
-    let uv = if t_aspect > r_aspect {
+    if t_aspect > r_aspect {
         let f = r_aspect / t_aspect;
         egui::Rect::from_min_max(
             egui::pos2(0.5 - f / 2.0, 0.0),
@@ -153,6 +153,5 @@ fn cover_uv(rect: egui::Rect, tex: &TextureHandle) -> egui::Rect {
             egui::pos2(0.0, 0.5 - f / 2.0),
             egui::pos2(1.0, 0.5 + f / 2.0),
         )
-    };
-    uv
+    }
 }

@@ -260,10 +260,6 @@ pub fn rows(ui: &mut Ui, add: impl FnOnce(&mut Rows)) {
 }
 
 impl Rows<'_> {
-    pub fn ui(&mut self) -> &mut Ui {
-        self.ui
-    }
-
     pub fn row<R>(
         &mut self,
         title: &str,

@@ -326,34 +326,6 @@ pub fn big_button(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Respon
     ui.add(b)
 }
 
-/// A labelled slider row with a reset-to-default button.
-pub fn slider_row(
-    ui: &mut egui::Ui,
-    label: &str,
-    value: &mut f32,
-    range: std::ops::RangeInclusive<f32>,
-    default: f32,
-    suffix: &str,
-) -> bool {
-    let mut changed = false;
-    ui.horizontal(|ui| {
-        ui.add_sized([170.0, 36.0], egui::Label::new(label));
-        changed |= ui
-            .add(
-                egui::Slider::new(value, range)
-                    .suffix(suffix)
-                    .max_decimals(2),
-            )
-            .changed();
-        if (*value - default).abs() > 1e-4 && ui.small_button("↺").on_hover_text("Reset").clicked()
-        {
-            *value = default;
-            changed = true;
-        }
-    });
-    changed
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

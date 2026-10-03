@@ -1,7 +1,8 @@
 //! Playback UI: the control bar, the adjustments panel and subtitles.
 
 use super::theme::Weight;
-use super::{Action, View, fmt_time, icons, slider_row, theme, widgets};
+use super::widgets::Kind;
+use super::{Action, View, fmt_time, icons, theme, widgets};
 use egui::{Align, Color32, Layout, RichText, Sense, Vec2};
 use fp_core::format::{Projection, StereoLayout, VideoFormat};
 use fp_core::view::ViewSettings;
@@ -443,266 +444,344 @@ fn seek_bar(
     }
 }
 
-const TABS: [&str; 6] = [
-    "Format",
-    "Position",
-    "Stereo",
-    "Picture",
-    "Audio & text",
-    "Haptics",
+const TABS: [(&str, &str); 6] = [
+    (icons::FRAME_CORNERS, "Format"),
+    (icons::ARROWS_OUT_CARDINAL, "Position"),
+    (icons::CUBE, "Stereo"),
+    (icons::SUN, "Picture"),
+    (icons::SUBTITLES, "Audio & text"),
+    (icons::VIBRATE, "Haptics"),
 ];
 
 /// Format, view adjustments, tracks and haptics for the open video.
 pub fn adjust_panel(ctx: &egui::Context, v: &mut View) {
     let frame = egui::Frame::new()
-        .fill(theme::PANEL_BG)
-        .corner_radius(18.0)
-        .inner_margin(16.0);
+        .fill(theme::BG)
+        .stroke(egui::Stroke::new(1.0_f32, theme::STROKE))
+        .corner_radius(28)
+        .inner_margin(egui::Margin::same(22));
     egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
         let Some(pb) = v.playback.as_deref_mut() else {
             return;
         };
+        ui.label(
+            RichText::new("Adjust")
+                .font(theme::font(Weight::Bold, 26.0))
+                .color(theme::TEXT),
+        );
+        ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
-            for (i, t) in TABS.iter().enumerate() {
-                if ui
-                    .selectable_label(v.state.adjust_tab == i, RichText::new(*t).size(19.0))
-                    .clicked()
-                {
+            ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
+            for (i, &(icon, label)) in TABS.iter().enumerate() {
+                if widgets::chip_icon(ui, Some(icon), label, v.state.adjust_tab == i).clicked() {
                     v.state.adjust_tab = i;
                 }
             }
         });
-        ui.separator();
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            let before = pb.settings;
-            let s = &mut pb.settings;
-            let d = ViewSettings::default();
-            match v.state.adjust_tab {
-                0 => {
-                    ui.label(format!(
-                        "Detected: {} ({})",
-                        pb.detected.label(),
-                        pb.evidence.label()
-                    ));
-                    ui.add_space(4.0);
-                    let user = pb.evidence == fp_core::format::Evidence::User;
-                    ui.horizontal_wrapped(|ui| {
-                        if ui.selectable_label(!user, "Automatic").clicked() {
-                            v.actions.push(Action::SetFormat(None));
-                        }
-                        for (label, f) in format_choices() {
-                            if ui.selectable_label(user && pb.format == f, label).clicked() {
-                                v.actions.push(Action::SetFormat(Some(f)));
+        ui.add_space(10.0);
+        // Save and reset stay at the bottom while the page scrolls.
+        let footer = v.state.adjust_tab <= 3;
+        let footer_h = if footer { 64.0 } else { 0.0 };
+        let page = ui.available_height() - footer_h;
+        egui::ScrollArea::vertical()
+            .max_height(page)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 10.0;
+                let before = pb.settings;
+                let s = &mut pb.settings;
+                let d = ViewSettings::default();
+                match v.state.adjust_tab {
+                    0 => {
+                        let user = pb.evidence == fp_core::format::Evidence::User;
+                        widgets::section_label(ui, "Format");
+                        ui.label(
+                            RichText::new(format!(
+                                "Detected {} ({})",
+                                pb.detected.label(),
+                                pb.evidence.label()
+                            ))
+                            .color(theme::TEXT_2),
+                        );
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
+                            if widgets::chip_icon(ui, Some(icons::MAGIC_WAND), "Automatic", !user)
+                                .clicked()
+                            {
+                                v.actions.push(Action::SetFormat(None));
                             }
+                            for (label, f) in format_choices() {
+                                if widgets::chip(ui, label, user && pb.format == f).clicked() {
+                                    v.actions.push(Action::SetFormat(Some(f)));
+                                }
+                            }
+                        });
+                        if let Projection::Fisheye { fov } = pb.format.projection {
+                            ui.add_space(6.0);
+                            widgets::section_label(ui, "Fisheye lens");
+                            widgets::rows(ui, |r| {
+                                let mut f = fov;
+                                if r.slider(
+                                    "Field of view",
+                                    None,
+                                    &mut f,
+                                    150.0..=240.0,
+                                    fov,
+                                    "°",
+                                    0,
+                                ) {
+                                    v.actions.push(Action::SetFormat(Some(VideoFormat {
+                                        projection: Projection::Fisheye { fov: f.round() },
+                                        ..pb.format
+                                    })));
+                                }
+                                r.slider("Lens k1", None, &mut s.lens_k1, -0.5..=0.5, 0.0, "", 2);
+                                r.slider("Lens k2", None, &mut s.lens_k2, -0.5..=0.5, 0.0, "", 2);
+                            });
                         }
-                    });
-                    ui.add_space(6.0);
-                    ui.label(RichText::new("Fisheye field of view").strong());
-                    if let Projection::Fisheye { fov } = pb.format.projection {
-                        let mut f = fov;
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut f, 150.0..=240.0)
-                                    .suffix("°")
-                                    .step_by(1.0),
+                        if pb.format.projection == Projection::Flat {
+                            ui.add_space(6.0);
+                            widgets::section_label(ui, "Screen");
+                            widgets::rows(ui, |r| {
+                                r.slider(
+                                    "Distance",
+                                    None,
+                                    &mut s.screen_distance,
+                                    1.0..=20.0,
+                                    d.screen_distance,
+                                    " m",
+                                    1,
+                                );
+                                r.slider(
+                                    "Width",
+                                    None,
+                                    &mut s.screen_width,
+                                    0.5..=30.0,
+                                    d.screen_width,
+                                    " m",
+                                    1,
+                                );
+                                r.slider(
+                                    "Curvature",
+                                    None,
+                                    &mut s.screen_curvature,
+                                    0.0..=1.0,
+                                    0.0,
+                                    "",
+                                    2,
+                                );
+                            });
+                        }
+                    }
+                    1 => {
+                        widgets::rows(ui, |r| {
+                            r.slider("Yaw", None, &mut s.yaw, -180.0..=180.0, 0.0, "°", 0);
+                            r.slider("Pitch", None, &mut s.pitch, -90.0..=90.0, 0.0, "°", 0);
+                            r.slider("Roll", None, &mut s.roll, -45.0..=45.0, 0.0, "°", 0);
+                            r.slider("Zoom", None, &mut s.zoom, 0.5..=2.5, 1.0, "×", 2);
+                        });
+                        ui.label(
+                            RichText::new(
+                                "Or hold a grip and the trigger and drag the picture; \
+                                 press the thumbstick to undo.",
                             )
-                            .changed()
-                        {
-                            v.actions.push(Action::SetFormat(Some(VideoFormat {
-                                projection: Projection::Fisheye { fov: f },
-                                ..pb.format
-                            })));
-                        }
-                        slider_row(ui, "Lens k1", &mut s.lens_k1, -0.5..=0.5, 0.0, "");
-                        slider_row(ui, "Lens k2", &mut s.lens_k2, -0.5..=0.5, 0.0, "");
-                    } else {
-                        ui.label(RichText::new("Only for fisheye formats.").color(theme::MUTED));
-                    }
-                    if pb.format.projection == Projection::Flat {
-                        ui.add_space(6.0);
-                        ui.label(RichText::new("Screen").strong());
-                        slider_row(
-                            ui,
-                            "Distance",
-                            &mut s.screen_distance,
-                            1.0..=20.0,
-                            d.screen_distance,
-                            " m",
+                            .color(theme::TEXT_3),
                         );
-                        slider_row(
-                            ui,
-                            "Width",
-                            &mut s.screen_width,
-                            0.5..=30.0,
-                            d.screen_width,
-                            " m",
-                        );
-                        slider_row(ui, "Curvature", &mut s.screen_curvature, 0.0..=1.0, 0.0, "");
                     }
+                    2 => {
+                        widgets::rows(ui, |r| {
+                            r.slider(
+                                "Depth",
+                                Some("Eye separation; lower if it's hard to fuse."),
+                                &mut s.ipd_offset,
+                                -5.0..=5.0,
+                                0.0,
+                                "°",
+                                1,
+                            );
+                            r.slider(
+                                "Vertical align",
+                                None,
+                                &mut s.vertical_align,
+                                -3.0..=3.0,
+                                0.0,
+                                "°",
+                                1,
+                            );
+                            r.slider(
+                                "Rotation align",
+                                None,
+                                &mut s.rotation_align,
+                                -3.0..=3.0,
+                                0.0,
+                                "°",
+                                1,
+                            );
+                            r.switch(
+                                "Swap eyes",
+                                Some("For left/right swapped files."),
+                                &mut s.swap_eyes,
+                            );
+                            r.slider(
+                                "Subtitle depth",
+                                None,
+                                &mut s.subtitle_distance,
+                                0.8..=10.0,
+                                d.subtitle_distance,
+                                " m",
+                                1,
+                            );
+                        });
+                    }
+                    3 => {
+                        widgets::rows(ui, |r| {
+                            r.slider(
+                                "Brightness",
+                                None,
+                                &mut s.brightness,
+                                -0.5..=0.5,
+                                0.0,
+                                "",
+                                2,
+                            );
+                            r.slider("Contrast", None, &mut s.contrast, 0.5..=1.5, 1.0, "", 2);
+                            r.slider("Saturation", None, &mut s.saturation, 0.0..=2.0, 1.0, "", 2);
+                            r.slider("Gamma", None, &mut s.gamma, 0.5..=2.0, 1.0, "", 2);
+                            r.slider("Sharpen", None, &mut s.sharpen, 0.0..=1.0, 0.0, "", 2);
+                        });
+                    }
+                    4 => audio_and_text(ui, pb, v.actions),
+                    _ => haptics_tab(ui, pb.script_count, v.settings, v.devices),
                 }
-                1 => {
-                    slider_row(ui, "Yaw", &mut s.yaw, -180.0..=180.0, 0.0, "°");
-                    slider_row(ui, "Pitch", &mut s.pitch, -90.0..=90.0, 0.0, "°");
-                    slider_row(ui, "Roll", &mut s.roll, -45.0..=45.0, 0.0, "°");
-                    slider_row(ui, "Zoom", &mut s.zoom, 0.5..=2.5, 1.0, "×");
-                    ui.label(
-                        RichText::new(
-                            "Tip: hold both grips and twist to rotate, or recenter from the bar.",
-                        )
-                        .color(theme::MUTED),
-                    );
+                if pb.settings != before {
+                    pb.settings_dirty = true;
                 }
-                2 => {
-                    slider_row(ui, "IPD / depth", &mut s.ipd_offset, -5.0..=5.0, 0.0, "°");
-                    slider_row(
+            });
+        if footer {
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                let label = if pb.record_id.is_some() {
+                    "Save for this video"
+                } else {
+                    "Keep for this session"
+                };
+                if ui
+                    .add_enabled_ui(pb.settings_dirty, |ui| {
+                        widgets::button(ui, Some(icons::CHECK), label, Kind::Primary)
+                    })
+                    .inner
+                    .clicked()
+                {
+                    v.actions.push(Action::SaveView);
+                }
+                if widgets::button(
+                    ui,
+                    Some(icons::ARROW_COUNTER_CLOCKWISE),
+                    "Reset",
+                    Kind::Secondary,
+                )
+                .clicked()
+                {
+                    v.actions.push(Action::ResetView);
+                }
+                if widgets::icon_button(ui, icons::TIMER, 48.0, false)
+                    .on_hover_text("Keyframe here: settings change smoothly between keyframes")
+                    .clicked()
+                {
+                    v.actions.push(Action::AddKeyframe);
+                }
+                if !pb.keyframes.frames.is_empty()
+                    && widgets::button(
                         ui,
-                        "Vertical align",
-                        &mut s.vertical_align,
-                        -3.0..=3.0,
-                        0.0,
-                        "°",
-                    );
-                    slider_row(
-                        ui,
-                        "Rotation align",
-                        &mut s.rotation_align,
-                        -3.0..=3.0,
-                        0.0,
-                        "°",
-                    );
-                    ui.checkbox(&mut s.swap_eyes, "Swap left and right eyes");
-                    slider_row(
-                        ui,
-                        "Subtitle depth",
-                        &mut s.subtitle_distance,
-                        0.8..=10.0,
-                        d.subtitle_distance,
-                        " m",
-                    );
+                        None,
+                        &format!("Clear {} keyframes", pb.keyframes.frames.len()),
+                        Kind::Ghost,
+                    )
+                    .clicked()
+                {
+                    v.actions.push(Action::ClearKeyframes);
                 }
-                3 => {
-                    slider_row(ui, "Brightness", &mut s.brightness, -0.5..=0.5, 0.0, "");
-                    slider_row(ui, "Contrast", &mut s.contrast, 0.5..=1.5, 1.0, "");
-                    slider_row(ui, "Saturation", &mut s.saturation, 0.0..=2.0, 1.0, "");
-                    slider_row(ui, "Gamma", &mut s.gamma, 0.5..=2.0, 1.0, "");
-                    slider_row(ui, "Sharpen", &mut s.sharpen, 0.0..=1.0, 0.0, "");
-                }
-                4 => audio_and_text(ui, pb, v.actions),
-                _ => haptics_tab(ui, pb.script_count, v.settings, v.devices),
-            }
-            if pb.settings != before {
-                pb.settings_dirty = true;
-            }
-            if v.state.adjust_tab <= 3 {
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    let label = if pb.record_id.is_some() {
-                        "Save for this video"
-                    } else {
-                        "Keep for this session"
-                    };
-                    if ui
-                        .add_enabled(pb.settings_dirty, egui::Button::new(label))
-                        .clicked()
-                    {
-                        v.actions.push(Action::SaveView);
-                    }
-                    if ui.button("Reset").clicked() {
-                        v.actions.push(Action::ResetView);
-                    }
-                    if ui
-                        .button("Keyframe here")
-                        .on_hover_text("Settings change smoothly between keyframes")
-                        .clicked()
-                    {
-                        v.actions.push(Action::AddKeyframe);
-                    }
-                    if !pb.keyframes.frames.is_empty()
-                        && ui
-                            .button(format!("Clear {} keyframes", pb.keyframes.frames.len()))
-                            .clicked()
-                    {
-                        v.actions.push(Action::ClearKeyframes);
-                    }
-                });
-            }
-        });
+            });
+        }
     });
 }
 
 fn audio_and_text(ui: &mut egui::Ui, pb: &crate::playback::Playback, actions: &mut Vec<Action>) {
     let info = pb.player.info();
-    ui.label(RichText::new("Audio").strong());
+    widgets::section_label(ui, "Audio");
     let current = pb.player.audio_stream();
-    let mut any = false;
-    for s in info.audio_streams() {
-        any = true;
-        let mut label = format!("#{} {}", s.index, s.codec);
-        if let Some(l) = &s.language {
-            label += &format!(" [{l}]");
-        }
-        if let Some(t) = &s.title {
-            label += &format!(" {t}");
-        }
-        label += &format!(" {} ch", s.channels);
-        if s.ambisonic {
-            label += " · spatial";
-        }
-        if ui
-            .selectable_label(current == Some(s.index), label)
-            .clicked()
-        {
-            actions.push(Action::SelectAudio(s.index));
-        }
+    let streams: Vec<_> = info.audio_streams().collect();
+    if streams.is_empty() {
+        ui.label(RichText::new("No audio").color(theme::TEXT_3));
+    } else {
+        widgets::rows(ui, |r| {
+            for s in &streams {
+                let mut title = s
+                    .title
+                    .clone()
+                    .or_else(|| s.language.clone())
+                    .unwrap_or_else(|| format!("Track {}", s.index));
+                if s.ambisonic {
+                    title += " · spatial";
+                }
+                let desc = format!("{} · {} ch", s.codec, s.channels);
+                r.row(&title, Some(desc.as_str()), |ui| {
+                    if radio(ui, current == Some(s.index)).clicked() {
+                        actions.push(Action::SelectAudio(s.index));
+                    }
+                });
+            }
+        });
     }
-    if !any {
-        ui.label(RichText::new("No audio").color(theme::MUTED));
-    }
-    ui.add_space(8.0);
-    ui.label(RichText::new("Subtitles").strong());
+    widgets::section_label(ui, "Subtitles");
     let sub_stream = pb.player.subtitle_stream();
     let off = sub_stream.is_none() && pb.active_subtitle_file.is_none();
-    if ui.selectable_label(off, "Off").clicked() {
-        actions.push(Action::SelectSubtitleFile(None));
-        actions.push(Action::SelectSubtitleStream(None));
-    }
-    for (i, (name, _)) in pb.subtitle_files.iter().enumerate() {
-        if ui
-            .selectable_label(pb.active_subtitle_file == Some(i), format!("File: {name}"))
-            .clicked()
-        {
-            actions.push(Action::SelectSubtitleFile(Some(i)));
-        }
-    }
-    for s in info.subtitle_streams() {
-        let mut label = format!("Track #{} {}", s.index, s.codec);
-        if let Some(l) = &s.language {
-            label += &format!(" [{l}]");
-        }
-        if let Some(t) = &s.title {
-            label += &format!(" {t}");
-        }
-        if ui
-            .selectable_label(
-                sub_stream == Some(s.index) && pb.active_subtitle_file.is_none(),
-                label,
-            )
-            .clicked()
-        {
-            actions.push(Action::SelectSubtitleFile(None));
-            actions.push(Action::SelectSubtitleStream(Some(s.index)));
-        }
-    }
-    if !pb.markers.is_empty() {
-        ui.add_space(8.0);
-        ui.label(RichText::new("Chapters and bookmarks").strong());
-        for (t, name) in &pb.markers {
-            if ui.button(format!("{}  {name}", fmt_time(*t))).clicked() {
-                actions.push(Action::Seek(*t));
+    widgets::rows(ui, |r| {
+        r.row("Off", None, |ui| {
+            if radio(ui, off).clicked() {
+                actions.push(Action::SelectSubtitleFile(None));
+                actions.push(Action::SelectSubtitleStream(None));
             }
+        });
+        for (i, (name, _)) in pb.subtitle_files.iter().enumerate() {
+            r.row(name, Some("File"), |ui| {
+                if radio(ui, pb.active_subtitle_file == Some(i)).clicked() {
+                    actions.push(Action::SelectSubtitleFile(Some(i)));
+                }
+            });
         }
+        for s in info.subtitle_streams() {
+            let title = s
+                .title
+                .clone()
+                .or_else(|| s.language.clone())
+                .unwrap_or_else(|| format!("Track {}", s.index));
+            let desc = format!("Track {} · {}", s.index, s.codec);
+            r.row(&title, Some(desc.as_str()), |ui| {
+                let on = sub_stream == Some(s.index) && pb.active_subtitle_file.is_none();
+                if radio(ui, on).clicked() {
+                    actions.push(Action::SelectSubtitleFile(None));
+                    actions.push(Action::SelectSubtitleStream(Some(s.index)));
+                }
+            });
+        }
+    });
+    if !pb.markers.is_empty() {
+        widgets::section_label(ui, "Chapters and bookmarks");
+        widgets::rows(ui, |r| {
+            for (t, name) in &pb.markers {
+                r.row(name, Some(fmt_time(*t).as_str()), |ui| {
+                    if widgets::icon_button(ui, icons::PLAY, 40.0, false)
+                        .on_hover_text("Go there")
+                        .clicked()
+                    {
+                        actions.push(Action::Seek(*t));
+                    }
+                });
+            }
+        });
     }
-    ui.add_space(8.0);
     let st = pb.player.stats();
     ui.label(
         RichText::new(format!(
@@ -714,9 +793,34 @@ fn audio_and_text(ui: &mut egui::Ui, pb: &crate::playback::Playback, actions: &m
             st.audio_decoder,
             st.audio_sink
         ))
-        .small()
-        .color(theme::MUTED),
+        .font(theme::font(Weight::Regular, 14.0))
+        .color(theme::TEXT_3),
     );
+}
+
+/// A round radio mark, filled when chosen; the whole row reads as the choice.
+fn radio(ui: &mut egui::Ui, on: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::click());
+    let t = ui
+        .ctx()
+        .animate_bool_with_time(resp.id, resp.hovered(), 0.12);
+    let p = ui.painter();
+    p.circle_filled(
+        rect.center(),
+        18.0,
+        Color32::from_white_alpha((t * 18.0) as u8),
+    );
+    if on {
+        p.circle_filled(rect.center(), 11.0, theme::ACCENT);
+        p.circle_filled(rect.center(), 4.5, Color32::WHITE);
+    } else {
+        p.circle_stroke(
+            rect.center(),
+            10.0,
+            egui::Stroke::new(2.0_f32, theme::TEXT_3.lerp_to_gamma(Color32::WHITE, t)),
+        );
+    }
+    resp
 }
 
 fn haptics_tab(
@@ -725,48 +829,72 @@ fn haptics_tab(
     settings: &mut crate::settings::Settings,
     devices: &[fp_haptics::DeviceStatus],
 ) {
-    if scripts == 0 {
-        ui.label(RichText::new("No haptic script for this video.").color(theme::MUTED));
-    } else {
-        ui.label(format!("{scripts} script axis(es) loaded."));
-    }
+    ui.label(
+        RichText::new(if scripts == 0 {
+            "No haptic script for this video.".to_string()
+        } else {
+            format!("{scripts} script axis(es) loaded.")
+        })
+        .color(theme::TEXT_2),
+    );
     let mut offset = settings.haptics.offset_ms as f32;
-    if slider_row(ui, "Timing offset", &mut offset, -500.0..=500.0, 0.0, " ms") {
-        settings.haptics.offset_ms = offset.round() as i64;
-    }
     let l0 = settings
         .haptics
         .axes
         .entry(fp_haptics::Axis::L0)
         .or_default();
     let (mut lo, mut hi) = (l0.min * 100.0, l0.max * 100.0);
-    let a = slider_row(ui, "Stroke bottom", &mut lo, 0.0..=100.0, 0.0, "%");
-    let b = slider_row(ui, "Stroke top", &mut hi, 0.0..=100.0, 100.0, "%");
+    let (mut a, mut b, mut o) = (false, false, false);
+    let mut invert = l0.invert;
+    widgets::rows(ui, |r| {
+        o = r.slider(
+            "Timing offset",
+            None,
+            &mut offset,
+            -500.0..=500.0,
+            0.0,
+            " ms",
+            0,
+        );
+        a = r.slider("Stroke bottom", None, &mut lo, 0.0..=100.0, 0.0, "%", 0);
+        b = r.slider("Stroke top", None, &mut hi, 0.0..=100.0, 100.0, "%", 0);
+        r.switch("Invert stroke", None, &mut invert);
+    });
+    let l0 = settings
+        .haptics
+        .axes
+        .entry(fp_haptics::Axis::L0)
+        .or_default();
+    l0.invert = invert;
     if a || b {
         l0.min = (lo / 100.0).min(hi / 100.0 - 0.05).max(0.0);
         l0.max = (hi / 100.0).max(l0.min + 0.05).min(1.0);
     }
-    ui.checkbox(&mut l0.invert, "Invert stroke");
-    ui.add_space(6.0);
-    ui.label(RichText::new("Devices").strong());
+    if o {
+        settings.haptics.offset_ms = offset.round() as i64;
+    }
+    widgets::section_label(ui, "Devices");
     if devices.is_empty() {
         ui.label(
-            RichText::new("None connected. Add one in Settings › Haptics.").color(theme::MUTED),
+            RichText::new("None connected. Add one in Settings › Haptics.").color(theme::TEXT_3),
         );
-    }
-    for d in devices {
-        let (c, s) = if d.connected {
-            (theme::OK, "connected")
-        } else {
-            (theme::ERROR, "disconnected")
-        };
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("⚡").color(c));
-            ui.label(format!("{} — {s}", d.name));
+    } else {
+        widgets::rows(ui, |r| {
+            for d in devices {
+                let desc = if d.connected {
+                    "Connected".to_string()
+                } else {
+                    d.last_error
+                        .clone()
+                        .unwrap_or_else(|| "Not connected".into())
+                };
+                r.row(&d.name, Some(desc.as_str()), |ui| {
+                    let c = if d.connected { theme::OK } else { theme::ERROR };
+                    let (dot, _) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
+                    ui.painter().circle_filled(dot.center(), 5.0, c);
+                });
+            }
         });
-        if let Some(e) = &d.last_error {
-            ui.label(RichText::new(e).small().color(theme::ERROR));
-        }
     }
 }
 
