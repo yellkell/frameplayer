@@ -47,21 +47,25 @@ if [[ -s $home_file ]]; then
 fi
 (( $# )) || set -- "$home_url"
 
-# WebXR at 90 Hz. SteamVR runs each app at its per-app preferredRefreshRate
-# (72 Hz unless set) and overrides what the app requests through OpenXR, so
-# set it for this Steam app, unless one was already chosen in SteamVR's
-# per-app video settings. CHROMIUM_XR_REFRESH_RATE=0 leaves it alone.
-rate=${CHROMIUM_XR_REFRESH_RATE:-90}
+# SteamVR runs each app at its own per-app video settings and overrides what
+# the app asks for through OpenXR, so set this Steam app's defaults unless
+# they were already chosen in SteamVR's per-app video settings:
+# - 90 Hz (SteamVR's default is 72 Hz). CHROMIUM_XR_REFRESH_RATE=0 leaves it alone.
+# - 2160 pixels per eye, the Frame's panel resolution (SteamVR's default is
+#   1728, 80%). CHROMIUM_XR_RESOLUTION=0 leaves it alone; lower it if a page
+#   stutters.
 vrcmd=/opt/steamvr/bin/linuxarm64/vrcmd
 vrsettings=$HOME/.config/openvr/config/steamvr.vrsettings
-if [[ -n ${SteamAppId:-} && $rate != 0 && -x $vrcmd ]] &&
-    ! python3 -c 'import json, sys
+app_default() { # KEY TYPE VALUE
+  [[ -n ${SteamAppId:-} && $3 != 0 && -x $vrcmd ]] || return 0
+  python3 -c 'import json, sys
 s = json.load(open(sys.argv[1])).get("steam.app." + sys.argv[2], {})
-sys.exit(0 if "preferredRefreshRate" in s else 1)' "$vrsettings" "$SteamAppId" 2>/dev/null; then
-  LD_LIBRARY_PATH=${vrcmd%/*} "$vrcmd" --set-settings-float \
-    "steam.app.$SteamAppId.preferredRefreshRate" "$rate" >/dev/null 2>&1 || true
-  echo "set SteamVR preferredRefreshRate=$rate for steam.app.$SteamAppId"
-fi
+sys.exit(0 if sys.argv[3] in s else 1)' "$vrsettings" "$SteamAppId" "$1" 2>/dev/null && return 0
+  LD_LIBRARY_PATH=${vrcmd%/*} "$vrcmd" --set-settings-"$2" "steam.app.$SteamAppId.$1" "$3" >/dev/null 2>&1 || true
+  echo "set SteamVR $1=$3 for steam.app.$SteamAppId"
+}
+app_default preferredRefreshRate float "${CHROMIUM_XR_REFRESH_RATE:-90}"
+app_default resolutionOverride int "${CHROMIUM_XR_RESOLUTION:-2160}"
 
 flags=(
   --user-data-dir="$HOME/.config/$name"
