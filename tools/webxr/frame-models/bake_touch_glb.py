@@ -120,6 +120,43 @@ def write_glb(path, gltf, binary):
     Path(path).write_bytes(struct.pack("<4sII", b"glTF", 2, 12 + len(chunks)) + chunks)
 
 
+COMPONENT_BYTES = {5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4}
+TYPE_SIZE = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}
+
+
+def deinterleave(gltf, binary):
+    """Gives every accessor in an interleaved buffer view (byteStride) its
+    own tightly packed view. SteamVR's models interleave position, normal
+    and UV; some loaders' mesh batching (IWSDK's) copies attribute arrays
+    whole and runs out of bounds on interleaved ones."""
+    out = bytearray(binary)
+    views = gltf["bufferViews"]
+    for acc in gltf.get("accessors", []):
+        if "bufferView" not in acc:
+            continue
+        view = views[acc["bufferView"]]
+        stride = view.get("byteStride")
+        elem = COMPONENT_BYTES[acc["componentType"]] * TYPE_SIZE[acc["type"]]
+        if not stride or stride == elem:
+            continue
+        start = view.get("byteOffset", 0) + acc.get("byteOffset", 0)
+        packed = b"".join(
+            binary[start + i * stride: start + i * stride + elem] for i in range(acc["count"])
+        )
+        out += bytes(-len(out) % 4)
+        views.append({
+            "buffer": view.get("buffer", 0),
+            "byteOffset": len(out),
+            "byteLength": len(packed),
+            "target": 34962,
+        })
+        out += packed
+        acc["bufferView"] = len(views) - 1
+        acc["byteOffset"] = 0
+    gltf["buffers"][0]["byteLength"] = len(out)
+    return bytes(out)
+
+
 # ---- baking -------------------------------------------------------------------
 
 class Model:
@@ -271,6 +308,7 @@ def main():
             print(f"{side}: no model")
             continue
         gltf, binary = read_glb(src / hand["asset"])
+        binary = deinterleave(gltf, binary)
         done = bake_hand(gltf, hand)
         write_glb(dst / f"{side}.glb", gltf, binary)
         print(f"{side}: {dst / (side + '.glb')} animates {', '.join(done) or 'nothing'}")
