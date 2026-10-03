@@ -20,7 +20,7 @@
 //! | `open LOCATION` | open a file or URL |
 //! | `shot NAME` | save the left eye as OUT_DIR/NAME.png |
 //! | `sbs NAME` | save both eyes side by side |
-//! | `screen NAME [TAB]` | show a browser screen (`home`, `library`, `sources`, `web`, `settings` and its tab) |
+//! | `screen NAME [TAB]` | show a browser screen (`home`, `library`, `sources`, `settings` and its tab) |
 //! | `panel PANEL NAME` | save a panel's image flat, pixel for pixel, as OUT_DIR/NAME.png |
 
 use crate::app::{App, FrameInput};
@@ -202,7 +202,6 @@ impl Sim {
                     "home" => Screen::Home,
                     "library" => Screen::Library,
                     "sources" => Screen::Sources,
-                    "web" => Screen::Web,
                     "settings" => Screen::Settings,
                     other => return Err(format!("no screen {other:?}").into()),
                 };
@@ -361,12 +360,8 @@ pub fn run(args: &Args, out: &Path) -> Result<(), Error> {
     } = sim;
     renderer.wait_idle();
     eyes.destroy(&renderer);
-    let handoff = app.handoff.take();
     app.shutdown();
     renderer.wait_idle();
     drop(renderer);
-    if let Some(argv) = handoff {
-        crate::hand_off(&argv)?;
-    }
     Ok(())
 }

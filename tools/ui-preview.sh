@@ -29,9 +29,6 @@ wait 1
 panel main library
 screen sources
 panel main sources
-screen web
-wait 1
-panel main web
 screen settings playback
 panel main settings-playback
 screen settings library

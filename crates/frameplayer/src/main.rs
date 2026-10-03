@@ -15,8 +15,6 @@ mod prober;
 mod services;
 mod settings;
 mod ui;
-mod webview;
-mod webxr;
 mod world;
 
 use app::{App, FrameInput};
@@ -181,20 +179,6 @@ fn info(file: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// Gives the headset to a WebXR browser: through `frameplayer.sh` when it
-/// started us (it runs the browser, then restarts FramePlayer), else
-/// directly.
-fn hand_off(argv: &[String]) -> Result<(), Error> {
-    if std::env::var_os(webxr::LAUNCHER_ENV).is_some() {
-        webxr::write_handoff(&webxr::handoff_path(), argv)?;
-        log::info!("handing off to the launcher: {argv:?}");
-        std::process::exit(webxr::HANDOFF_EXIT_CODE);
-    }
-    log::info!("starting {argv:?}");
-    webxr::spawn_detached(argv)?;
-    Ok(())
-}
-
 fn run_xr(args: &Args) -> Result<(), Error> {
     // Coming back from a WebXR browser, SteamVR may still be closing its
     // session: keep trying for a while instead of quitting.
@@ -315,27 +299,11 @@ fn run_xr(args: &Args) -> Result<(), Error> {
     }
     log::info!("{frames} frames, {} with video", video_frames);
     renderer.wait_idle();
-    let handoff = app.handoff.take();
-    let yield_to_web = app.yield_to_web;
     app.shutdown();
     drop(renderer);
     drop(session);
     drop(gpu);
     drop(ctx);
-    if let Some(argv) = handoff {
-        hand_off(&argv)?;
-    }
-    if yield_to_web {
-        // The headset is free once this process is gone: frameplayer.sh
-        // tells the embedded browser's page (xr-ready) after we exit, waits
-        // for its VR session to end and starts us again. SteamVR refuses the
-        // page's session while our OpenXR connection is still closing.
-        log::info!("handing the headset to the web view's page");
-        if std::env::var_os(webxr::LAUNCHER_ENV).is_some() {
-            std::process::exit(webview::YIELD_EXIT_CODE);
-        }
-        webview::write_xr_ready()?;
-    }
     log::info!("bye");
     Ok(())
 }

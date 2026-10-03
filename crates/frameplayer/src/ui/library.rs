@@ -25,7 +25,6 @@ pub fn browser(ctx: &egui::Context, v: &mut View) {
                     (Screen::Home, "Home"),
                     (Screen::Library, "Library"),
                     (Screen::Sources, "Sources"),
-                    (Screen::Web, "Web XR"),
                     (Screen::Settings, "Settings"),
                 ] {
                     if big_button(ui, label, v.state.screen == s).clicked() {
@@ -81,7 +80,6 @@ pub fn browser(ctx: &egui::Context, v: &mut View) {
             Screen::Home => home(ui, v),
             Screen::Library => library(ui, v),
             Screen::Sources => super::sources::sources(ui, v),
-            Screen::Web => super::web::web(ui, v),
             Screen::Settings => super::settings::settings(ui, v),
         }
     });

@@ -4,7 +4,7 @@ A native Linux ARM64 VR video player for the Valve Steam Frame. Aims to be a com
 
 See [docs/OUTLINE.md](docs/OUTLINE.md) for the full project outline: platform constraints, feature set, architecture, install strategy, milestones, and risks.
 
-Also here: [docs/webxr/README.md](docs/webxr/README.md), an analysis and Chromium patch set for running WebXR on the Steam Frame with the seccomp sandbox enabled.
+Also here: Chromium XR for Steam Frame, a separate WebXR browser app (yellkell.com/fac and other WebXR pages); [docs/webxr/README.md](docs/webxr/README.md) has its build, patches and install.
 
 ## Status
 
@@ -21,8 +21,6 @@ harness; it has not yet run on Steam Frame hardware.
   HTTP folders
 - Haptics: funscripts with Intiface, TCode devices and The Handy
 - Phone web remote and DeoVR remote API
-- Web XR tab: launches WebXR games and pages (e.g. yellkell.com/fac) in
-  the Frame's Chromium XR browser and returns to FramePlayer afterwards
 - Signed self-updates; install via Frame Control/FrameDrop or
   `frameplayer-install`
 

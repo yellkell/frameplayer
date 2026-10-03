@@ -106,36 +106,19 @@ phone through the web remote.
 
 ## Web XR games and experiences
 
-The **Web XR** tab opens a web page in **Chromium XR**, the Frame's WebXR
-browser. The address starts as Fish & Chips (`https://yellkell.com/fac`);
-type another to change it (**Reset** puts Fish & Chips back).
-
-1. Install **Chromium XR for Steam Frame** once: the `ChromiumXR-Frame-arm64.zip`
-   release of this repository, unpacked into `~/chromium-xr-frame`, with its
-   Steam library entry (see `docs/webxr/README.md`). It carries the Frame
-   fixes: both eyes render, the controllers work like Quest Touch
-   controllers in Quest-made games, and WebXR runs at 90 Hz.
-2. In FramePlayer, **Web XR › Open in Chromium XR**. FramePlayer closes and
-   Steam starts Chromium XR at that page, as its own app in the headset;
-   press the page's **Enter VR** button. It's a normal browser window: use
-   its address bar to go anywhere else.
-3. Start FramePlayer again from your library when you're done.
-
-Mixed-reality pages (WebXR `immersive-ar`) also
-need the headset to offer passthrough to apps: Chromium only offers AR when
-SteamVR reports an alpha-blend or additive blend mode. The Web XR tab (and
-Settings › About) says whether this headset does; if not, such pages report
-XR as unavailable while `immersive-vr` pages still work.
-
-Add your own pages with a name and address, or type one and press **Open
-now**. Only `http://` and `https://` pages open.
+WebXR pages run in **Chromium XR for Steam Frame**, a separate app from this
+repository's releases (`ChromiumXR-Frame-arm64.zip`, unpacked into
+`~/chromium-xr-frame` with its Steam library entry; see
+[docs/webxr](webxr/README.md)). Start it from your library: it opens Fish &
+Chips (`https://yellkell.com/fac`) at 90 Hz, both eyes render, and the Frame
+controllers work like Quest Touch controllers in Quest-made games. Its
+address bar goes anywhere else; to change the page it starts on, put an
+address in `~/.config/chromium-xr-frame/home-url`.
 
 Notes: Chromium XR currently runs with part of Chromium's sandbox switched
 off (its `--disable-seccomp-filter-sandbox` flag), because SteamVR refuses
 the sandboxed browser otherwise. Use it for VR pages you trust.
-[docs/webxr](webxr/README.md) has the patches that fix this properly. The
-hand-off needs FramePlayer started from Steam (it runs `frameplayer.sh`);
-started any other way, FramePlayer just opens the browser and quits.
+[docs/webxr](webxr/README.md) has the patches that fix this properly.
 
 ## Haptics
 

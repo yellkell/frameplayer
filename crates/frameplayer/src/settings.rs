@@ -62,8 +62,6 @@ pub struct Settings {
     pub check_updates: bool,
     /// UI text size multiplier.
     pub ui_scale: f32,
-    /// The page the Web XR tab opens in Chromium XR (the last one opened).
-    pub web_home: String,
 }
 
 impl Default for Settings {
@@ -94,7 +92,6 @@ impl Default for Settings {
             update_channel: "stable".into(),
             check_updates: true,
             ui_scale: 1.0,
-            web_home: crate::webxr::DEFAULT_URL.into(),
         }
     }
 }
