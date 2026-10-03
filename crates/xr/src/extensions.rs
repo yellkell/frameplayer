@@ -1,7 +1,14 @@
 //! Which OpenXR extensions FramePlayer asks for, and a report of which ones
 //! the runtime actually exposes.
 
+use crate::bindings::FRAME_CONTROLLER_EXTENSION;
 use openxr as xr;
+
+/// Extensions the `openxr` crate has no field for live in
+/// `ExtensionSet::other`, by name.
+fn has_other(set: &xr::ExtensionSet, name: &str) -> bool {
+    set.other.iter().any(|n| n == name)
+}
 
 /// Extension availability / enablement report. Logged at startup so the
 /// `[verify]` questions about SteamVR on the Frame get answered from logs.
@@ -15,6 +22,8 @@ pub struct ExtensionReport {
     pub display_refresh_rate: bool,
     pub convert_timespec_time: bool,
     pub foveation: bool,
+    /// XR_VALVE_frame_controller_interaction: the Frame controller profile.
+    pub frame_controller: bool,
 }
 
 impl ExtensionReport {
@@ -28,6 +37,7 @@ impl ExtensionReport {
             display_refresh_rate: a.fb_display_refresh_rate,
             convert_timespec_time: a.khr_convert_timespec_time,
             foveation: a.fb_foveation,
+            frame_controller: has_other(a, FRAME_CONTROLLER_EXTENSION),
         }
     }
 
@@ -41,6 +51,9 @@ impl ExtensionReport {
         e.khr_composition_layer_depth = self.composition_layer_depth && want.depth_layers;
         e.fb_display_refresh_rate = self.display_refresh_rate;
         e.khr_convert_timespec_time = self.convert_timespec_time;
+        if self.frame_controller {
+            e.other.push(FRAME_CONTROLLER_EXTENSION.to_string());
+        }
         e
     }
 
@@ -56,7 +69,7 @@ impl ExtensionReport {
     pub fn summary(&self) -> String {
         let f = |b: bool| if b { "yes" } else { "no" };
         format!(
-            "vulkan_enable2={} eye_gaze={} hand_tracking={} cylinder={} depth={} refresh_rate={} timespec={} fb_foveation={}",
+            "vulkan_enable2={} eye_gaze={} hand_tracking={} cylinder={} depth={} refresh_rate={} timespec={} fb_foveation={} frame_controller={}",
             f(self.vulkan_enable2),
             f(self.eye_gaze_interaction),
             f(self.hand_tracking),
@@ -65,6 +78,7 @@ impl ExtensionReport {
             f(self.display_refresh_rate),
             f(self.convert_timespec_time),
             f(self.foveation),
+            f(self.frame_controller),
         )
     }
 }
@@ -115,5 +129,19 @@ mod tests {
         let en = r.enabled(&want);
         assert!(!en.hand_tracking && en.composition_layer_depth && !en.foveation);
         assert!(r.summary().contains("hand_tracking=yes"));
+        assert!(!r.frame_controller && !en.frame_controller);
+    }
+
+    #[test]
+    fn frame_controller_extension_round_trips() {
+        let mut a = xr::ExtensionSet::default();
+        a.khr_vulkan_enable2 = true;
+        a.other.push(FRAME_CONTROLLER_EXTENSION.to_string());
+        let r = ExtensionReport::from_available(&a);
+        assert!(r.frame_controller);
+        let e = r.to_enable(&ExtensionWishes::default());
+        assert_eq!(e.other, ["XR_VALVE_frame_controller_interaction"]);
+        assert!(r.enabled(&ExtensionWishes::default()).frame_controller);
+        assert!(r.summary().contains("frame_controller=yes"));
     }
 }

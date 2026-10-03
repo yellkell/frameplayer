@@ -324,7 +324,11 @@ impl XrSession {
     /// Create the session on the Vulkan device from [`VulkanContext`].
     pub fn new(ctx: &XrContext, vk_ctx: &VulkanContext) -> Result<XrSession, XrError> {
         let instance = ctx.instance.clone();
-        let mut input = InputSystem::new(&instance, ctx.enabled.eye_gaze_interaction)?;
+        let mut input = InputSystem::new(
+            &instance,
+            ctx.enabled.eye_gaze_interaction,
+            ctx.enabled.frame_controller,
+        )?;
         let (session, waiter, stream) = unsafe {
             instance.create_session::<xr::Vulkan>(ctx.system, &vk_ctx.session_create_info())?
         };

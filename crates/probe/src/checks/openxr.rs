@@ -18,36 +18,21 @@ use std::time::{Duration, Instant};
 
 const STEREO: xr::ViewConfigurationType = xr::ViewConfigurationType::PRIMARY_STEREO;
 
-/// Extra Frame-controller component paths worth knowing about, beyond the
-/// ones fp-xr suggests (per hand suffixes).
+/// The rest of Valve's published Frame controller profile (ValveSoftware/
+/// Unity, `SteamFrameControllerProfile.cs`), beyond the paths fp-xr binds
+/// (per hand suffixes; a path not valid for one hand is reported rejected).
 pub const FRAME_EXTRA_CANDIDATES: &[&str] = &[
     "/input/system/click",
-    "/input/menu/click",
-    "/input/view/click",
-    "/input/a/click",
-    "/input/b/click",
-    "/input/x/click",
-    "/input/y/click",
+    "/input/system/touch",
+    "/input/menu/touch",
+    "/input/view/touch",
     "/input/squeeze/click",
-    "/input/squeeze/force",
     "/input/squeeze/touch",
-    "/input/trigger/force",
-    "/input/bumper/touch",
-    "/input/bumper/value",
-    "/input/thumbrest/touch",
-    "/input/trackpad",
-    "/input/trackpad/click",
-    "/input/trackpad/touch",
-    "/input/trackpad/force",
-    "/input/dpad_up/click",
-    "/input/dpad_down/click",
-    "/input/dpad_left/click",
-    "/input/dpad_right/click",
-    "/input/grip_l4/click",
-    "/input/grip_r4/click",
-    "/input/back_upper/click",
-    "/input/back_lower/click",
-    "/input/palm_ext/pose",
+    "/input/shoulder/touch",
+    "/input/dpad_up/touch",
+    "/input/dpad_down/touch",
+    "/input/dpad_left/touch",
+    "/input/dpad_right/touch",
 ];
 
 /// Load the OpenXR loader the way fp-xr does (`libopenxr_loader.so`),
@@ -112,7 +97,7 @@ fn eye_gaze_supported(instance: &xr::Instance, system: xr::SystemId) -> Option<b
 /// Paths to test for `profile`: fp-xr's full binding list plus, for the
 /// Frame profile, extra candidates on both hands. De-duplicated.
 pub fn candidate_paths(profile: Profile) -> Vec<String> {
-    let mut v: Vec<String> = bindings::bindings(profile, true)
+    let mut v: Vec<String> = bindings::bindings(profile)
         .into_iter()
         .map(|(_, p)| p.to_string())
         .collect();
@@ -219,9 +204,9 @@ fn binding_tests(instance: &xr::Instance, eye_gaze: bool) -> Result<Value, Strin
             }
             None => json!(rejected),
         };
-        let fp_core: Vec<String> = Profile::from_path(&profile)
+        let fp_bound: Vec<String> = Profile::from_path(&profile)
             .map(|p| {
-                bindings::bindings(p, false)
+                bindings::bindings(p)
                     .into_iter()
                     .map(|(_, s)| short_path(s))
                     .collect()
@@ -232,7 +217,7 @@ fn binding_tests(instance: &xr::Instance, eye_gaze: bool) -> Result<Value, Strin
             json!({
                 "accepted": ok,
                 "rejected": rejected_v,
-                "fp_xr_core_bindings_all_accepted": fp_core.iter().all(|c| ok.contains(c)),
+                "fp_xr_bindings_all_accepted": fp_bound.iter().all(|c| ok.contains(c)),
             }),
         );
     }
@@ -360,6 +345,14 @@ pub fn run(ctx: &CheckContext) -> CheckOutput {
     enable.fb_display_refresh_rate = avail.fb_display_refresh_rate;
     enable.khr_composition_layer_cylinder = avail.khr_composition_layer_cylinder;
     enable.khr_convert_timespec_time = avail.khr_convert_timespec_time;
+    // The Frame controller profile only exists with its extension enabled.
+    let frame_ext = fp_xr::extensions::ExtensionReport::from_available(&avail).frame_controller;
+    if frame_ext {
+        enable
+            .other
+            .push(bindings::FRAME_CONTROLLER_EXTENSION.to_string());
+    }
+    o.set("frame_controller_extension", frame_ext);
     let app = xr::ApplicationInfo {
         application_name: "frameplayer-probe",
         application_version: 1,
@@ -547,7 +540,7 @@ pub fn run(ctx: &CheckContext) -> CheckOutput {
         Ok(v) => {
             let frame = &v[Profile::Frame.path()];
             let accepted = frame["accepted"].as_array().map_or(0, |a| a.len());
-            let core_ok = frame["fp_xr_core_bindings_all_accepted"] == true;
+            let all_ok = frame["fp_xr_bindings_all_accepted"] == true;
             o.finding(
                 "frame_profile",
                 if accepted > 0 { Status::Pass } else { Status::Fail },
@@ -560,7 +553,7 @@ pub fn run(ctx: &CheckContext) -> CheckOutput {
                     )
                 } else {
                     format!(
-                        "{} accepts {accepted} component paths (fp-xr core set fully accepted: {core_ok}); see data.bindings",
+                        "{} accepts {accepted} component paths (all fp-xr bindings accepted: {all_ok}); see data.bindings",
                         Profile::Frame.path()
                     )
                 },
@@ -720,7 +713,7 @@ mod tests {
     #[test]
     fn candidates_cover_fp_xr_bindings() {
         let c = candidate_paths(Profile::Frame);
-        for (_, p) in bindings::bindings(Profile::Frame, true) {
+        for (_, p) in bindings::bindings(Profile::Frame) {
             assert!(c.iter().any(|x| x == p), "{p}");
         }
         let unique: std::collections::HashSet<_> = c.iter().collect();
