@@ -10,6 +10,8 @@ pub mod media;
 pub mod projection;
 pub mod time;
 
-pub use media::{AudioTrackInfo, Chapter, Codec, ColorTransfer, MediaInfo, SubtitleTrackInfo, VideoTrackInfo};
+pub use media::{
+    AudioTrackInfo, Chapter, Codec, ColorTransfer, MediaInfo, SubtitleTrackInfo, VideoTrackInfo,
+};
 pub use projection::{Corrections, FisheyeLens, Projection, StereoMode, ViewSettings};
 pub use time::MediaTime;

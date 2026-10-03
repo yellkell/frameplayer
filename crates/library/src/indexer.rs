@@ -279,8 +279,11 @@ impl Indexer {
                 None => true,
             }
         };
+        // Collected up front: a filter-closure iterator held across the
+        // `.await` below makes this future impossible to `tokio::spawn`.
+        let to_hash: Vec<Entry> = videos.iter().filter(|e| needs_hash(e)).cloned().collect();
         let hashes: HashMap<String, std::result::Result<String, String>> =
-            futures::stream::iter(videos.iter().filter(|e| needs_hash(e)).cloned())
+            futures::stream::iter(to_hash)
                 .map(|e| {
                     let source = source.clone();
                     async move {

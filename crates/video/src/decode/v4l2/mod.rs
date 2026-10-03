@@ -337,6 +337,16 @@ pub fn drm_format_for(pixfmt: u32) -> Option<(u32, u64)> {
     }
 }
 
+/// Source of [`V4l2Decoder::instance`] numbers.
+static NEXT_INSTANCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Stable id of one CAPTURE buffer: decoder instance, buffer-pool generation
+/// and buffer index. Changes whenever the underlying DMA-BUF does, so a
+/// renderer import cache keyed by it never aliases a reallocated buffer.
+pub fn capture_buffer_id(instance: u64, generation: u64, index: usize) -> u64 {
+    (instance << 40) | ((generation & 0xff_ffff) << 16) | (index as u64 & 0xffff)
+}
+
 pub struct V4l2Decoder {
     fd: OwnedFd,
     info: V4l2DeviceInfo,
@@ -347,6 +357,8 @@ pub struct V4l2Decoder {
     cap_fmt: Option<CaptureFormat>,
     cap_streaming: bool,
     generation: u64,
+    /// Process-unique decoder instance number (part of every frame's `buffer_id`).
+    instance: u64,
     release_tx: Sender<(u64, usize)>,
     release_rx: Receiver<(u64, usize)>,
     state: State,
@@ -498,6 +510,7 @@ impl V4l2Decoder {
             cap_fmt: None,
             cap_streaming: false,
             generation: 0,
+            instance: NEXT_INSTANCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             release_tx,
             release_rx,
             state: State::Init,
@@ -878,6 +891,7 @@ impl VideoDecoder for V4l2Decoder {
             let tx = self.release_tx.clone();
             let gen = self.generation;
             let frame = DmaBufFrame {
+                buffer_id: capture_buffer_id(self.instance, gen, idx),
                 planes: dmabuf_planes(&fmt, &raw_fds, offsets, self.info.is_qcom()),
                 fourcc,
                 modifier,
@@ -975,6 +989,15 @@ impl VideoDecoder for V4l2Decoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capture_buffer_ids_are_distinct() {
+        let a = capture_buffer_id(1, 0, 3);
+        assert_eq!(a, capture_buffer_id(1, 0, 3));
+        assert_ne!(a, capture_buffer_id(1, 1, 3));
+        assert_ne!(a, capture_buffer_id(2, 0, 3));
+        assert_ne!(a, capture_buffer_id(1, 0, 4));
+    }
 
     #[test]
     fn timestamp_roundtrip() {

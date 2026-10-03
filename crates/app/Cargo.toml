@@ -11,11 +11,39 @@ path = "src/main.rs"
 
 [dependencies]
 fp-core.workspace = true
+fp-xr.workspace = true
+fp-gfx.workspace = true
+fp-video.workspace = true
+fp-audio.workspace = true
+fp-sources.workspace = true
+fp-library.workspace = true
+fp-haptics.workspace = true
+fp-remote.workspace = true
+fp-ui.workspace = true
+fp-updater.workspace = true
 anyhow.workspace = true
+async-trait.workspace = true
+bytes.workspace = true
+clap.workspace = true
+crossbeam-channel.workspace = true
+glam.workspace = true
+parking_lot.workspace = true
+reqwest.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+url.workspace = true
+semver = "1"
+# Pure-Rust JPEG encoder for library thumbnails / sprite sheets.
+jpeg-encoder = "0.6"
+# Pure-Rust decoders for thumbnails shown in the headset (local JPEGs,
+# remote feed thumbnails).
+jpeg-decoder = { version = "0.3", default-features = false }
+png = "0.17"
 
 [dev-dependencies]
 tempfile.workspace = true

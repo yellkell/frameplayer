@@ -102,6 +102,10 @@ impl std::fmt::Debug for FrameLease {
 /// A decoded frame living in DMA-BUF memory (zero-copy to Vulkan).
 #[derive(Debug, Clone)]
 pub struct DmaBufFrame {
+    /// Stable identifier of the decoder buffer behind this frame (same value
+    /// every time that buffer is reused, new value after a reallocation).
+    /// Renderers cache DMA-BUF imports under it.
+    pub buffer_id: u64,
     pub planes: Vec<DmaBufPlane>,
     /// DRM fourcc ([`drm::FORMAT_NV12`] or [`drm::FORMAT_P010`]).
     pub fourcc: u32,
