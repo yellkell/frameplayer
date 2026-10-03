@@ -71,6 +71,15 @@ renderer.setAnimationLoop((t, frame) => {
   cube.rotation.y = t / 1000;
   if (window.__heavyMat) window.__heavyMat.uniforms.t.value = t / 1000;
   renderer.render(scene, camera);
+  // Frame rate over frames 30-330, and what each controller reports.
+  if (frames === 30) result.t30 = t;
+  if (frames === 330) {
+    result.fps = Math.round(300 / ((t - result.t30) / 1000) * 10) / 10;
+    result.inputs = [...renderer.xr.getSession().inputSources].map((s) => ({
+      hand: s.handedness, profiles: s.profiles, buttons: s.gamepad?.buttons.length ?? 0, axes: s.gamepad?.axes.length ?? 0,
+    }));
+    out(result);
+  }
   if (frames === 30) {
     const layer = renderer.xr.getBaseLayer();
     const s = renderer.xr.getSession();

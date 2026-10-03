@@ -47,6 +47,22 @@ if ! (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
 fi
 (( $# )) || set -- "http://localhost:$port/?title=$name"
 
+# WebXR at 90 Hz. SteamVR runs each app at its per-app preferredRefreshRate
+# (72 Hz unless set) and overrides what the app requests through OpenXR, so
+# set it for this Steam app, unless one was already chosen in SteamVR's
+# per-app video settings. CHROMIUM_XR_REFRESH_RATE=0 leaves it alone.
+rate=${CHROMIUM_XR_REFRESH_RATE:-90}
+vrcmd=/opt/steamvr/bin/linuxarm64/vrcmd
+vrsettings=$HOME/.config/openvr/config/steamvr.vrsettings
+if [[ -n ${SteamAppId:-} && $rate != 0 && -x $vrcmd ]] &&
+    ! python3 -c 'import json, sys
+s = json.load(open(sys.argv[1])).get("steam.app." + sys.argv[2], {})
+sys.exit(0 if "preferredRefreshRate" in s else 1)' "$vrsettings" "$SteamAppId" 2>/dev/null; then
+  LD_LIBRARY_PATH=${vrcmd%/*} "$vrcmd" --set-settings-float \
+    "steam.app.$SteamAppId.preferredRefreshRate" "$rate" >/dev/null 2>&1 || true
+  echo "set SteamVR preferredRefreshRate=$rate for steam.app.$SteamAppId"
+fi
+
 flags=(
   --user-data-dir="$HOME/.config/$name"
   --enable-features=OpenXR       # the Linux OpenXR device is off by default
