@@ -81,11 +81,18 @@ jobs:
             test -s "title/frame-models/$f" || { echo "missing frame-models/$f"; exit 1; }
           done
           mkdir -p page
-          printf '%s
-' '<!doctype html><body><script>'             'document.body.textContent = "xr:" + ("xr" in navigator) + " secure:" + isSecureContext;'             '</script>' > page/index.html
+          cat > page/index.html <<'HTML'
+          <!doctype html><body><script>
+          document.body.textContent = "xr:" + ("xr" in navigator) + " secure:" + isSecureContext;
+          </script>
+          HTML
           python3 -m http.server 8765 --bind 127.0.0.1 --directory page >/dev/null 2>&1 &
           sleep 1
-          title/chromium/chrome --headless=new --no-sandbox --disable-gpu --virtual-time-budget=3000             --enable-features=OpenXR             --disable-features=DisableLoadExtensionCommandLineSwitch             --load-extension="$PWD/title/frame-models"             --dump-dom http://localhost:8765/ > dom.html
+          title/chromium/chrome --headless=new --no-sandbox --disable-gpu --virtual-time-budget=3000 \
+            --enable-features=OpenXR \
+            --disable-features=DisableLoadExtensionCommandLineSwitch \
+            --load-extension="$PWD/title/frame-models" \
+            --dump-dom http://localhost:8765/ > dom.html
           cat dom.html
           grep -q 'xr:true secure:true' dom.html
 
