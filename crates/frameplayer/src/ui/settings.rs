@@ -159,6 +159,7 @@ fn playback(ui: &mut egui::Ui, v: &mut View) {
             |ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut s.audio_device)
+                        .margin(egui::Margin::symmetric(12, 9))
                         .font(theme::font(Weight::Regular, 17.0))
                         .desired_width(260.0),
                 );
@@ -255,6 +256,7 @@ fn library(ui: &mut egui::Ui, v: &mut View) {
             ui.horizontal(|ui| {
                 ui.add(
                     egui::TextEdit::singleline(&mut v.state.new_folder)
+                        .margin(egui::Margin::symmetric(12, 9))
                         .hint_text("/run/media/deck/SDCARD/Videos")
                         .font(theme::font(Weight::Regular, 17.0))
                         .desired_width(ui.available_width() - 170.0),
@@ -422,6 +424,7 @@ fn haptics(ui: &mut egui::Ui, v: &mut View) {
                 let hint = DEVICE_KINDS[v.state.new_device_kind.min(2)].1;
                 ui.add(
                     egui::TextEdit::singleline(&mut v.state.new_device)
+                        .margin(egui::Margin::symmetric(12, 9))
                         .hint_text(hint)
                         .font(theme::font(Weight::Regular, 17.0))
                         .desired_width(ui.available_width() - 180.0),

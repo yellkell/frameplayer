@@ -538,6 +538,7 @@ fn add_form(ui: &mut egui::Ui, v: &mut View) {
         let field = |ui: &mut egui::Ui, value: &mut String, hint: &str, password: bool| {
             ui.add(
                 egui::TextEdit::singleline(value)
+                    .margin(egui::Margin::symmetric(12, 9))
                     .password(password)
                     .hint_text(hint)
                     .font(theme::font(Weight::Regular, 17.0))

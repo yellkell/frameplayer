@@ -280,40 +280,48 @@ impl Rows<'_> {
         egui::Frame::new()
             .inner_margin(egui::Margin::symmetric(16, 12))
             .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.set_min_height(44.0);
-                    // Text on the left, leaving room for a slider row's
-                    // control; it wraps if longer.
-                    let w = ui.available_width();
-                    let text_w = (w - 420.0).max(w * 0.4);
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(text_w, 0.0),
-                        Layout::top_down(Align::Min),
-                        |ui| {
-                            ui.set_max_width(text_w);
-                            ui.spacing_mut().item_spacing.y = 3.0;
-                            ui.label(
-                                egui::RichText::new(title)
-                                    .font(theme::font(Weight::Medium, 18.0))
-                                    .color(theme::TEXT),
-                            );
-                            if let Some(d) = desc {
-                                ui.label(
-                                    egui::RichText::new(d)
-                                        .font(theme::font(Weight::Regular, 15.0))
-                                        .color(theme::TEXT_2),
-                                );
-                            }
-                        },
-                    );
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.spacing_mut().item_spacing.x = 10.0;
-                        control(ui)
-                    })
-                    .inner
-                })
-                .inner
+                // Text on the left (leaving room for a slider row's control,
+                // wrapping if longer) and the control on the right, both
+                // centred on the row's height.
+                let w = ui.available_width();
+                let text_w = (w - 420.0).max(w * 0.4);
+                let title_g = ui.painter().layout(
+                    title.to_string(),
+                    theme::font(Weight::Medium, 18.0),
+                    theme::TEXT,
+                    text_w,
+                );
+                let desc_g = desc.map(|d| {
+                    ui.painter().layout(
+                        d.to_string(),
+                        theme::font(Weight::Regular, 15.0),
+                        theme::TEXT_2,
+                        text_w,
+                    )
+                });
+                let text_h =
+                    title_g.size().y + desc_g.as_ref().map(|g| 3.0 + g.size().y).unwrap_or(0.0);
+                let (rect, _) =
+                    ui.allocate_exact_size(Vec2::new(w, text_h.max(48.0)), Sense::hover());
+                let mut y = rect.center().y - text_h / 2.0;
+                let p = ui.painter();
+                let title_h = title_g.size().y;
+                p.galley(Pos2::new(rect.left(), y), title_g, theme::TEXT);
+                y += title_h + 3.0;
+                if let Some(g) = desc_g {
+                    p.galley(Pos2::new(rect.left(), y), g, theme::TEXT_2);
+                }
+                let control_rect = Rect::from_min_max(
+                    Pos2::new(rect.left() + text_w + 12.0, rect.top()),
+                    rect.max,
+                );
+                let mut c = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(control_rect)
+                        .layout(Layout::right_to_left(Align::Center)),
+                );
+                c.spacing_mut().item_spacing.x = 10.0;
+                control(&mut c)
             })
             .inner
     }
