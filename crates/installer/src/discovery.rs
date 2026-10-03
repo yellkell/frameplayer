@@ -42,9 +42,15 @@ pub fn instance_name(fullname: &str) -> String {
 
 /// Browse for `timeout`, returning every resolved headset (deduplicated).
 pub fn browse(timeout: Duration) -> Result<Vec<Discovered>> {
+    browse_until(timeout, None)
+}
+
+/// Like [`browse`], but with `settle = Some(d)` return `d` after the first
+/// headset resolves (so a found headset doesn't wait out the full timeout).
+pub fn browse_until(timeout: Duration, settle: Option<Duration>) -> Result<Vec<Discovered>> {
     let daemon = mdns_sd::ServiceDaemon::new()?;
     let rx = daemon.browse(SERVICE_TYPE)?;
-    let deadline = Instant::now() + timeout;
+    let mut deadline = Instant::now() + timeout;
     let mut found: Vec<Discovered> = Vec::new();
     while let Some(left) = deadline.checked_duration_since(Instant::now()) {
         match rx.recv_timeout(left) {
@@ -62,6 +68,9 @@ pub fn browse(timeout: Duration) -> Result<Vec<Discovered>> {
                 };
                 found.retain(|f| f.name != d.name);
                 found.push(d);
+                if let Some(settle) = settle {
+                    deadline = deadline.min(Instant::now() + settle);
+                }
             }
             Ok(_) => {}
             Err(_) => break,

@@ -14,3 +14,12 @@ rustflags = ["-C", "target-feature=+fp16,+dotprod,+rcpc"]
 # To run aarch64 tests under QEMU user-mode on x86_64 (docker/Dockerfile.qemu-test
 # sets this for you):
 #   CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER="qemu-aarch64 -L /usr/aarch64-linux-gnu"
+
+# Windows desktop installer (frameplayer-install.exe), cross-built from Linux:
+#   apt install gcc-mingw-w64-x86-64 && rustup target add x86_64-pc-windows-gnu
+#   cargo build -p fp-installer --release --target x86_64-pc-windows-gnu
+# Static CRT/libgcc so the .exe needs only system DLLs (no libgcc_s/winpthread
+# next to it).
+[target.x86_64-pc-windows-gnu]
+linker = "x86_64-w64-mingw32-gcc"
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-args=-static -static-libgcc"]

@@ -1,21 +1,26 @@
 name: Release
 
-# Tag vX.Y.Z (stable) or vX.Y.Z-beta.N (beta) → build the aarch64 tarball in the
-# SLR build image → delta from the previous release → sign manifests with the
-# FP_SIGNING_KEY secret → GitHub Release → GitHub Pages (website manifest,
-# download page, update channels) → installed apps pick it up.
+# Tag vX.Y.Z (stable) or vX.Y.Z-<pre> (pre-release, e.g. v0.1.0-alpha.1,
+# v0.2.0-beta.1, v0.2.0-pre.3) → cross-build the aarch64 tarball (app +
+# frameplayer-probe self-test + launchers) on a plain Ubuntu runner → sign the
+# update manifests with the FP_SIGNING_KEY secret (optional for pre-releases)
+# → desktop installers (Windows .exe cross-built with mingw, Linux, macOS) →
+# GitHub Release (marked pre-release for tags containing "-") → GitHub Pages
+# (website manifest, update channels; only when the manifests are signed).
+#
+# No Docker image is needed. The aarch64 build links against Ubuntu 22.04's
+# glibc (2.35), older than any SteamOS release on the Frame.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to (re)release, e.g. v0.2.0"
+        description: "Existing tag to (re)release, e.g. v0.1.0-alpha.1"
         required: true
 
 permissions:
   contents: write
-  packages: write
   pages: write
   id-token: write
 
@@ -29,44 +34,14 @@ env:
   PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
 
 jobs:
-  image:
-    name: build image (SLR 4 arm64)
-    runs-on: ubuntu-24.04-arm
-    outputs:
-      image: ${{ steps.ref.outputs.image }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: ref
-        run: |
-          h=$(sha256sum docker/Dockerfile.aarch64 | cut -c1-16)
-          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}/build-aarch64:$h" >> "$GITHUB_OUTPUT"
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push if missing
-        env:
-          IMAGE: ${{ steps.ref.outputs.image }}
-        run: |
-          if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then echo "cached: $IMAGE"; exit 0; fi
-          # [verify] SLR 4 arm64 SDK path; fall back to Debian bookworm so a release is never blocked.
-          docker build -f docker/Dockerfile.aarch64 -t "$IMAGE" docker \
-            || docker build --build-arg BASE=debian:bookworm -f docker/Dockerfile.aarch64 -t "$IMAGE" docker
-          docker push "$IMAGE"
-
   build:
-    name: build + sign
-    needs: image
-    runs-on: ubuntu-24.04-arm
-    container:
-      image: ${{ needs.image.outputs.image }}
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+    name: aarch64 tarball + manifests
+    runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.v.outputs.version }}
       channel: ${{ steps.v.outputs.channel }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+      signed: ${{ steps.rel.outputs.signed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -75,15 +50,33 @@ jobs:
       - id: v
         name: Version and channel
         run: |
-          git config --global --add safe.directory "$PWD"
           V=${TAG#v}
+          [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::tag $TAG is not vX.Y.Z[-pre]"; exit 1; }
           CARGO_V=$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version *= *"\(.*\)"/\1/p}' Cargo.toml | head -n1)
-          [ "$V" = "$CARGO_V" ] || { echo "::error::tag $TAG does not match Cargo.toml version $CARGO_V"; exit 1; }
-          case "$V" in *-*) CH=beta ;; *) CH=stable ;; esac
+          case "$V" in
+            *-*) CH=beta; PRE=true ;;
+            *)   CH=stable; PRE=false ;;
+          esac
+          if [ "$V" != "$CARGO_V" ]; then
+            if [ "$PRE" = true ]; then
+              echo "::warning::tag $TAG does not match Cargo.toml version $CARGO_V (binaries will report $CARGO_V)"
+            else
+              echo "::error::tag $TAG does not match Cargo.toml version $CARGO_V"; exit 1
+            fi
+          fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
           echo "channel=$CH" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRE" >> "$GITHUB_OUTPUT"
           PREV=$(git describe --tags --abbrev=0 --match 'v*' "$TAG^" 2>/dev/null || true)
           echo "prev=$PREV" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - name: Install cross linker
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-aarch64
       - name: Fetch previous release for delta
         if: steps.v.outputs.prev != ''
         run: |
@@ -91,31 +84,80 @@ jobs:
           curl -fsSL -o /tmp/prev.tar.gz \
             "https://github.com/${GITHUB_REPOSITORY}/releases/download/$P/frameplayer-${P#v}-aarch64.tar.gz" \
             || rm -f /tmp/prev.tar.gz
-      - name: Build release
+      - id: rel
+        name: Build release (cross aarch64, linker from .cargo/config.toml)
         env:
           FP_SIGNING_KEY: ${{ secrets.FP_SIGNING_KEY }}
           REPO_URL: https://github.com/${{ github.repository }}
+          V: ${{ steps.v.outputs.version }}
+          CH: ${{ steps.v.outputs.channel }}
+          PRE: ${{ steps.v.outputs.prerelease }}
         run: |
-          [ -n "$FP_SIGNING_KEY" ] || { echo "::error::FP_SIGNING_KEY secret is not set"; exit 1; }
-          args=(--version "${{ steps.v.outputs.version }}" --channel "${{ steps.v.outputs.channel }}" --require-trusted)
+          args=(--version "$V" --channel "$CH")
+          if [ -n "$FP_SIGNING_KEY" ]; then
+            args+=(--require-trusted)
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          elif [ "$PRE" = true ]; then
+            echo "::warning::FP_SIGNING_KEY is not set: publishing the pre-release with UNSIGNED manifests (installed apps will not auto-update to it; Pages is not updated)"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::FP_SIGNING_KEY secret is not set (required for stable releases)"; exit 1
+          fi
           [ -f /tmp/prev.tar.gz ] && args+=(--prev-tarball /tmp/prev.tar.gz)
-          [ -f "docs/release-notes/${{ steps.v.outputs.version }}.md" ] && args+=(--notes "docs/release-notes/${{ steps.v.outputs.version }}.md")
+          [ -f "docs/release-notes/$V.md" ] && args+=(--notes "docs/release-notes/$V.md")
           tools/release.sh "${args[@]}"
-          cp target/release/frameplayer-install "dist/out/${{ steps.v.outputs.version }}/frameplayer-install-linux-aarch64"
+          OUT=dist/out/$V
+          tar -tzf "$OUT/frameplayer-$V-aarch64.tar.gz" | grep -q 'bin/frameplayer-probe$' \
+            || echo "::warning::tarball has no bin/frameplayer-probe; the installer's self-test step will fail"
+          cargo build --release --target aarch64-unknown-linux-gnu -p fp-installer
+          cp target/aarch64-unknown-linux-gnu/release/frameplayer-install "$OUT/frameplayer-install-linux-aarch64"
+          if [ -z "$FP_SIGNING_KEY" ]; then
+            # Don't ship unsigned manifests as release assets.
+            find "$OUT/site/updates" -name '*.json' -delete
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: release
           path: dist/out/${{ steps.v.outputs.version }}
+
+  windows:
+    name: frameplayer-install (windows-x86_64, mingw cross)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-gnu
+      # Static CRT/libgcc via .cargo/config.toml: the .exe needs only system DLLs.
+      - run: cargo build --release -p fp-installer --target x86_64-pc-windows-gnu
+      - name: Stage and check DLL imports
+        run: |
+          mkdir -p out
+          E=target/x86_64-pc-windows-gnu/release/frameplayer-install.exe
+          x86_64-w64-mingw32-objdump -p "$E" | grep 'DLL Name' | sort -u
+          if x86_64-w64-mingw32-objdump -p "$E" | grep -qiE 'DLL Name: (libgcc|libwinpthread|libstdc|vcruntime)'; then
+            echo "::error::exe depends on a non-system DLL"; exit 1
+          fi
+          cp "$E" out/frameplayer-install-windows-x86_64.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-windows-x86_64
+          path: out/*
 
   installers:
     name: frameplayer-install (${{ matrix.name }})
     strategy:
       matrix:
         include:
-          - { name: linux-x86_64, os: ubuntu-24.04, target: x86_64-unknown-linux-gnu, exe: frameplayer-install }
-          - { name: macos-arm64, os: macos-14, target: aarch64-apple-darwin, exe: frameplayer-install }
-          - { name: macos-x86_64, os: macos-14, target: x86_64-apple-darwin, exe: frameplayer-install }
-          - { name: windows-x86_64, os: windows-2022, target: x86_64-pc-windows-msvc, exe: frameplayer-install.exe }
+          - { name: linux-x86_64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }
+          - { name: macos-arm64, os: macos-14, target: aarch64-apple-darwin }
+          - { name: macos-x86_64, os: macos-14, target: x86_64-apple-darwin }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -129,7 +171,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p out
-          cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" "out/frameplayer-install-${{ matrix.name }}${{ endsWith(matrix.exe, '.exe') && '.exe' || '' }}"
+          cp "target/${{ matrix.target }}/release/frameplayer-install" "out/frameplayer-install-${{ matrix.name }}"
       - uses: actions/upload-artifact@v4
         with:
           name: installer-${{ matrix.name }}
@@ -137,7 +179,7 @@ jobs:
 
   publish:
     name: GitHub Release
-    needs: [build, installers]
+    needs: [build, windows, installers]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
@@ -147,20 +189,31 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           V: ${{ needs.build.outputs.version }}
-          CH: ${{ needs.build.outputs.channel }}
+          PRE: ${{ needs.build.outputs.prerelease }}
+          SIGNED: ${{ needs.build.outputs.signed }}
         run: |
           cd artifacts
           files=(release/frameplayer-*.tar.gz release/frameplayer-*.sha256 release/frameplayer-install-* installer-*/*)
           compgen -G "release/*.fpd" > /dev/null && files+=(release/*.fpd)
+          if [ "$SIGNED" = true ]; then
+            for f in release/site/updates/*.json release/site/updates/*.json.sig; do
+              [ -f "$f" ] && cp "$f" "release/manifest-$(basename "$f")" && files+=("release/manifest-$(basename "$f")")
+            done
+          fi
           (cd release && sha256sum frameplayer-* > SHA256SUMS) && files+=(release/SHA256SUMS)
-          flags=(--title "FramePlayer $V" --generate-notes --verify-tag)
-          [ "$CH" = beta ] && flags+=(--prerelease)
+          cat > notes.md <<EOF
+          **Windows:** download \`frameplayer-install-windows-x86_64.exe\`, double-click it and follow the steps.
+          It finds the Steam Frame on your Wi-Fi (Developer Mode on), installs FramePlayer and runs the self-test.
+          EOF
+          flags=(--title "FramePlayer $V" --notes-file notes.md --generate-notes --verify-tag)
+          [ "$PRE" = true ] && flags+=(--prerelease)
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" "${flags[@]}" "${files[@]}" \
             || gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "${files[@]}"
 
   pages:
     name: Website + update channels
     needs: [build, publish]
+    if: needs.build.outputs.signed == 'true'
     runs-on: ubuntu-24.04
     environment:
       name: github-pages

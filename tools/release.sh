@@ -3,7 +3,7 @@
 # signed update manifests and the website install manifest.
 #
 #   tools/release.sh [--version X.Y.Z] [--channel stable|beta]
-#                    [--prev-tarball OLD.tar.gz]... [--bin PATH] [--no-build]
+#                    [--prev-tarball OLD.tar.gz]... [--bin PATH] [--probe-bin PATH] [--no-build]
 #                    [--out DIR] [--download-base URL] [--min-steamos V]
 #                    [--notes FILE] [--require-trusted]
 #
@@ -12,6 +12,8 @@
 #
 # Output ($OUT, default dist/out/<version>):
 #   frameplayer-<v>-aarch64.tar.gz (+ .sha256)
+#     frameplayer.sh, frameplayer-probe.sh, RELEASE,
+#     versions/<v>/bin/{frameplayer,frameplayer-probe}, lib/, share/
 #   frameplayer-<v>-from-<old>.fpd       delta patches
 #   site/                                 GitHub Pages tree:
 #     index.html frameplayer.json frameplayer.schema.json art/*.png
@@ -26,6 +28,7 @@ VERSION=""
 CHANNEL=stable
 PREV=()
 BIN=""
+PROBE_BIN=""
 BUILD=1
 OUT=""
 REPO_URL=${REPO_URL:-https://github.com/yellkell/frameplayer}
@@ -42,6 +45,7 @@ while [ $# -gt 0 ]; do
     --channel) CHANNEL=$2; shift 2 ;;
     --prev-tarball) PREV+=("$2"); shift 2 ;;
     --bin) BIN=$2; BUILD=0; shift 2 ;;
+    --probe-bin) PROBE_BIN=$2; shift 2 ;;
     --no-build) BUILD=0; shift ;;
     --out) OUT=$2; shift 2 ;;
     --download-base) DOWNLOAD_BASE=$2; shift 2 ;;
@@ -49,7 +53,7 @@ while [ $# -gt 0 ]; do
     --notes) NOTES=$2; shift 2 ;;
     --key-file) KEY_FILE=$2; shift 2 ;;
     --require-trusted) REQUIRE_TRUSTED=--require-trusted; shift ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
     *) die "unknown option $1" ;;
   esac
 done
@@ -75,13 +79,26 @@ cargo build --release -q -p fp-installer
 FPI=$ROOT/target/release/frameplayer-install
 [ -n "${CARGO_TARGET_DIR:-}" ] && FPI=$CARGO_TARGET_DIR/release/frameplayer-install
 
+# The self-test (crates/probe, binary frameplayer-probe) ships in every
+# tarball once the crate exists; frameplayer-install runs it after installing.
+HAVE_PROBE=0
+[ -f crates/probe/Cargo.toml ] && HAVE_PROBE=1
+TDIR=${CARGO_TARGET_DIR:-$ROOT/target}/$TARGET/release
 if [ "$BUILD" = 1 ]; then
-  echo "==> cargo build --release --target $TARGET -p fp-app"
-  cargo build --release --target "$TARGET" -p fp-app
-  BIN=${CARGO_TARGET_DIR:-$ROOT/target}/$TARGET/release/frameplayer
+  pkgs=(-p fp-app)
+  if [ "$HAVE_PROBE" = 1 ]; then pkgs+=(-p fp-probe); else echo "warning: crates/probe missing; tarball will not contain the self-test" >&2; fi
+  echo "==> cargo build --release --target $TARGET ${pkgs[*]}"
+  cargo build --release --target "$TARGET" "${pkgs[@]}"
+  BIN=$TDIR/frameplayer
+  [ "$HAVE_PROBE" = 1 ] && PROBE_BIN=${PROBE_BIN:-$TDIR/frameplayer-probe}
 fi
-BIN=${BIN:-${CARGO_TARGET_DIR:-$ROOT/target}/$TARGET/release/frameplayer}
+BIN=${BIN:-$TDIR/frameplayer}
 [ -x "$BIN" ] || die "binary $BIN not found (build first or pass --bin)"
+if [ -z "$PROBE_BIN" ] && [ -x "$TDIR/frameplayer-probe" ] && [ "$BUILD" = 0 ] && [ "$BIN" = "$TDIR/frameplayer" ]; then
+  PROBE_BIN=$TDIR/frameplayer-probe
+fi
+if [ -n "$PROBE_BIN" ] && [ ! -x "$PROBE_BIN" ]; then die "probe binary $PROBE_BIN not found"; fi
+[ -n "$PROBE_BIN" ] || echo "warning: no frameplayer-probe binary; the tarball will not contain the self-test" >&2
 if command -v file >/dev/null; then
   file -b "$BIN" | grep -q 'ARM aarch64' || echo "warning: $BIN is not an aarch64 ELF: $(file -b "$BIN")" >&2
 fi
@@ -92,6 +109,8 @@ V=$STAGE/versions/$VERSION
 mkdir -p "$V/bin" "$V/lib" "$V/share/steam" "$V/share/frameplayer"
 install -m 0755 "$BIN" "$V/bin/frameplayer"
 install -m 0755 dist/frameplayer.sh "$STAGE/frameplayer.sh"
+install -m 0755 dist/frameplayer-probe.sh "$STAGE/frameplayer-probe.sh"
+[ -n "$PROBE_BIN" ] && install -m 0755 "$PROBE_BIN" "$V/bin/frameplayer-probe"
 printf '%s\n' "$VERSION" > "$STAGE/RELEASE"
 # Bundled shared libraries (normally none: everything is static except glibc
 # and the system Vulkan loader). Drop extras in dist/lib-aarch64/.
@@ -115,7 +134,7 @@ fi
 
 echo "==> $TARBALL"
 tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$SOURCE_DATE_EPOCH" \
-    --format=gnu -C "$STAGE" -cf - frameplayer.sh RELEASE versions | gzip -9n > "$TARBALL"
+    --format=gnu -C "$STAGE" -cf - frameplayer.sh frameplayer-probe.sh RELEASE versions | gzip -9n > "$TARBALL"
 (cd "$OUT" && sha256sum "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
 echo "    sha256 $(cut -d' ' -f1 "$TARBALL.sha256")  size $(wc -c < "$TARBALL")"
 
