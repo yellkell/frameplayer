@@ -125,8 +125,8 @@ fn thumb_key(r: &MediaRecord) -> Option<String> {
         .or_else(|| r.thumbnail_url.clone())
 }
 
-fn open_record(r: &MediaRecord) -> Action {
-    Action::Open(OpenRequest {
+fn request(r: &MediaRecord) -> OpenRequest {
+    OpenRequest {
         location: r.location.clone(),
         source_id: (r.source_id != "local"
             && !r.source_id.is_empty()
@@ -134,7 +134,16 @@ fn open_record(r: &MediaRecord) -> Action {
         .then(|| r.source_id.clone()),
         entry: None,
         start_at: None,
-    })
+    }
+}
+
+fn open_record(r: &MediaRecord) -> Action {
+    Action::Open(request(r))
+}
+
+/// Opens `records[i]` with the rest of the list queued for next/previous.
+fn open_in(records: &[MediaRecord], i: usize) -> Action {
+    Action::OpenList(records.iter().map(request).collect(), i)
 }
 
 /// A thumbnail card; returns (play clicked, details clicked).
@@ -263,13 +272,13 @@ fn grid(ui: &mut egui::Ui, v: &mut View, records: &[MediaRecord]) {
     let per_row = ((ui.available_width() + 12.0) / (CARD.x + 12.0))
         .floor()
         .max(1.0) as usize;
-    for row in records.chunks(per_row) {
+    for (ri, row) in records.chunks(per_row).enumerate() {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 12.0;
-            for r in row {
+            for (ci, r) in row.iter().enumerate() {
                 let (play, more) = card(ui, v, r);
                 if play {
-                    v.actions.push(open_record(r));
+                    v.actions.push(open_in(records, ri * per_row + ci));
                 }
                 if more {
                     v.state.details = Some(r.id);
@@ -290,10 +299,10 @@ fn row(ui: &mut egui::Ui, v: &mut View, title: &str, records: &[MediaRecord]) {
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 12.0;
-                for r in records {
+                for (i, r) in records.iter().enumerate() {
                     let (play, more) = card(ui, v, r);
                     if play {
-                        v.actions.push(open_record(r));
+                        v.actions.push(open_in(records, i));
                     }
                     if more {
                         v.state.details = Some(r.id);

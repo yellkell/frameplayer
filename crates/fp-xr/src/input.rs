@@ -19,6 +19,8 @@ pub struct Hand {
     pub trigger: f32,
     pub squeeze: f32,
     pub stick: Vec2,
+    /// Thumbstick pressed in.
+    pub stick_click: bool,
     /// A / X.
     pub primary: bool,
     /// B / Y.
@@ -38,6 +40,7 @@ pub(crate) struct Actions {
     trigger: xr::Action<f32>,
     squeeze: xr::Action<f32>,
     stick: xr::Action<xr::Vector2f>,
+    stick_click: xr::Action<bool>,
     primary: xr::Action<bool>,
     secondary: xr::Action<bool>,
     menu: xr::Action<bool>,
@@ -53,6 +56,7 @@ enum Kind {
     Trigger,
     Squeeze,
     Stick,
+    StickClick,
     Primary,
     Secondary,
     Menu,
@@ -73,6 +77,7 @@ const PROFILES: &[(&str, &[Candidate])] = &[
             ("input/squeeze/value", Kind::Squeeze, 3),
             ("input/grip/value", Kind::Squeeze, 3),
             ("input/thumbstick", Kind::Stick, 3),
+            ("input/thumbstick/click", Kind::StickClick, 3),
             ("input/a/click", Kind::Primary, 2),
             ("input/b/click", Kind::Secondary, 2),
             ("input/x/click", Kind::Primary, 1),
@@ -89,6 +94,7 @@ const PROFILES: &[(&str, &[Candidate])] = &[
             ("input/trigger/value", Kind::Trigger, 3),
             ("input/squeeze/value", Kind::Squeeze, 3),
             ("input/thumbstick", Kind::Stick, 3),
+            ("input/thumbstick/click", Kind::StickClick, 3),
             ("input/a/click", Kind::Primary, 3),
             ("input/b/click", Kind::Secondary, 3),
             ("input/system/click", Kind::Menu, 3),
@@ -102,6 +108,7 @@ const PROFILES: &[(&str, &[Candidate])] = &[
             ("input/trigger/value", Kind::Trigger, 3),
             ("input/squeeze/value", Kind::Squeeze, 3),
             ("input/thumbstick", Kind::Stick, 3),
+            ("input/thumbstick/click", Kind::StickClick, 3),
             ("input/a/click", Kind::Primary, 2),
             ("input/b/click", Kind::Secondary, 2),
             ("input/x/click", Kind::Primary, 1),
@@ -152,6 +159,9 @@ impl Actions {
         let stick = set
             .create_action::<xr::Vector2f>("stick", "Thumbstick", &hands)
             .ctx("action")?;
+        let stick_click = set
+            .create_action::<bool>("stick_click", "Reset view", &hands)
+            .ctx("action")?;
         let primary = set
             .create_action::<bool>("primary", "Play/pause", &hands)
             .ctx("action")?;
@@ -170,6 +180,7 @@ impl Actions {
             trigger,
             squeeze,
             stick,
+            stick_click,
             primary,
             secondary,
             menu,
@@ -236,6 +247,7 @@ impl Actions {
                 Kind::Trigger => xr::Binding::new(&self.trigger, *p),
                 Kind::Squeeze => xr::Binding::new(&self.squeeze, *p),
                 Kind::Stick => xr::Binding::new(&self.stick, *p),
+                Kind::StickClick => xr::Binding::new(&self.stick_click, *p),
                 Kind::Primary => xr::Binding::new(&self.primary, *p),
                 Kind::Secondary => xr::Binding::new(&self.secondary, *p),
                 Kind::Menu => xr::Binding::new(&self.menu, *p),
@@ -283,6 +295,11 @@ impl Actions {
             if let Ok(s) = self.stick.state(session, *h) {
                 hand.stick = Vec2::new(s.current_state.x, s.current_state.y);
             }
+            hand.stick_click = self
+                .stick_click
+                .state(session, *h)
+                .map(|s| s.current_state)
+                .unwrap_or(false);
             hand.primary = self
                 .primary
                 .state(session, *h)

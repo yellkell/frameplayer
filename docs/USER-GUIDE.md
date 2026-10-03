@@ -82,15 +82,24 @@ Subtitles: SRT, ASS/SSA, WebVTT, and embedded text or picture subtitles.
 
 ## Controls
 
+The same as DeoVR's defaults on Quest, so muscle memory carries over:
+
 | Control | Action |
 |---|---|
-| Trigger | Click; click empty space to show or hide the controls |
 | A / X | Play / pause |
-| B / Y | Show / hide the controls |
-| Thumbstick left / right | Seek back / forward (10 s, adjustable) |
+| B / Y | Back: closes the open panel, then shows the library over the video, then returns to the video |
+| Thumbstick left / right | Seek back / forward 10 s (adjustable; hold to repeat). Pointing at a list: previous / next page |
 | Thumbstick up / down | Volume (or scroll a menu you point at) |
-| Both grips | Recenter |
+| Thumbstick press | Reset the image (zoom and drag) |
+| Hold grip + trigger, move | Drag the picture (the dome follows your hand) |
+| Grip + thumbstick right / left | Next / previous video in the list you opened it from |
+| Grip + thumbstick down / up | Zoom in / out |
+| Trigger | Click; on empty space, show or hide the controls |
 | Menu | Library |
+| Both grips | Recenter |
+
+Drags and zoom count as adjustments: save them for that video under ⚙, or
+press the thumbstick to undo them.
 
 Text fields bring up a keyboard in front of you; you can also type on your
 phone through the web remote.

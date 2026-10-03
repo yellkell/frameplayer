@@ -211,12 +211,27 @@ fn browse(ui: &mut egui::Ui, v: &mut View) {
             if resp.clicked() {
                 match e.kind {
                     EntryKind::Directory => go = Some(e.location.clone()),
-                    _ => v.actions.push(Action::Open(OpenRequest {
-                        location: e.location.clone(),
-                        source_id: Some(source.clone()),
-                        entry: Some(e.clone()),
-                        start_at: None,
-                    })),
+                    _ => {
+                        // Queue the folder's videos for next/previous.
+                        let videos: Vec<&fp_core::source::Entry> = entries
+                            .iter()
+                            .filter(|x| x.kind == EntryKind::Video)
+                            .collect();
+                        let pos = videos
+                            .iter()
+                            .position(|x| x.location == e.location)
+                            .unwrap_or(0);
+                        let list = videos
+                            .iter()
+                            .map(|x| OpenRequest {
+                                location: x.location.clone(),
+                                source_id: Some(source.clone()),
+                                entry: Some((*x).clone()),
+                                start_at: None,
+                            })
+                            .collect();
+                        v.actions.push(Action::OpenList(list, pos));
+                    }
                 }
             }
         }

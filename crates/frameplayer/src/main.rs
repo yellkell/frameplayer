@@ -6,6 +6,7 @@
 //! used for automated UI tests.
 
 mod app;
+mod controls;
 mod jobs;
 mod logger;
 mod playback;

@@ -27,7 +27,8 @@ cargo test --workspace                   # GPU tests use any Vulkan device (lava
 tools/package.sh                         # release zip + manifests for the Frame in dist/
 ```
 
-Needs Rust 1.89+, meson, ninja, nasm, pkg-config, zig (`pip install
+Needs Rust 1.89+, meson 1.4+ (older meson cannot use zig's linker), ninja,
+nasm, pkg-config, zig (`pip install
 ziglang`) and `cargo-zigbuild`. Binaries target glibc 2.28.
 
 ## Running without a headset

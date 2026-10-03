@@ -324,6 +324,11 @@ impl Pointer {
         routed
     }
 
+    /// The panel the active hand points at.
+    pub fn hovered(&self) -> Option<usize> {
+        self.hovered_panel
+    }
+
     /// Pointer rays and cursor dots to draw.
     pub fn quads(&self, eye: Vec3, show: bool) -> Vec<QuadDraw> {
         let mut out = Vec::new();

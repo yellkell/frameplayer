@@ -14,7 +14,9 @@
 //! | `click` | pull and release the trigger |
 //! | `button primary/secondary/menu` | press and release a button |
 //! | `stick X Y FRAMES` | hold the thumbstick |
-//! | `squeeze` | squeeze both grips (recenter) |
+//! | `squeeze` | squeeze and release the grip |
+//! | `grip V` / `trigger V` | hold the grip / trigger at V (0..1) until changed |
+//! | `status` | print what is playing and the view settings |
 //! | `open LOCATION` | open a file or URL |
 //! | `shot NAME` | save the left eye as OUT_DIR/NAME.png |
 //! | `sbs NAME` | save both eyes side by side |
@@ -194,6 +196,7 @@ impl Sim {
                 let b = parts.get(1).copied().unwrap_or("primary");
                 let set = |h: &mut Hand, v: bool| match b {
                     "secondary" => h.secondary = v,
+                    "stick" => h.stick_click = v,
                     "menu" => h.menu = v,
                     _ => h.primary = v,
                 };
@@ -208,6 +211,9 @@ impl Sim {
                 self.hand.stick = Vec2::ZERO;
                 self.run_frames(2)?;
             }
+            Some("grip") => self.hand.squeeze = num(1)?,
+            Some("trigger") => self.hand.trigger = num(1)?,
+            Some("status") => println!("status: {}", self.app.status_line()),
             Some("squeeze") => {
                 self.hand.squeeze = 1.0;
                 self.run_frames(2)?;

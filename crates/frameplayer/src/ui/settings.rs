@@ -475,19 +475,29 @@ fn about(ui: &mut egui::Ui, v: &mut View) {
     ui.add_space(8.0);
     ui.label(RichText::new("Controller").strong());
     for (k, d) in [
+        ("A / X", "Play or pause"),
+        (
+            "B / Y",
+            "Back: close a panel, library, then the video again",
+        ),
+        (
+            "Thumbstick left / right",
+            "Seek (hold to repeat); page lists you point at",
+        ),
+        ("Thumbstick up / down", "Volume; scroll menus you point at"),
+        ("Thumbstick press", "Reset the image (zoom and drag)"),
+        ("Hold grip + trigger", "Drag the picture to move it"),
+        ("Grip + thumbstick left / right", "Previous / next video"),
+        ("Grip + thumbstick down / up", "Zoom in / out"),
         (
             "Trigger",
-            "Click buttons; click empty space to show or hide controls",
+            "Click; on empty space, show or hide the controls",
         ),
-        ("A / X", "Play or pause"),
-        ("B / Y", "Show or hide controls"),
-        ("Thumbstick left/right", "Seek (not over a menu)"),
-        ("Thumbstick up/down", "Scroll menus; volume during playback"),
-        ("Both grips", "Recenter the view"),
         ("Menu", "Library"),
+        ("Both grips", "Recenter"),
     ] {
         ui.horizontal(|ui| {
-            ui.add_sized([230.0, 28.0], egui::Label::new(RichText::new(k).strong()));
+            ui.add_sized([300.0, 28.0], egui::Label::new(RichText::new(k).strong()));
             ui.label(d);
         });
     }

@@ -45,6 +45,8 @@ pub fn fmt_size(bytes: u64) -> String {
 #[derive(Clone, Debug)]
 pub enum Action {
     Open(OpenRequest),
+    /// Open item `.1` of a list; grip + thumbstick moves through the list.
+    OpenList(Vec<OpenRequest>, usize),
     TogglePause,
     Seek(f64),
     SeekRelative(f64),

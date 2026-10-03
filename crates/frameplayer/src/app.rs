@@ -82,8 +82,13 @@ pub struct App {
     ui_visible: bool,
     show_browser: bool,
     last_activity: Instant,
-    prev: [Hand; 2],
-    stick_latch: [bool; 2],
+    controls: crate::controls::Controls,
+    trigger_prev: [f32; 2],
+    /// Yaw/pitch when a dome drag began.
+    drag_start: Option<(f32, f32)>,
+    /// The list the open video came from, for next/previous.
+    queue: Vec<OpenRequest>,
+    queue_pos: usize,
     last_status: Option<PlaybackStatus>,
     update: Option<fp_updater::Update>,
     /// Removable drives seen at the last check, and when that was.
@@ -134,8 +139,11 @@ impl App {
             ui_visible: true,
             show_browser: true,
             last_activity: Instant::now(),
-            prev: Default::default(),
-            stick_latch: [false; 2],
+            controls: Default::default(),
+            trigger_prev: [0.0; 2],
+            drag_start: None,
+            queue: Vec::new(),
+            queue_pos: 0,
             last_status: None,
             update: None,
             mounts: crate::services::removable_mounts(),
@@ -160,6 +168,29 @@ impl App {
     /// Opens a location (path or URL) as if picked in the UI.
     pub fn open(&mut self, req: OpenRequest) {
         self.apply(Action::Open(req));
+    }
+
+    /// One line about the open video and the UI, for the preview harness.
+    pub fn status_line(&self) -> String {
+        let ui = format!(
+            "ui_visible={} browser={} adjust={}",
+            self.ui_visible, self.show_browser, self.ui.adjust_open
+        );
+        match &self.playback {
+            Some(p) => format!(
+                "{} pos={:.1} vol={:.2} zoom={:.2} yaw={:.1} pitch={:.1} queue={}/{} paused={} {ui}",
+                p.title,
+                p.player.position(),
+                p.player.volume(),
+                p.settings.zoom,
+                p.settings.yaw,
+                p.settings.pitch,
+                self.queue_pos + 1,
+                self.queue.len(),
+                p.player.is_paused()
+            ),
+            None => format!("no video, screen={:?} {ui}", self.ui.screen),
+        }
     }
 
     /// World position of a fractional point on a visible panel (tests).
@@ -561,22 +592,15 @@ impl App {
         let lib = self.services.library.clone();
         match a {
             Action::Open(req) => {
-                self.open_seq += 1;
-                let seq = self.open_seq;
-                let opener = self.services.opener.clone();
-                let settings = self.settings.clone();
-                self.ui.opening = Some(
-                    req.entry
-                        .as_ref()
-                        .map(|e| e.name.clone())
-                        .unwrap_or_else(|| {
-                            req.location.rsplit('/').next().unwrap_or("").to_string()
-                        }),
-                );
-                self.ui.open_error = None;
-                self.jobs.spawn("open", move || {
-                    Job::Opened(seq, Box::new(playback::open(req, &opener, &lib, &settings)))
-                });
+                self.queue.clear();
+                self.open_request(req);
+            }
+            Action::OpenList(list, pos) => {
+                if let Some(req) = list.get(pos).cloned() {
+                    self.queue = list;
+                    self.queue_pos = pos;
+                    self.open_request(req);
+                }
             }
             Action::TogglePause => {
                 if let Some(p) = &self.playback {
@@ -931,79 +955,210 @@ impl App {
 
     // ---- input ---------------------------------------------------------------
 
+    /// DeoVR-style controller bindings (see controls.rs).
     fn controller(
         &mut self,
         input: &FrameInput,
         over_ui: bool,
         click_outside: bool,
+        anchor: Mat4,
         buzz: &mut Vec<(usize, f32, i64)>,
     ) {
+        use crate::controls::{Cmd, Context};
         let h = input.hands;
-        let pressed = |i: usize, f: fn(&Hand) -> bool| f(&h[i]) && !f(&self.prev[i]);
-        let mut actions = Vec::new();
-        let mut activity = over_ui;
         let playing = self.playback.is_some();
-        for i in 0..2 {
-            if pressed(i, |h| h.primary) && playing {
-                actions.push(Action::TogglePause);
-                activity = true;
-            }
-            if pressed(i, |h| h.secondary) || (pressed(i, |h| h.menu) && !playing) {
-                self.ui_visible = !self.ui_visible || self.show_browser;
-                self.show_browser = false;
-                activity = true;
-            }
-            if pressed(i, |h| h.menu) && playing {
-                self.show_browser = !self.show_browser;
-                self.ui_visible = true;
-                activity = true;
-            }
-            // Thumbstick: seek left/right when not pointing at a menu; volume up/down.
-            let s = h[i].stick;
-            if !over_ui && playing {
-                if s.x.abs() > 0.75 && !self.stick_latch[i] {
-                    self.stick_latch[i] = true;
-                    actions.push(Action::SeekRelative(
-                        self.settings.seek_step * s.x.signum() as f64,
-                    ));
-                    buzz.push((i, 0.15, 10));
-                    activity = true;
-                } else if s.x.abs() < 0.3 {
-                    self.stick_latch[i] = false;
-                }
-                if s.y.abs() > 0.5
-                    && s.x.abs() < 0.3
-                    && let Some(p) = &self.playback
-                {
-                    let v = (p.player.volume() + s.y * input.dt * 0.6).clamp(0.0, 1.5);
-                    actions.push(Action::SetVolume(v));
-                    activity = true;
-                }
-            }
-        }
-        let squeeze = |hh: &[Hand; 2]| hh[0].squeeze > 0.8 && hh[1].squeeze > 0.8;
-        if squeeze(&h) && !squeeze(&self.prev) {
-            self.reanchor = true;
-            buzz.push((0, 0.3, 20));
-            buzz.push((1, 0.3, 20));
-        }
-        if click_outside && playing {
-            self.ui_visible = !self.ui_visible;
-            if !self.ui_visible {
-                self.show_browser = false;
-            }
-            activity = true;
-        }
-        if over_ui && (0..2).any(|i| h[i].trigger > 0.7 && self.prev[i].trigger <= 0.7) {
+        let anchor_rot = anchor.to_scale_rotation_translation().1;
+        let cmds = self.controls.update(
+            &h,
+            anchor_rot,
+            Context {
+                over_ui,
+                click_outside,
+                playing,
+                dt: input.dt,
+            },
+        );
+        if over_ui && (0..2).any(|i| h[i].trigger > 0.7 && self.trigger_prev[i] <= 0.7) {
             buzz.push((self.pointer.active, 0.2, 8));
         }
-        if activity {
+        self.trigger_prev = [h[0].trigger, h[1].trigger];
+        if over_ui || !cmds.is_empty() {
             self.last_activity = Instant::now();
         }
-        self.prev = h;
-        for a in actions {
-            self.apply(a);
+        for c in cmds {
+            match c {
+                Cmd::TogglePause => self.apply(Action::TogglePause),
+                Cmd::Back => self.back(),
+                Cmd::Menu => {
+                    if playing {
+                        self.show_browser = !self.show_browser;
+                        self.ui_visible = true;
+                    } else {
+                        self.ui_visible = true;
+                    }
+                }
+                Cmd::Seek(dir) => {
+                    self.apply(Action::SeekRelative(self.settings.seek_step * dir as f64));
+                    buzz.push((self.pointer.active, 0.15, 10));
+                }
+                Cmd::Volume(d) => {
+                    if let Some(p) = &self.playback {
+                        let v = (p.player.volume() + d).clamp(0.0, 1.5);
+                        self.apply(Action::SetVolume(v));
+                    }
+                }
+                Cmd::Zoom(d) => {
+                    if let Some(p) = &mut self.playback {
+                        p.settings.zoom = (p.settings.zoom + d).clamp(0.5, 2.5);
+                        p.settings_dirty = true;
+                    }
+                }
+                Cmd::Next => self.step_queue(1),
+                Cmd::Previous => self.step_queue(-1),
+                Cmd::ResetImage => {
+                    if let Some(p) = &mut self.playback {
+                        let d = self.settings.default_view;
+                        (
+                            p.settings.yaw,
+                            p.settings.pitch,
+                            p.settings.roll,
+                            p.settings.zoom,
+                        ) = (d.yaw, d.pitch, d.roll, d.zoom);
+                        p.settings_dirty = true;
+                        self.ui.toast("View reset");
+                    }
+                }
+                Cmd::DragBegin => {
+                    self.drag_start = self
+                        .playback
+                        .as_ref()
+                        .map(|p| (p.settings.yaw, p.settings.pitch));
+                    buzz.push((self.pointer.active, 0.25, 12));
+                }
+                Cmd::DragTo { yaw, pitch } => {
+                    if let (Some(p), Some((y0, p0))) = (&mut self.playback, self.drag_start) {
+                        // The picture follows the hand.
+                        p.settings.yaw = y0 + yaw;
+                        p.settings.pitch = (p0 + pitch).clamp(-90.0, 90.0);
+                        p.settings_dirty = true;
+                    }
+                }
+                Cmd::DragEnd => self.drag_start = None,
+                Cmd::Recenter => {
+                    self.reanchor = true;
+                    buzz.push((0, 0.3, 20));
+                    buzz.push((1, 0.3, 20));
+                }
+                Cmd::ToggleUi => {
+                    self.ui_visible = !self.ui_visible;
+                    if !self.ui_visible {
+                        self.show_browser = false;
+                    }
+                }
+                Cmd::Page(dir) => {
+                    if let Some(i) = self.pointer.hovered() {
+                        let page = self.panels[i].points().y * 0.8;
+                        self.panels[i].push(egui::Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Point,
+                            delta: egui::vec2(0.0, -page * dir as f32),
+                            modifiers: egui::Modifiers::NONE,
+                        });
+                    }
+                }
+            }
         }
+    }
+
+    /// B / Y, as DeoVR's Back: close the innermost thing that is open.
+    fn back(&mut self) {
+        if self.panels[KEYBOARD].visible {
+            let target = [MAIN, ADJUST]
+                .into_iter()
+                .find(|&i| self.panels[i].wants_keyboard());
+            if let Some(i) = target {
+                self.panels[i].push(egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            return;
+        }
+        let playing = self.playback.is_some();
+        if playing && self.ui.adjust_open && self.ui_visible && !self.show_browser {
+            self.ui.adjust_open = false;
+        } else if (!playing || self.show_browser) && self.ui.details.is_some() {
+            self.ui.details = None;
+        } else if (!playing || self.show_browser) && self.ui.source_form.is_some() {
+            self.ui.source_form = None;
+        } else if (!playing || self.show_browser) && self.ui.browse.is_some() {
+            let source = self
+                .ui
+                .browse
+                .as_ref()
+                .map(|b| b.source.clone())
+                .unwrap_or_default();
+            match self.ui.browse.as_mut().and_then(|b| b.stack.pop()) {
+                Some(parent) => self.browse(source, parent),
+                None => self.ui.browse = None,
+            }
+        } else if playing && self.show_browser {
+            // Library open over the video: back to the video.
+            self.show_browser = false;
+            self.ui_visible = true;
+        } else if playing && self.ui_visible {
+            // Player controls: back to the library, video keeps playing.
+            self.show_browser = true;
+            self.ui.invalidate();
+        } else if playing {
+            self.ui_visible = true;
+        } else if self.ui.screen != ui::Screen::Home {
+            self.ui.screen = ui::Screen::Home;
+            self.ui.invalidate();
+        }
+        self.last_activity = Instant::now();
+    }
+
+    fn open_request(&mut self, req: OpenRequest) {
+        self.open_seq += 1;
+        let lib = self.services.library.clone();
+        let seq = self.open_seq;
+        let opener = self.services.opener.clone();
+        let settings = self.settings.clone();
+        self.ui.opening = Some(
+            req.entry
+                .as_ref()
+                .map(|e| e.name.clone())
+                .unwrap_or_else(|| req.location.rsplit('/').next().unwrap_or("").to_string()),
+        );
+        self.ui.open_error = None;
+        self.jobs.spawn("open", move || {
+            Job::Opened(seq, Box::new(playback::open(req, &opener, &lib, &settings)))
+        });
+    }
+
+    /// Next/previous video in the list the current one was opened from.
+    fn step_queue(&mut self, dir: i32) {
+        if self.queue.is_empty() {
+            self.ui.toast("No other videos in this list");
+            return;
+        }
+        let n = self.queue.len() as i32;
+        let next = self.queue_pos as i32 + dir;
+        if !(0..n).contains(&next) {
+            self.ui.toast(if dir > 0 {
+                "Last video in this list"
+            } else {
+                "First video in this list"
+            });
+            return;
+        }
+        self.queue_pos = next as usize;
+        let req = self.queue[self.queue_pos].clone();
+        self.ui.toast(format!("{} of {}", self.queue_pos + 1, n));
+        self.open_request(req);
     }
 
     // ---- frame -----------------------------------------------------------------
@@ -1063,7 +1218,13 @@ impl App {
                 .route(&mut [a, b, c, d], &input.hands, input.dt)
         };
         let mut buzz = Vec::new();
-        self.controller(&input, routed.over_ui, routed.click_outside, &mut buzz);
+        self.controller(
+            &input,
+            routed.over_ui,
+            routed.click_outside,
+            anchor,
+            &mut buzz,
+        );
 
         // Paint panels.
         let mut actions = Vec::new();
