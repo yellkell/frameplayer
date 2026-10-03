@@ -14,7 +14,7 @@ holding the rest and fully-pressed poses). Pages that animate Touch models
 (three.js XRControllerModelFactory, IWSDK) then move the Frame's trigger,
 grip, stick and A/B as the gamepad reports them.
 
-Nothing extracted is distributed: run this on your own extraction.
+The Chromium XR release ships the result (tools/webxr/package-frame-title.sh).
 
 Usage: bake_touch_glb.py IN_DIR OUT_DIR
 """

@@ -2,9 +2,8 @@
 # Starts Chromium XR from the Frame Control / Steam devkit title. The title's
 # top-level chromium-xr.sh and chromium-xr-sandboxed.sh call this with
 # CHROMIUM_XR_SANDBOXED=0 or 1. Steam passes no arguments, so it opens the
-# page in ~/.config/chromium-xr-frame/home-url (FramePlayer's Web XR tab
-# writes it), else Fish & Chips. Arguments, if any, go to Chromium:
-# `chromium-xr.sh URL`. The WebXR check page is in chromium/start/.
+# page in ~/.config/chromium-xr-frame/home-url, else Fish & Chips.
+# Arguments, if any, go to Chromium: `chromium-xr.sh URL`.
 #
 # Based on saphid/chromium-webxr-steam-frame frame/chromium-xr (BSD-3).
 set -euo pipefail
@@ -85,10 +84,9 @@ flags=(
 # --test-type hides the "unsupported command-line flag" bar the flag below
 # would put over every page (the flag is deliberate; see docs/webxr).
 [[ $sandboxed == 1 ]] || flags+=(--disable-seccomp-filter-sandbox --test-type)
-# Steam Frame controller models where pages ask for Quest Touch ones: an
-# extension made on this headset by tools/webxr/frame-models (the models are
-# SteamVR's, extracted locally, never shipped). Chromium only loads
-# extensions from the command line with this feature off.
+# Steam Frame controller models where pages ask for Quest Touch ones: the
+# extension made by tools/webxr/frame-models, shipped in the title. Chromium
+# only loads extensions from the command line with this feature off.
 models="$here/../frame-models"
 if [[ -f $models/manifest.json ]]; then
   flags+=(--load-extension="$(cd "$models" && pwd)"

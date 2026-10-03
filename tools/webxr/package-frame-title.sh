@@ -2,7 +2,7 @@
 # Package a finished build-frame-chromium.sh build as a Frame Control title:
 # one .zip that installs from a link, plus one install manifest per title.
 #
-#   TAG=chromium-xr-frame-<version>-<n> tools/webxr/package-frame-title.sh
+#   TAG=chromium-xr-frame-<version>-<n> FRAME_MODELS_EXT=<extension dir> #     tools/webxr/package-frame-title.sh
 #
 # Output in $W/release:
 #   ChromiumXR-Frame-arm64.zip         Chromium in chromium/, launchers on top
@@ -26,19 +26,18 @@ rm -rf "$stage" "$OUT"
 mkdir -p "$stage/chromium" "$OUT"
 install -m 755 "$FP"/tools/webxr/frame-title/chromium-xr.sh "$FP"/tools/webxr/frame-title/chromium-xr-sandboxed.sh "$stage/"
 install -m 755 "$FP"/tools/webxr/frame-title/launch.sh "$stage/chromium/"
+# Steam Frame controller models for pages that ask for Quest Touch ones: the
+# extension made by tools/webxr/frame-models (bake_touch_glb.py, then
+# make_extension.py) from an extraction on a Frame. The launcher loads it.
+FRAME_MODELS_EXT=${FRAME_MODELS_EXT:?set FRAME_MODELS_EXT to the controller models extension}
+[[ -f $FRAME_MODELS_EXT/manifest.json ]] || { echo "no manifest.json in $FRAME_MODELS_EXT" >&2; exit 1; }
+cp -r "$FRAME_MODELS_EXT" "$stage/frame-models"
 cd "$B"
 files=(chrome chrome_crashpad_handler *.pak *.bin icudtl.dat locales product_logo_256.png BUILD-INFO.txt)
 for f in libEGL.so libGLESv2.so libvk_swiftshader.so libvulkan.so.1 vk_swiftshader_icd.json; do
   [[ -e $f ]] && files+=("$f")
 done
 cp -r "${files[@]}" "$stage/chromium/"
-cp -r "$FP/tools/webxr/frame-webxr-check" "$stage/chromium/start"
-# Bundle three.js so the start page works offline on the headset.
-three=$(grep -o 'https://cdn.jsdelivr.net/npm/three@[0-9.]*/build/three.module.js' "$stage/chromium/start/index.html")
-curl -fsSL "$three" -o "$stage/chromium/start/three.module.js"
-curl -fsSL "${three%/build/three.module.js}/LICENSE" -o "$stage/chromium/start/three.LICENSE"
-sed -i "s#$three#./three.module.js#" "$stage/chromium/start/index.html"
-grep -q '"three": "./three.module.js"' "$stage/chromium/start/index.html"
 cp "$W/src/LICENSE" "$stage/chromium/LICENSE.chromium"
 
 # Files at the zip root (no single top folder), so the manifests' "exe"
@@ -69,10 +68,21 @@ link() { python3 -c 'import sys, urllib.parse as u; print("frame-control://insta
 base="https://github.com/$REPO/releases/download/$TAG"
 cat > "$OUT/INSTALL.md" <<EOF
 Chromium with immersive WebXR for the Steam Frame, built from chromium/main
-\`$(sed -n 's/^chromium\/src //p' "$B/BUILD-INFO.txt" | cut -c1-12)\` with FramePlayer's sandbox patches
-(docs/webxr/patches 0001-0003) and IWFDK's Frame controller patch (0004).
+\`$(sed -n 's/^chromium\/src //p' "$B/BUILD-INFO.txt" | cut -c1-12)\` with the patches listed below.
 Unofficial and experimental; based on
 [saphid/chromium-webxr-steam-frame](https://github.com/saphid/chromium-webxr-steam-frame).
+
+What works on the Frame:
+
+- Opens Fish & Chips (https://yellkell.com/fac) at 90 Hz and 2160 pixels per eye
+  (SteamVR per-app settings, unless you chose your own). To start on another
+  page, put its address in \`~/.config/chromium-xr-frame/home-url\`.
+- Both eyes render (patch 0005; WebXR layers are off, they render black).
+- The controllers work like Quest Touch controllers in games made for Quest
+  (patch 0006), and look like Steam Frame controllers: pages that load the
+  Quest Touch models get the Frame's, with trigger, grip and stick moving.
+- Controller vibration (\`gamepad.vibrationActuator\`, patch 0008).
+- No "unsupported command-line flag" bar.
 
 ## Install with Frame Control
 
@@ -86,10 +96,10 @@ Two Steam titles from the same zip. Install either or both:
 Or give Frame Control the zip directly and pick \`chromium-xr.sh\` or
 \`chromium-xr-sandboxed.sh\` as the program: $url
 
-Each opens a start page with the **Frame WebXR check** (press Enter VR, press
-every control, press Menu, hold both triggers and grips 2 s, then copy the
-report) and links to Fish & Chips and other WebXR pages.
 Logs: \`~/.local/state/chromium-xr-frame/\`.
+
+The Steam Frame controller models (\`frame-models/\`) are Valve's, from SteamVR,
+converted for WebXR pages by FramePlayer's tools/webxr/frame-models.
 
 sha256 \`$sha\`, $size bytes.
 
