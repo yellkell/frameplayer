@@ -1212,7 +1212,18 @@ impl App {
             self.anchor = Some(anchor_from_head(pos, rot));
             self.reanchor = false;
         }
-        let anchor = self.anchor.unwrap_or(Mat4::IDENTITY);
+        let mut anchor = self.anchor.unwrap_or(Mat4::IDENTITY);
+        // A 180°/360° video is drawn from wherever the head is (it was
+        // filmed from one spot), so it moves along when you lean; panels
+        // fixed in the room then seem to slide against it. During such a
+        // video the panels keep to the head's position (not its turning),
+        // so they stay put relative to the picture.
+        if let (Some((pos, _)), Some(p)) = (input.head, &self.playback)
+            && p.format.projection != fp_core::format::Projection::Flat
+        {
+            let (_, rot, _) = anchor.to_scale_rotation_translation();
+            anchor = Mat4::from_rotation_translation(rot, pos);
+        }
         let eye = input.head.map(|h| h.0).unwrap_or(anchor.w_axis.truncate());
 
         // Visibility.
