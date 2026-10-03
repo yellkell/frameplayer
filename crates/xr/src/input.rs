@@ -67,6 +67,7 @@ pub struct ControllerState {
     pub squeeze: f32,
     /// Squeeze as a button (with hysteresis).
     pub grip_button: Button,
+    /// Shoulder button (`/input/shoulder` in Valve's Frame profile).
     pub bumper: Button,
     pub thumbstick: Vec2,
     pub thumbstick_button: Button,
@@ -219,8 +220,13 @@ pub struct InputSystem {
 
 impl InputSystem {
     /// Create actions and suggest bindings (must happen before the session
-    /// attaches action sets). `eye_gaze` requires XR_EXT_eye_gaze_interaction.
-    pub fn new(instance: &xr::Instance, eye_gaze: bool) -> Result<InputSystem, XrError> {
+    /// attaches action sets). `eye_gaze` requires XR_EXT_eye_gaze_interaction,
+    /// `frame_controller` XR_VALVE_frame_controller_interaction.
+    pub fn new(
+        instance: &xr::Instance,
+        eye_gaze: bool,
+        frame_controller: bool,
+    ) -> Result<InputSystem, XrError> {
         let set = instance.create_action_set("frameplayer", "FramePlayer", 0)?;
         let hand_paths = [
             instance.string_to_path(bindings::LEFT)?,
@@ -280,37 +286,27 @@ impl InputSystem {
         };
 
         for profile in Profile::ALL {
+            // The Frame profile only exists with its extension enabled.
+            if profile == Profile::Frame && !frame_controller {
+                tracing::warn!(
+                    "{} not enabled: Frame controllers arrive as emulated Touch controllers",
+                    bindings::FRAME_CONTROLLER_EXTENSION
+                );
+                continue;
+            }
             let profile_path = instance.string_to_path(profile.path())?;
-            let mut done = false;
-            for full in [true, false] {
-                if done || (!full && profile != Profile::Frame) {
-                    continue;
-                }
-                let list = bindings::bindings(profile, full);
-                let mut paths = Vec::with_capacity(list.len());
-                for (id, p) in &list {
-                    paths.push((*id, instance.string_to_path(p)?));
-                }
-                let b: Vec<xr::Binding<'_>> = paths
-                    .iter()
-                    .map(|&(id, p)| actions.binding(id, p))
-                    .collect();
-                match instance.suggest_interaction_profile_bindings(profile_path, &b) {
-                    Ok(()) => {
-                        tracing::info!(
-                            "suggested {} bindings for {} ({})",
-                            b.len(),
-                            profile.path(),
-                            if full { "full" } else { "core" }
-                        );
-                        done = true;
-                    }
-                    Err(e) => tracing::warn!(
-                        "bindings for {} ({}) rejected: {e}",
-                        profile.path(),
-                        if full { "full" } else { "core" }
-                    ),
-                }
+            let list = bindings::bindings(profile);
+            let mut paths = Vec::with_capacity(list.len());
+            for (id, p) in &list {
+                paths.push((*id, instance.string_to_path(p)?));
+            }
+            let b: Vec<xr::Binding<'_>> = paths
+                .iter()
+                .map(|&(id, p)| actions.binding(id, p))
+                .collect();
+            match instance.suggest_interaction_profile_bindings(profile_path, &b) {
+                Ok(()) => tracing::info!("suggested {} bindings for {}", b.len(), profile.path()),
+                Err(e) => tracing::warn!("bindings for {} rejected: {e}", profile.path()),
             }
         }
         if let Some(g) = &actions.gaze {

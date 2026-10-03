@@ -1,10 +1,11 @@
 //! Action definitions and suggested bindings, as plain data so they can be
 //! validated by tests without a runtime.
 //!
-//! Binding tiers: suggesting bindings for a profile fails as a whole if any
-//! single path is rejected, so every profile has a `full` list (including
-//! guessed component paths) and a `core` list of paths that are near
-//! certain. The runtime layer tries `full` first and falls back to `core`.
+//! The Steam Frame controller paths follow Valve's published OpenXR profile
+//! (ValveSoftware/Unity, `SteamFrameControllerProfile.cs`). The profile
+//! needs `XR_VALVE_frame_controller_interaction`; without it SteamVR presents
+//! the Frame controllers as emulated Touch controllers, so the Touch profile
+//! is the fallback, then the KHR simple controller.
 
 /// Value type of an action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,21 +152,22 @@ impl ActionId {
 /// Interaction profiles we suggest bindings for, in priority order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Profile {
-    /// Valve Steam Frame controllers.
+    /// Valve Steam Frame controllers (XR_VALVE_frame_controller_interaction).
     Frame,
-    /// Valve Index controllers (also what many runtimes emulate).
-    Index,
+    /// Oculus Touch: what SteamVR presents the Frame controllers as when the
+    /// Frame profile is unavailable.
+    Touch,
     /// KHR simple controller (universal fallback).
     Simple,
 }
 
 impl Profile {
-    pub const ALL: [Profile; 3] = [Profile::Frame, Profile::Index, Profile::Simple];
+    pub const ALL: [Profile; 3] = [Profile::Frame, Profile::Touch, Profile::Simple];
 
     pub fn path(self) -> &'static str {
         match self {
             Profile::Frame => "/interaction_profiles/valve/frame_controller_valve",
-            Profile::Index => "/interaction_profiles/valve/index_controller",
+            Profile::Touch => "/interaction_profiles/oculus/touch_controller",
             Profile::Simple => "/interaction_profiles/khr/simple_controller",
         }
     }
@@ -174,6 +176,10 @@ impl Profile {
         Profile::ALL.into_iter().find(|x| x.path() == p)
     }
 }
+
+/// The OpenXR extension that defines the Frame controller profile. Not in the
+/// Khronos registry yet; SteamVR on the Steam Frame provides it.
+pub const FRAME_CONTROLLER_EXTENSION: &str = "XR_VALVE_frame_controller_interaction";
 
 /// Eye gaze interaction profile and its single pose binding.
 pub const EYE_GAZE_PROFILE: &str = "/interaction_profiles/ext/eye_gaze_interaction";
@@ -202,12 +208,9 @@ const COMMON_HANDS: [[Binding; 2]; 6] = [
     both!(ActionId::Haptic, "/output/haptic"),
 ];
 
-/// Paths for the Frame controllers. Layout per the outline: A/B/X/Y and
-/// menu on the right controller, D-pad and view on the left (Steam Deck
-/// style), bumper/grip/trigger/stick on both, capacitive touch everywhere.
-// [verify] Every component path below on SteamVR for the Frame (dump with
-// `xrEnumerateBoundSourcesForAction` / SteamVR binding UI). Paths mirror
-// the Index profile's naming where the hardware matches.
+/// Frame controllers: A/B/X/Y and menu on the right, D-pad and view on the
+/// left, a shoulder button (the bumper), grip, trigger and stick on both,
+/// touch on every button. The system button is reserved by the runtime.
 const FRAME_EXTRA: &[Binding] = &[
     (
         ActionId::TriggerClick,
@@ -225,8 +228,8 @@ const FRAME_EXTRA: &[Binding] = &[
         ActionId::TriggerTouch,
         "/user/hand/right/input/trigger/touch",
     ),
-    (ActionId::Bumper, "/user/hand/left/input/bumper/click"),
-    (ActionId::Bumper, "/user/hand/right/input/bumper/click"),
+    (ActionId::Bumper, "/user/hand/left/input/shoulder/click"),
+    (ActionId::Bumper, "/user/hand/right/input/shoulder/click"),
     (
         ActionId::ThumbstickClick,
         "/user/hand/left/input/thumbstick/click",
@@ -262,41 +265,11 @@ const FRAME_EXTRA: &[Binding] = &[
     ),
 ];
 
-/// Frame bindings that are near certain (mirror Index components).
-const FRAME_CORE_EXTRA: &[Binding] = &[
-    (
-        ActionId::TriggerClick,
-        "/user/hand/left/input/trigger/click",
-    ),
-    (
-        ActionId::TriggerClick,
-        "/user/hand/right/input/trigger/click",
-    ),
-    (
-        ActionId::ThumbstickClick,
-        "/user/hand/left/input/thumbstick/click",
-    ),
-    (
-        ActionId::ThumbstickClick,
-        "/user/hand/right/input/thumbstick/click",
-    ),
-    (ActionId::ButtonA, "/user/hand/right/input/a/click"),
-    (ActionId::ButtonB, "/user/hand/right/input/b/click"),
-];
-
-/// Valve Index: A/B on both hands; left A/B stand in for X/Y. The system
-/// button is reserved by SteamVR, so Menu/View stay unbound (the app can
-/// treat a long B press as menu) and the D-pad is emulated from the left
-/// thumbstick (see `input::stick_to_dpad`).
-const INDEX_EXTRA: &[Binding] = &[
-    (
-        ActionId::TriggerClick,
-        "/user/hand/left/input/trigger/click",
-    ),
-    (
-        ActionId::TriggerClick,
-        "/user/hand/right/input/trigger/click",
-    ),
+/// Touch, as SteamVR emulates it for the Frame controllers: A/B on the
+/// right, X/Y and menu on the left, no trigger click (the analog threshold in
+/// `input` stands in), no D-pad (emulated from the left stick), no view or
+/// shoulder buttons.
+const TOUCH_EXTRA: &[Binding] = &[
     (
         ActionId::TriggerTouch,
         "/user/hand/left/input/trigger/touch",
@@ -323,12 +296,13 @@ const INDEX_EXTRA: &[Binding] = &[
     ),
     (ActionId::ButtonA, "/user/hand/right/input/a/click"),
     (ActionId::ButtonB, "/user/hand/right/input/b/click"),
-    (ActionId::ButtonX, "/user/hand/left/input/a/click"),
-    (ActionId::ButtonY, "/user/hand/left/input/b/click"),
+    (ActionId::ButtonX, "/user/hand/left/input/x/click"),
+    (ActionId::ButtonY, "/user/hand/left/input/y/click"),
     (ActionId::TouchA, "/user/hand/right/input/a/touch"),
     (ActionId::TouchB, "/user/hand/right/input/b/touch"),
-    (ActionId::TouchX, "/user/hand/left/input/a/touch"),
-    (ActionId::TouchY, "/user/hand/left/input/b/touch"),
+    (ActionId::TouchX, "/user/hand/left/input/x/touch"),
+    (ActionId::TouchY, "/user/hand/left/input/y/touch"),
+    (ActionId::Menu, "/user/hand/left/input/menu/click"),
 ];
 
 const SIMPLE: &[Binding] = &[
@@ -347,19 +321,12 @@ const SIMPLE: &[Binding] = &[
     (ActionId::Haptic, "/user/hand/right/output/haptic"),
 ];
 
-/// Suggested bindings for `profile`. `full = false` returns the
-/// conservative core subset.
-pub fn bindings(profile: Profile, full: bool) -> Vec<Binding> {
+/// Suggested bindings for `profile`.
+pub fn bindings(profile: Profile) -> Vec<Binding> {
     let common = || COMMON_HANDS.iter().flatten().copied();
     match profile {
-        Profile::Frame => common()
-            .chain(
-                if full { FRAME_EXTRA } else { FRAME_CORE_EXTRA }
-                    .iter()
-                    .copied(),
-            )
-            .collect(),
-        Profile::Index => common().chain(INDEX_EXTRA.iter().copied()).collect(),
+        Profile::Frame => common().chain(FRAME_EXTRA.iter().copied()).collect(),
+        Profile::Touch => common().chain(TOUCH_EXTRA.iter().copied()).collect(),
         Profile::Simple => SIMPLE.to_vec(),
     }
 }
@@ -405,37 +372,52 @@ mod tests {
         for p in Profile::ALL {
             assert!(p.path().starts_with("/interaction_profiles/"));
             assert_eq!(Profile::from_path(p.path()), Some(p));
-            for full in [true, false] {
-                let b = bindings(p, full);
-                assert!(!b.is_empty());
-                let mut seen = HashSet::new();
-                for (a, path) in &b {
-                    assert!(path.starts_with(LEFT) || path.starts_with(RIGHT), "{path}");
-                    assert_eq!(kind_for_path(path), Some(a.kind()), "{p:?} {a:?} {path}");
-                    assert!(seen.insert((*a, *path)), "duplicate {path}");
-                }
+            let b = bindings(p);
+            assert!(!b.is_empty());
+            let mut seen = HashSet::new();
+            for (a, path) in &b {
+                assert!(path.starts_with(LEFT) || path.starts_with(RIGHT), "{path}");
+                assert_eq!(kind_for_path(path), Some(a.kind()), "{p:?} {a:?} {path}");
+                assert!(seen.insert((*a, *path)), "duplicate {path}");
             }
         }
-        // The core Frame set is a subset of the full one.
-        let full: HashSet<_> = bindings(Profile::Frame, true).into_iter().collect();
-        assert!(bindings(Profile::Frame, false)
-            .iter()
-            .all(|b| full.contains(b)));
-        assert!(Profile::from_path("/interaction_profiles/htc/vive_controller").is_none());
+        assert!(Profile::from_path("/interaction_profiles/valve/index_controller").is_none());
     }
 
     #[test]
-    fn frame_layout_matches_outline() {
-        let b = bindings(Profile::Frame, true);
+    fn frame_layout_matches_valve_profile() {
+        let b = bindings(Profile::Frame);
         let has = |a: ActionId, p: &str| b.iter().any(|&(x, q)| x == a && q == p);
         assert!(has(ActionId::ButtonX, "/user/hand/right/input/x/click"));
         assert!(has(ActionId::DpadUp, "/user/hand/left/input/dpad_up/click"));
         assert!(has(ActionId::Menu, "/user/hand/right/input/menu/click"));
         assert!(has(ActionId::View, "/user/hand/left/input/view/click"));
+        assert!(has(
+            ActionId::Bumper,
+            "/user/hand/left/input/shoulder/click"
+        ));
+        assert!(!b
+            .iter()
+            .any(|(_, p)| p.contains("bumper") || p.contains("/system/")));
         // Every action except gaze has at least one Frame binding.
         for a in ActionId::ALL {
             assert!(b.iter().any(|&(x, _)| x == a), "{a:?} unbound on Frame");
         }
         assert_eq!(kind_for_path(EYE_GAZE_POSE), Some(ActionKind::Pose));
+        assert!(FRAME_CONTROLLER_EXTENSION.starts_with("XR_VALVE_"));
+    }
+
+    #[test]
+    fn touch_emulation_layout() {
+        let b = bindings(Profile::Touch);
+        let has = |a: ActionId, p: &str| b.iter().any(|&(x, q)| x == a && q == p);
+        assert!(has(ActionId::ButtonA, "/user/hand/right/input/a/click"));
+        assert!(has(ActionId::ButtonX, "/user/hand/left/input/x/click"));
+        assert!(has(ActionId::Menu, "/user/hand/left/input/menu/click"));
+        // Touch has no trigger click or D-pad: input falls back to the analog
+        // trigger threshold and stick D-pad emulation.
+        assert!(!b
+            .iter()
+            .any(|&(x, _)| x == ActionId::TriggerClick || x == ActionId::DpadUp));
     }
 }

@@ -8,7 +8,7 @@
 //!   (wait/begin/end with predicted display time), views, reference spaces
 //!   with recentering, swapchains, quad/cylinder/projection layers,
 //!   refresh-rate control.
-//! * [`input`] — action set + suggested bindings (Frame, Index, simple),
+//! * [`input`] — action set + suggested bindings (Frame, Touch emulation, simple),
 //!   eye gaze, hand joints with pinch detection, per-frame [`InputState`].
 //! * [`math`], [`pinch`], [`lifecycle`], [`select`], [`bindings`] — pure,
 //!   unit-tested building blocks.
