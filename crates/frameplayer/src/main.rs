@@ -4,6 +4,8 @@
 //! `frameplayer --preview OUT_DIR [--script FILE] [FILE|URL]` runs without a
 //! headset, simulating the head and a controller, and saves screenshots;
 //! used for automated UI tests.
+//! `frameplayer --decode-bench FILE` decodes without a headset and prints
+//! the decoder and its frame rate.
 
 mod app;
 mod controls;
@@ -34,6 +36,8 @@ struct Args {
     size: Option<u32>,
     exit_after: Option<f64>,
     info: Option<String>,
+    bench: Option<String>,
+    bench_opts: fp_media::bench::BenchOptions,
     verbose: bool,
     open: Option<String>,
 }
@@ -41,6 +45,8 @@ struct Args {
 const USAGE: &str = "usage: frameplayer [--verbose] [--exit-after SECONDS] [FILE|URL]
        frameplayer --preview OUT_DIR [--script FILE] [--size PIXELS] [FILE|URL]
        frameplayer --info FILE      (print what FramePlayer detects about a video)
+       frameplayer --decode-bench FILE [--frames N] [--sw] [--seek SECONDS]
+                   [--checksum N,N,...]  (decode only; print decoder and fps)
        frameplayer --version";
 
 fn parse_args() -> Result<Args, String> {
@@ -65,6 +71,29 @@ fn parse_args() -> Result<Args, String> {
                 )
             }
             "--info" => a.info = Some(it.next().ok_or("--info needs a file")?),
+            "--decode-bench" => a.bench = Some(it.next().ok_or("--decode-bench needs a file")?),
+            "--frames" => {
+                a.bench_opts.frames = it
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .ok_or("--frames needs a number")?
+            }
+            "--sw" => a.bench_opts.hw = fp_media::HwDecode::Off,
+            "--seek" => {
+                a.bench_opts.seek = Some(
+                    it.next()
+                        .and_then(|s| s.parse().ok())
+                        .ok_or("--seek needs seconds")?,
+                )
+            }
+            "--checksum" => {
+                a.bench_opts.checksum = it
+                    .next()
+                    .ok_or("--checksum needs frame numbers")?
+                    .split(',')
+                    .filter_map(|s| s.trim().parse().ok())
+                    .collect()
+            }
             "-v" | "--verbose" => a.verbose = true,
             "--version" => {
                 println!("FramePlayer {}", env!("CARGO_PKG_VERSION"));
@@ -108,6 +137,15 @@ fn main() {
     logger::init(args.verbose);
     fp_media::init_logging();
     log::info!("FramePlayer {} starting", env!("CARGO_PKG_VERSION"));
+    if let Some(f) = &args.bench {
+        std::process::exit(match bench(f, &args.bench_opts) {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("{e}");
+                1
+            }
+        });
+    }
     if let Some(f) = &args.info {
         std::process::exit(match info(f) {
             Ok(()) => 0,
@@ -176,6 +214,40 @@ fn info(file: &str) -> Result<(), Error> {
         "  first frame: {}x{} {:?} decoded",
         f.width, f.height, f.layout
     );
+    Ok(())
+}
+
+/// Decodes a file as the player would, without a headset or GPU, and prints
+/// the decoder used and its rate.
+fn bench(file: &str, opts: &fp_media::bench::BenchOptions) -> Result<(), Error> {
+    let path = std::path::Path::new(file);
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let src: Arc<dyn fp_core::ByteSource> = Arc::new(fp_core::source::FileSource::open(path)?);
+    let r = fp_media::bench::decode_bench(src, &name, opts)?;
+    println!(
+        "{name}: {}x{} {:?} via {} ({})",
+        r.width,
+        r.height,
+        r.layout,
+        r.decoder,
+        if r.hardware { "hardware" } else { "software" }
+    );
+    let line = |label: &str, run: &fp_media::bench::BenchRun| {
+        println!(
+            "  {label}: {} frames, first after {:.3} s, {:.2} fps (pts {:.3?}..{:.3?})",
+            run.frames, run.first_frame_secs, run.fps, run.first_pts, run.last_pts
+        )
+    };
+    line("decode", &r.run);
+    if let Some(s) = &r.after_seek {
+        line("after seek", s);
+    }
+    for (i, pts, sum) in &r.checksums {
+        println!("  frame {i} pts {pts:.3}: yuv fnv {sum:016x}");
+    }
     Ok(())
 }
 
