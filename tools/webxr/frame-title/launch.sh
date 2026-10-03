@@ -82,7 +82,9 @@ flags=(
 )
 # Without the FramePlayer sandbox patches working, SteamVR refuses the session
 # with the seccomp filter on; the non-sandboxed title keeps it off.
-[[ $sandboxed == 1 ]] || flags+=(--disable-seccomp-filter-sandbox)
+# --test-type hides the "unsupported command-line flag" bar the flag below
+# would put over every page (the flag is deliberate; see docs/webxr).
+[[ $sandboxed == 1 ]] || flags+=(--disable-seccomp-filter-sandbox --test-type)
 # DevTools on loopback only while ~/.config/chromium-xr-frame-devtools exists,
 # for remote debugging over SSH (ssh -L 9223:127.0.0.1:9223). It has no
 # authentication, so remove the file when done.
