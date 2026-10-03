@@ -27,7 +27,7 @@ Gathered from Valve's Steamworks Steam Frame docs and community projects (Frame 
 - Four outward monochrome tracking cameras with IR illumination. Stock passthrough is **monochrome with a configurable tint**. Arcturus Vision add-on (expansion port, dual 32 MP RGB) adds colour passthrough system-wide.
 - Inward eye-tracking cameras; exposed to apps via `XR_EXT_eye_gaze_interaction`.
 - Hardware video decode: HEVC / VP9 / AV1 up to 8K60 (SoC spec), HDR10 / HDR10+ / HLG / Dolby Vision bitstreams. **[verify]** which path SteamOS exposes on the Frame: V4L2 stateful (`venus`/`iris` driver), Vulkan Video on Turnip, or neither.
-- Frame controllers: A/B/X/Y + menu (right), D-pad + view (left), bumper/grip/trigger/stick on both, capacitive touch on every button. OpenXR interaction profile: `interaction_profiles/valve/frame_controller_valve`. Bare-hand tracking available.
+- Frame controllers: A/B/X/Y + menu (right), D-pad + view (left), shoulder (bumper)/grip/trigger/stick on both, capacitive touch on every button. OpenXR interaction profile: `/interaction_profiles/valve/frame_controller_valve` from the `XR_VALVE_frame_controller_interaction` extension; component paths per Valve's published profile ([ValveSoftware/Unity](https://github.com/ValveSoftware/Unity), `SteamFrameControllerProfile.cs`). Without the extension SteamVR presents the controllers as emulated Touch controllers. Bare-hand tracking available.
 - Wi-Fi 6E with dedicated streaming radio, 21.6 Wh battery, speakers + mics.
 
 ### 1.2 Software

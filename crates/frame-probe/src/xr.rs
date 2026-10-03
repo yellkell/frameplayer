@@ -84,6 +84,13 @@ fn wanted(avail: &xr::ExtensionSet) -> xr::ExtensionSet {
     e.ext_eye_gaze_interaction = avail.ext_eye_gaze_interaction;
     e.ext_hand_tracking = avail.ext_hand_tracking;
     e.ext_hand_interaction = avail.ext_hand_interaction;
+    if avail
+        .other
+        .iter()
+        .any(|n| n.as_slice() == FRAME_CONTROLLER_EXTENSION)
+    {
+        e.other.push(FRAME_CONTROLLER_EXTENSION.to_vec());
+    }
     // XR_EXT_dpad_binding is only valid together with XR_KHR_binding_modification.
     e.ext_dpad_binding = avail.ext_dpad_binding && avail.khr_binding_modification;
     e.khr_binding_modification = e.ext_dpad_binding;
@@ -326,9 +333,15 @@ pub fn input_kind(path: &str) -> InputKind {
     }
 }
 
-/// Component paths tried on every controller profile. The Frame controller's
-/// layout (per community projects): A/B + menu on the right, D-pad + view on
-/// the left, bumper, grip, trigger and stick on both, capacitive touch on all.
+/// Defines the Frame controller profile. Not in the Khronos registry yet;
+/// SteamVR on the Steam Frame provides it.
+pub const FRAME_CONTROLLER_EXTENSION: &[u8] = b"XR_VALVE_frame_controller_interaction\0";
+
+/// Every component of Valve's published Frame controller profile
+/// (ValveSoftware/Unity, SteamFrameControllerProfile.cs): A/B/X/Y and menu on
+/// the right, D-pad and view on the left, a shoulder button (the bumper),
+/// grip, trigger and stick on both, touch on every button. Tried on both
+/// hands, so a one-hand component also shows up rejected for the other.
 const FRAME_COMPONENTS: &[&str] = &[
     "input/trigger/value",
     "input/trigger/click",
@@ -336,8 +349,8 @@ const FRAME_COMPONENTS: &[&str] = &[
     "input/squeeze/value",
     "input/squeeze/click",
     "input/squeeze/touch",
-    "input/bumper/click",
-    "input/bumper/touch",
+    "input/shoulder/click",
+    "input/shoulder/touch",
     "input/thumbstick",
     "input/thumbstick/click",
     "input/thumbstick/touch",
@@ -350,12 +363,19 @@ const FRAME_COMPONENTS: &[&str] = &[
     "input/y/click",
     "input/y/touch",
     "input/menu/click",
+    "input/menu/touch",
     "input/view/click",
+    "input/view/touch",
     "input/system/click",
+    "input/system/touch",
     "input/dpad_up/click",
+    "input/dpad_up/touch",
     "input/dpad_down/click",
+    "input/dpad_down/touch",
     "input/dpad_left/click",
+    "input/dpad_left/touch",
     "input/dpad_right/click",
+    "input/dpad_right/touch",
     "input/grip/pose",
     "input/aim/pose",
     "output/haptic",
@@ -373,12 +393,13 @@ fn probe_profiles(instance: &xr::Instance, enabled: &xr::ExtensionSet) -> Vec<Pr
         "/interaction_profiles/valve/frame_controller_valve",
         both(FRAME_COMPONENTS),
     ));
+    // What SteamVR presents the Frame controllers as without the extension.
     profiles.push((
-        "/interaction_profiles/valve/index_controller",
+        "/interaction_profiles/oculus/touch_controller",
         both(&[
             "input/trigger/value",
+            "input/squeeze/value",
             "input/thumbstick",
-            "input/a/click",
             "input/grip/pose",
         ]),
     ));
@@ -604,6 +625,19 @@ unsafe fn session_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn enables_the_frame_controller_extension_when_offered() {
+        let mut avail = xr::ExtensionSet::default();
+        assert!(wanted(&avail).other.is_empty());
+        avail.other.push(FRAME_CONTROLLER_EXTENSION.to_vec());
+        assert_eq!(
+            wanted(&avail).other,
+            vec![FRAME_CONTROLLER_EXTENSION.to_vec()]
+        );
+        assert!(FRAME_COMPONENTS.contains(&"input/shoulder/click"));
+        assert!(!FRAME_COMPONENTS.iter().any(|c| c.contains("bumper")));
+    }
 
     #[test]
     fn classifies_input_paths() {
