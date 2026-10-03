@@ -82,6 +82,8 @@ pub struct App {
     ui_visible: bool,
     show_browser: bool,
     last_activity: Instant,
+    /// Each hand's ray direction when it last counted as moving.
+    activity_aim: [Option<Vec3>; 2],
     controls: crate::controls::Controls,
     trigger_prev: [f32; 2],
     /// Yaw/pitch when a dome drag began.
@@ -137,6 +139,7 @@ impl App {
             ui_visible: true,
             show_browser: true,
             last_activity: Instant::now(),
+            activity_aim: [None; 2],
             controls: Default::default(),
             trigger_prev: [0.0; 2],
             drag_start: None,
@@ -837,6 +840,10 @@ impl App {
                 }
             }
             Action::Quit => self.quit = true,
+            Action::HideControls => {
+                self.ui_visible = false;
+                self.show_browser = false;
+            }
         }
     }
 
@@ -967,7 +974,24 @@ impl App {
             buzz.push((self.pointer.active, 0.2, 8));
         }
         self.trigger_prev = [h[0].trigger, h[1].trigger];
-        if over_ui || !cmds.is_empty() {
+        // Pointing at a panel only counts as activity while the ray moves
+        // or a trigger or grip is pulled: a hand resting with its ray on the
+        // control bar must not keep it up forever.
+        let mut moved = false;
+        for (i, hand) in h.iter().enumerate() {
+            if let Some((_, rot)) = hand.aim {
+                let dir = rot * Vec3::NEG_Z;
+                match self.activity_aim[i] {
+                    Some(prev) if prev.angle_between(dir) < 4f32.to_radians() => {}
+                    _ => {
+                        moved |= self.activity_aim[i].is_some();
+                        self.activity_aim[i] = Some(dir);
+                    }
+                }
+            }
+        }
+        let pulling = h.iter().any(|h| h.trigger > 0.3 || h.squeeze > 0.5);
+        if (over_ui && (moved || pulling)) || !cmds.is_empty() {
             self.last_activity = Instant::now();
         }
         for c in cmds {
@@ -1315,7 +1339,10 @@ impl App {
         if self.subs.visible {
             quads.extend(self.subs.quad());
         }
-        let mut order: Vec<usize> = (0..4).filter(|&i| self.panels[i].visible).collect();
+        for p in self.panels.iter_mut() {
+            p.update_fade(input.dt);
+        }
+        let mut order: Vec<usize> = (0..4).filter(|&i| self.panels[i].shown()).collect();
         order.sort_by(|&a, &b| {
             let da = (self.panels[a].pose.w_axis.truncate() - eye).length();
             let db = (self.panels[b].pose.w_axis.truncate() - eye).length();

@@ -20,6 +20,8 @@ pub struct Panel {
     pub pose: Mat4,
     pub visible: bool,
     pub opacity: f32,
+    /// 0 hidden → 1 shown, following `visible` over a short fade.
+    fade: f32,
     events: Vec<Event>,
     hovered: bool,
     last_paint: Option<Instant>,
@@ -42,6 +44,7 @@ impl Panel {
             pose: Mat4::IDENTITY,
             visible: false,
             opacity: 1.0,
+            fade: 0.0,
             events: Vec::new(),
             hovered: false,
             last_paint: None,
@@ -141,15 +144,32 @@ impl Panel {
         Ok(())
     }
 
+    /// Moves the fade towards `visible`: in over 0.15 s, out over 0.25 s.
+    pub fn update_fade(&mut self, dt: f32) {
+        self.fade = if self.visible {
+            (self.fade + dt / 0.15).min(1.0)
+        } else {
+            (self.fade - dt / 0.25).max(0.0)
+        };
+    }
+
+    /// Drawn at all: visible, or still fading out.
+    pub fn shown(&self) -> bool {
+        self.fade > 0.01 || self.visible
+    }
+
     pub fn quad(&self) -> Option<QuadDraw> {
         let id = self.id?;
-        (self.visible && self.opacity > 0.01).then(|| {
+        // Smoothstep, so the fade starts and ends gently.
+        let f = self.fade * self.fade * (3.0 - 2.0 * self.fade);
+        let opacity = self.opacity * f;
+        (self.shown() && opacity > 0.01).then(|| {
             QuadDraw::panel(
                 QuadTexture::Panel(id),
                 self.pose,
                 self.size.x,
                 self.size.y,
-                self.opacity,
+                opacity,
             )
         })
     }

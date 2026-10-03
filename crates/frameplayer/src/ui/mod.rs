@@ -2,6 +2,7 @@
 //! state; anything that changes more than view-local state is returned as
 //! an [`Action`] for the app to apply.
 
+pub mod icons;
 pub mod keyboard;
 pub mod library;
 pub mod player;
@@ -9,6 +10,7 @@ pub mod settings;
 pub mod sources;
 pub mod theme;
 pub mod thumbs;
+pub mod widgets;
 
 use crate::playback::OpenRequest;
 use crate::settings::HapticDeviceConfig;
@@ -95,6 +97,9 @@ pub enum Action {
     TogglePassthrough,
     /// Show the library/browser panel (during playback).
     ShowBrowser(bool),
+    /// Hide the player controls (the trigger on empty space brings them
+    /// back).
+    HideControls,
     Quit,
 }
 
@@ -214,6 +219,8 @@ pub struct UiState {
     pub toast: Option<(String, std::time::Instant)>,
     /// Hide the seek-preview while scrubbing has not moved.
     pub scrub: Option<f64>,
+    /// The volume before muting from the control bar.
+    pub unmute_volume: Option<f32>,
     pub keyboard_shift: bool,
     /// Facts for the About tab (runtime, GPU, decoder...).
     pub about: Vec<(String, String)>,
@@ -256,6 +263,7 @@ impl Default for UiState {
             opening: None,
             toast: None,
             scrub: None,
+            unmute_volume: None,
             keyboard_shift: false,
             about: Vec::new(),
         }

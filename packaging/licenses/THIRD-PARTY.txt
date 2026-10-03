@@ -17,3 +17,13 @@ dav1d 1.5.3 (statically linked into libavcodec)
 
 Rust crates compiled into the frameplayer binary are under MIT, Apache-2.0,
 BSD, ISC, Zlib, Unicode-3.0 or MPL-2.0 licences; see rust-crates.txt.
+
+Fonts embedded in the frameplayer binary:
+
+Inter 4.1 by Rasmus Andersson (Regular, Medium, SemiBold, Bold; subset)
+  Licence: SIL Open Font License 1.1, text in Inter-OFL.txt.
+  Source: https://github.com/rsms/inter
+
+Phosphor Icons (regular and fill weights)
+  Licence: MIT, text in Phosphor-MIT.txt.
+  Source: https://github.com/phosphor-icons/core
