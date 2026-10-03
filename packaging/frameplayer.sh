@@ -75,6 +75,10 @@ while :; do
   "$here/frameplayer" "$@"
   rc=$?
   if [[ $rc -eq 76 ]]; then
+    # FramePlayer has exited; give SteamVR a moment to drop its session,
+    # then tell the browser (it waits up to 8 s for this).
+    sleep 0.5
+    mkdir -p "$webxr" && : >"$webxr/xr-ready"
     echo "$(date -Is) web view page has the headset" >>"$log"
     wait_for_web_xr
     echo "$(date -Is) web view page's VR session ended" >>"$log"

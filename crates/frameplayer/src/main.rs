@@ -326,13 +326,15 @@ fn run_xr(args: &Args) -> Result<(), Error> {
         hand_off(&argv)?;
     }
     if yield_to_web {
-        // The headset is free: let the embedded browser's page start its VR
-        // session. frameplayer.sh waits for it to end and starts us again.
-        webview::write_xr_ready()?;
-        log::info!("headset handed to the web view's page");
+        // The headset is free once this process is gone: frameplayer.sh
+        // tells the embedded browser's page (xr-ready) after we exit, waits
+        // for its VR session to end and starts us again. SteamVR refuses the
+        // page's session while our OpenXR connection is still closing.
+        log::info!("handing the headset to the web view's page");
         if std::env::var_os(webxr::LAUNCHER_ENV).is_some() {
             std::process::exit(webview::YIELD_EXIT_CODE);
         }
+        webview::write_xr_ready()?;
     }
     log::info!("bye");
     Ok(())

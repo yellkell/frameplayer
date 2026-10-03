@@ -454,6 +454,19 @@ fn first_page_ws(json_list: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Message ids for screencast acks, apart from [`WebView::send`]'s. DevTools
+/// rejects ids that don't fit a 32-bit int ("Message must have integer 'id'
+/// property"), and without acks the screencast stops after a few pictures.
+const FIRST_ACK_ID: u64 = 1 << 30;
+
+fn next_ack_id(id: u64) -> u64 {
+    if id >= i32::MAX as u64 {
+        FIRST_ACK_ID
+    } else {
+        id + 1
+    }
+}
+
 /// The connection thread: sends queued commands, decodes screencast frames
 /// and keeps the page's address.
 fn run(
@@ -489,7 +502,7 @@ fn run(
         s.connected = true;
         s.error = None;
     }
-    let mut ack_id: u64 = 1 << 40;
+    let mut ack_id = FIRST_ACK_ID;
     loop {
         loop {
             match rx.try_recv() {
@@ -510,7 +523,7 @@ fn run(
                 match v["method"].as_str() {
                     Some("Page.screencastFrame") => {
                         let p = &v["params"];
-                        ack_id += 1;
+                        ack_id = next_ack_id(ack_id);
                         let id = ack_id;
                         let _ = tx.send(
                             json!({ "id": id, "method": "Page.screencastFrameAck",
@@ -565,6 +578,13 @@ fn decode_frame(b64: &str) -> Option<Frame> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ack_ids_fit_devtools_int() {
+        assert!(FIRST_ACK_ID < i32::MAX as u64);
+        assert_eq!(next_ack_id(FIRST_ACK_ID), FIRST_ACK_ID + 1);
+        assert_eq!(next_ack_id(i32::MAX as u64), FIRST_ACK_ID);
+    }
 
     #[test]
     fn devtools_port_file() {
