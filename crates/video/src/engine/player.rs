@@ -1033,6 +1033,22 @@ impl Engine {
         if let Some(e) = decode_error {
             self.warn(format!("video decode error: {e}"));
         }
+        // Runtime hardware → software fallback inside the decoder.
+        let switched = self
+            .media
+            .as_mut()
+            .unwrap()
+            .video
+            .as_mut()
+            .and_then(|v| v.dec.take_fallback_notice().map(|n| (n, v.dec.path())));
+        if let Some((notice, path)) = switched {
+            self.media.as_mut().unwrap().decoder_path = Some(path.clone());
+            self.warn(notice.clone());
+            self.emit(PlayerEvent::DecoderSelected {
+                path,
+                warnings: vec![notice],
+            });
+        }
 
         // 3. Audio out.
         if let (Some(a), Some(o)) = (
@@ -1318,6 +1334,76 @@ mod tests {
             assert!(t0.elapsed() < Duration::from_secs(5), "no frame shown");
             std::thread::sleep(Duration::from_millis(5));
         }
+    }
+
+    /// Mock media whose "hardware" decoder fails on its first frame.
+    struct FailingHwBackend(MockBackend);
+
+    impl MediaBackend for FailingHwBackend {
+        fn open_demuxer(&mut self, input: Box<dyn MediaInput>) -> Result<Box<dyn Demuxer>> {
+            self.0.open_demuxer(input)
+        }
+        fn open_video_decoder(&mut self, track: &TrackDesc) -> Result<DecoderSelection> {
+            use crate::decode::fallback::tests::{FailingHw, Failure};
+            let mut hw = |_: &DecoderRequest, _: &DecoderOptions| {
+                Ok(Box::new(FailingHw::new(Failure::ReceiveError)) as Box<dyn VideoDecoder>)
+            };
+            crate::decode::select_decoder_with(
+                &DecoderRequest::from_track(track),
+                &DecoderOptions::default(),
+                &mut hw,
+                &["mock".to_string()],
+                Arc::new(|_: &str, _: &DecoderRequest, _| {
+                    Ok(Box::new(crate::mock::MockVideoDecoder::default()) as Box<dyn VideoDecoder>)
+                }),
+                Default::default(),
+            )
+        }
+        fn open_audio_decoder(&mut self, track: &TrackDesc) -> Result<Box<dyn AudioDecoder>> {
+            self.0.open_audio_decoder(track)
+        }
+        fn open_audio_output(
+            &mut self,
+            sample_rate: u32,
+            channels: u16,
+        ) -> Result<Box<dyn AudioOutput>> {
+            self.0.open_audio_output(sample_rate, channels)
+        }
+    }
+
+    #[test]
+    fn runtime_hardware_failure_falls_back_to_software() {
+        let media = MockMedia {
+            duration: MediaTime::from_secs_f64(1.0),
+            ..Default::default()
+        };
+        let p = Player::spawn(
+            Box::new(FailingHwBackend(MockBackend { media })),
+            PlayerConfig::default(),
+        );
+        open(&p, false);
+        let s = wait_for(&p, "end", |s| s.state == PlaybackState::Ended);
+        assert_eq!(
+            s.decoder,
+            Some(DecoderPath::Software {
+                library: "mock".into()
+            })
+        );
+        assert!(
+            s.warnings.iter().any(|w| w.contains("falling back")),
+            "{:?}",
+            s.warnings
+        );
+        let events: Vec<PlayerEvent> = p.events().try_iter().collect();
+        let selected: Vec<&DecoderPath> = events
+            .iter()
+            .filter_map(|e| match e {
+                PlayerEvent::DecoderSelected { path, .. } => Some(path),
+                _ => None,
+            })
+            .collect();
+        assert!(matches!(selected[0], DecoderPath::Hardware { .. }));
+        assert!(matches!(selected[1], DecoderPath::Software { .. }));
     }
 
     #[test]

@@ -177,6 +177,12 @@ impl VideoDecoder for FfmpegVideoDecoder {
                 self.drained = true;
                 Ok(None)
             }
+            // A corrupt picture is dropped like a corrupt packet (see
+            // send_packet); the decoder resyncs on the next one.
+            Err(ff::Error::InvalidData) => {
+                tracing::debug!("ffmpeg: dropping undecodable frame");
+                Ok(None)
+            }
             Err(e) => Err(fferr(e)),
         }
     }

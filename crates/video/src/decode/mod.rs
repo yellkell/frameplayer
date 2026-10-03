@@ -14,9 +14,14 @@
 //! * `ffmpeg` (feature `ffmpeg`): software HEVC / H.264 / VP9 / AV1 via libavcodec.
 //!
 //! [`select_decoder`] tries hardware first, then software (capped at 4K by
-//! default) and reports which path it picked and why.
+//! default) and reports which path it picked and why. When both are
+//! available the hardware decoder is wrapped in a
+//! [`fallback::FallbackDecoder`], which switches to software at runtime if
+//! the hardware fails during its first frames (STREAMON / CAPTURE setup
+//! errors, decode errors, a stalled decoder).
 
 pub mod convert;
+pub mod fallback;
 pub mod v4l2;
 
 #[cfg(feature = "dav1d")]
@@ -205,6 +210,12 @@ pub trait VideoDecoder: Send {
     fn wait(&mut self, timeout: Duration) {
         std::thread::sleep(timeout.min(Duration::from_millis(1)));
     }
+    /// Set once when the decoder switched paths at runtime (hardware →
+    /// software fallback); the message says why. [`path`](Self::path)
+    /// reports the new path afterwards.
+    fn take_fallback_notice(&mut self) -> Option<String> {
+        None
+    }
 }
 
 /// What to decode.
@@ -319,17 +330,92 @@ pub fn open_software(
     }
 }
 
+/// Opens a hardware decoder for [`select_decoder_with`].
+pub type HardwareOpener<'a> =
+    &'a mut dyn FnMut(&DecoderRequest, &DecoderOptions) -> Result<Box<dyn VideoDecoder>>;
+
+/// Opens a software decoder by library name for [`select_decoder_with`].
+pub type SoftwareOpener =
+    Arc<dyn Fn(&str, &DecoderRequest, usize) -> Result<Box<dyn VideoDecoder>> + Send + Sync>;
+
 /// Pick a decoder: V4L2 hardware first, then software. Reports the chosen
-/// path, warnings, and why other paths were rejected.
+/// path, warnings, and why other paths were rejected. A hardware decoder is
+/// returned wrapped in a runtime fallback to software when a software
+/// decoder for the stream is compiled in and within the pixel cap.
 pub fn select_decoder(req: &DecoderRequest, opts: &DecoderOptions) -> Result<DecoderSelection> {
+    let mut hw = |r: &DecoderRequest, o: &DecoderOptions| {
+        v4l2::V4l2Decoder::open_best(r, o).map(|d| Box::new(d) as Box<dyn VideoDecoder>)
+    };
+    let libs: Vec<String> = software_decoders_for(&req.codec)
+        .into_iter()
+        .map(String::from)
+        .collect();
+    select_decoder_with(
+        req,
+        opts,
+        &mut hw,
+        &libs,
+        Arc::new(|lib: &str, r: &DecoderRequest, t: usize| open_software(lib, r, t)),
+        fallback::FallbackPolicy::default(),
+    )
+}
+
+/// [`select_decoder`] with injectable decoder constructors (tests, tools).
+pub fn select_decoder_with(
+    req: &DecoderRequest,
+    opts: &DecoderOptions,
+    hardware: HardwareOpener<'_>,
+    software_libs: &[String],
+    software: SoftwareOpener,
+    policy: fallback::FallbackPolicy,
+) -> Result<DecoderSelection> {
     let mut rejected = Vec::new();
+    // Software eligibility first: it decides both the direct software path
+    // and whether a hardware decoder gets a runtime fallback.
+    let pixels = req.width as u64 * req.height as u64;
+    let software_reject = if !opts.allow_software {
+        Some("software: disabled".to_string())
+    } else if software_libs.is_empty() {
+        Some(format!(
+            "software: no software decoder compiled in for {:?}",
+            req.codec
+        ))
+    } else {
+        opts.software_pixel_cap.filter(|&c| pixels > c).map(|cap| {
+            format!(
+                "software: {}x{} exceeds the software decode cap ({} Mpx)",
+                req.width,
+                req.height,
+                cap as f64 / 1e6
+            )
+        })
+    };
+
     if opts.allow_hardware {
-        match v4l2::V4l2Decoder::open_best(req, opts) {
+        match hardware(req, opts) {
             Ok(d) => {
                 let path = d.path();
                 tracing::info!("video decode: {path}");
+                let decoder: Box<dyn VideoDecoder> = if software_reject.is_none() {
+                    let libs = software_libs.to_vec();
+                    let req = req.clone();
+                    let threads = opts.threads;
+                    let factory: fallback::SoftwareFactory = Box::new(move || {
+                        let mut errs = Vec::new();
+                        for lib in &libs {
+                            match software(lib, &req, threads) {
+                                Ok(d) => return Ok(d),
+                                Err(e) => errs.push(format!("{lib}: {e}")),
+                            }
+                        }
+                        Err(VideoError::NoSoftwareDecoder(errs.join("; ")))
+                    });
+                    Box::new(fallback::FallbackDecoder::with_policy(d, factory, policy))
+                } else {
+                    d
+                };
                 return Ok(DecoderSelection {
-                    decoder: Box::new(d),
+                    decoder,
                     path,
                     warnings: Vec::new(),
                     rejected,
@@ -341,24 +427,15 @@ pub fn select_decoder(req: &DecoderRequest, opts: &DecoderOptions) -> Result<Dec
             }
         }
     }
-    if opts.allow_software {
-        let pixels = req.width as u64 * req.height as u64;
-        let libs = software_decoders_for(&req.codec);
-        if libs.is_empty() {
-            rejected.push(format!(
-                "software: no software decoder compiled in for {:?}",
-                req.codec
-            ));
-        } else if let Some(cap) = opts.software_pixel_cap.filter(|&c| pixels > c) {
-            rejected.push(format!(
-                "software: {}x{} exceeds the software decode cap ({} Mpx)",
-                req.width,
-                req.height,
-                cap as f64 / 1e6
-            ));
-        } else {
-            for lib in libs {
-                match open_software(lib, req, opts.threads) {
+    match software_reject {
+        Some(r) => {
+            if opts.allow_software {
+                rejected.push(r);
+            }
+        }
+        None => {
+            for lib in software_libs {
+                match software(lib, req, opts.threads) {
                     Ok(d) => {
                         let path = d.path();
                         let warn = format!(
@@ -406,6 +483,118 @@ mod tests {
     fn drm_fourccs() {
         assert_eq!(drm::FORMAT_NV12, 0x3231_564e);
         assert_eq!(drm::FORMAT_P010, 0x3031_3050);
+    }
+
+    use crate::decode::fallback::tests::{FailingHw, Failure};
+    use crate::mock::MockVideoDecoder;
+
+    fn mock_sw() -> SoftwareOpener {
+        Arc::new(|lib: &str, _: &DecoderRequest, _| match lib {
+            "mock" => Ok(Box::new(MockVideoDecoder::default()) as Box<dyn VideoDecoder>),
+            _ => Err(VideoError::NoSoftwareDecoder(lib.into())),
+        })
+    }
+
+    fn req(w: u32, h: u32) -> DecoderRequest {
+        DecoderRequest {
+            codec: CodecId::Hevc,
+            width: w,
+            height: h,
+            bit_depth: 8,
+            codec_private: vec![],
+        }
+    }
+
+    fn select(
+        r: &DecoderRequest,
+        failure: Option<Failure>,
+        libs: &[&str],
+    ) -> Result<DecoderSelection> {
+        let mut hw = |_: &DecoderRequest, _: &DecoderOptions| match failure {
+            Some(f) => Ok(Box::new(FailingHw::new(f)) as Box<dyn VideoDecoder>),
+            None => Err(VideoError::NoDecoder("no V4L2 M2M decoder devices".into())),
+        };
+        let libs: Vec<String> = libs.iter().map(|s| s.to_string()).collect();
+        select_decoder_with(
+            r,
+            &DecoderOptions::default(),
+            &mut hw,
+            &libs,
+            mock_sw(),
+            fallback::FallbackPolicy::default(),
+        )
+    }
+
+    fn pkt(i: i64) -> Packet {
+        Packet {
+            track: 1,
+            pts: MediaTime::from_millis(i * 40),
+            dts: MediaTime::from_millis(i * 40),
+            duration: MediaTime::from_millis(40),
+            keyframe: i == 0,
+            data: vec![i as u8; 8],
+        }
+    }
+
+    #[test]
+    fn no_hardware_selects_software_with_warning() {
+        let sel = select(&req(1920, 1080), None, &["broken", "mock"]).unwrap();
+        assert_eq!(
+            sel.path,
+            DecoderPath::Software {
+                library: "mock".into()
+            }
+        );
+        assert_eq!(sel.warnings.len(), 1);
+        assert!(
+            sel.rejected[0].starts_with("hardware: "),
+            "{:?}",
+            sel.rejected
+        );
+        assert!(
+            sel.rejected[1].starts_with("software broken"),
+            "{:?}",
+            sel.rejected
+        );
+    }
+
+    #[test]
+    fn hardware_preferred_and_falls_back_at_runtime() {
+        let mut sel = select(&req(3840, 2160), Some(Failure::ReceiveError), &["mock"]).unwrap();
+        assert!(matches!(sel.path, DecoderPath::Hardware { .. }));
+        assert!(sel.warnings.is_empty());
+        let d = &mut sel.decoder;
+        assert!(d.send_packet(&pkt(0)).unwrap());
+        let f = d
+            .receive_frame()
+            .unwrap()
+            .expect("software frame after fallback");
+        assert_eq!(f.pts(), MediaTime::ZERO);
+        assert!(matches!(d.path(), DecoderPath::Software { .. }));
+        assert!(d.take_fallback_notice().unwrap().contains("falling back"));
+    }
+
+    #[test]
+    fn software_cap_applies_to_selection_and_fallback() {
+        // 8K: hardware works, no software fallback wrapper (errors pass through).
+        let mut sel = select(&req(7680, 3840), Some(Failure::ReceiveError), &["mock"]).unwrap();
+        sel.decoder.send_packet(&pkt(0)).unwrap();
+        assert!(sel.decoder.receive_frame().is_err());
+        assert!(sel.decoder.take_fallback_notice().is_none());
+        // 8K without hardware: rejected with the cap reason.
+        match select(&req(7680, 3840), None, &["mock"]) {
+            Err(VideoError::NoDecoder(m)) => assert!(m.contains("software decode cap"), "{m}"),
+            other => panic!("unexpected {other:?}"),
+        }
+        // Exactly 4K (4096x2160) is still allowed.
+        assert!(select(&req(4096, 2160), None, &["mock"]).is_ok());
+    }
+
+    #[test]
+    fn hardware_without_software_is_unwrapped() {
+        let mut sel = select(&req(1920, 1080), Some(Failure::ReceiveError), &[]).unwrap();
+        sel.decoder.send_packet(&pkt(0)).unwrap();
+        assert!(sel.decoder.receive_frame().is_err());
     }
 
     #[test]

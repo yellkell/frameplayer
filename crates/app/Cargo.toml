@@ -5,6 +5,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# Bundled software decode fallback (libavcodec/libavformat + dav1d). Build the
+# libraries with tools/build-codecs.sh and source its env.sh first.
+sw-decode = ["fp-video/ffmpeg", "fp-video/dav1d"]
+
 [[bin]]
 name = "frameplayer"
 path = "src/main.rs"
