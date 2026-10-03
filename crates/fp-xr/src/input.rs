@@ -48,6 +48,10 @@ pub(crate) struct Actions {
     pub hands: [xr::Path; 2],
     aim_spaces: Option<[xr::Space; 2]>,
     pub bound: Vec<(String, usize)>,
+    /// `FRAMEPLAYER_DEBUG_INPUT=1`: log each hand's input when it changes,
+    /// and errors reading action states (normally ignored).
+    debug: bool,
+    last_logged: std::cell::RefCell<[String; 2]>,
 }
 
 #[derive(Clone, Copy)]
@@ -178,6 +182,8 @@ impl Actions {
             hands,
             aim_spaces: None,
             bound: Vec::new(),
+            debug: std::env::var_os("FRAMEPLAYER_DEBUG_INPUT").is_some_and(|v| v != "0"),
+            last_logged: Default::default(),
         };
         for (profile, candidates) in PROFILES {
             let Ok(profile_path) = instance.string_to_path(profile) else {
@@ -275,9 +281,16 @@ impl Actions {
         }
         for (i, h) in self.hands.iter().enumerate() {
             let hand = &mut out.hands[i];
-            if let Ok(s) = self.trigger.state(session, *h) {
-                hand.trigger = s.current_state;
-                hand.active |= s.is_active;
+            let mut trigger_note = String::new();
+            match self.trigger.state(session, *h) {
+                Ok(s) => {
+                    hand.trigger = s.current_state;
+                    hand.active |= s.is_active;
+                    if !s.is_active {
+                        trigger_note = " trigger-inactive".into();
+                    }
+                }
+                Err(e) => trigger_note = format!(" trigger-error={e}"),
             }
             if let Ok(s) = self.squeeze.state(session, *h) {
                 hand.squeeze = s.current_state;
@@ -315,6 +328,26 @@ impl Actions {
                 if ok {
                     hand.aim = Some(crate::pose(loc.pose));
                     hand.active = true;
+                }
+            }
+            if self.debug {
+                let line = format!(
+                    "trigger {:.1} squeeze {:.1} stick {:.1},{:.1} click {} primary {} secondary {} menu {} aim {}{}",
+                    hand.trigger,
+                    hand.squeeze,
+                    hand.stick.x,
+                    hand.stick.y,
+                    hand.stick_click,
+                    hand.primary,
+                    hand.secondary,
+                    hand.menu,
+                    hand.aim.is_some(),
+                    trigger_note
+                );
+                let mut last = self.last_logged.borrow_mut();
+                if last[i] != line {
+                    log::info!("input {}: {line}", ["left", "right"][i]);
+                    last[i] = line;
                 }
             }
         }

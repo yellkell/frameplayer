@@ -9,6 +9,16 @@ here="$(cd "$(dirname "$0")" && pwd)"
 export LD_LIBRARY_PATH="$here/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export FRAMEPLAYER_LAUNCHER=1
 
+# Optional environment for runs started from Steam, which can't pass any:
+# KEY=value lines, e.g. FRAMEPLAYER_DEBUG_INPUT=1 or RUST_LOG=debug.
+envfile=${XDG_CONFIG_HOME:-$HOME/.config}/frameplayer/env
+if [[ -f $envfile ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$envfile"
+  set +a
+fi
+
 # 90 Hz, for FramePlayer and the WebXR browser it hands over to (Steam sees
 # one app). SteamVR runs each app at its per-app preferredRefreshRate (72 Hz
 # unless set) and overrides OpenXR requests, so set it for this Steam app
