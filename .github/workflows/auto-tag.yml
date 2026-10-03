@@ -1,0 +1,62 @@
+name: Auto-tag
+
+# Creates the vX.Y.Z[-pre] tag when the workspace version in Cargo.toml
+# changes, then runs the release workflow for it. This lets a release be cut
+# by committing a version bump, without pushing a tag from the dev machine.
+#
+# - On main: any version that has no tag yet is released.
+# - On other branches: only pre-release versions (containing "-"), so a
+#   feature branch can publish test builds but never a stable release.
+on:
+  push:
+    branches: ["**"]
+    paths: ["Cargo.toml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      create: ${{ steps.v.outputs.create }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: v
+        name: Decide
+        run: |
+          V=$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version *= *"\(.*\)"/\1/p}' Cargo.toml | head -1)
+          [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::bad version '$V'"; exit 1; }
+          T="v$V"
+          echo "tag=$T" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/$T" >/dev/null; then
+            echo "$T already exists; nothing to do"; echo "create=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [[ "$GITHUB_REF_NAME" != main && "$V" != *-* ]]; then
+            echo "::notice::$V is a stable version on branch $GITHUB_REF_NAME; stable releases are only cut from main"
+            echo "create=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "create=true" >> "$GITHUB_OUTPUT"
+      - name: Create tag
+        if: steps.v.outputs.create == 'true'
+        env:
+          T: ${{ steps.v.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$T" -m "FramePlayer ${T#v}" "$GITHUB_SHA"
+          git push origin "refs/tags/$T"
+
+  release:
+    needs: tag
+    if: needs.tag.outputs.create == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    secrets: inherit

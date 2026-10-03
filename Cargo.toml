@@ -3,6 +3,8 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
+# Committing a new version publishes a release: pre-releases (with "-") from
+# any branch, stable versions from main only. See .github/workflows/auto-tag.yml.
 version = "0.1.0-alpha.1"
 edition = "2021"
 rust-version = "1.87"

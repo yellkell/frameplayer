@@ -18,6 +18,13 @@ on:
       tag:
         description: "Existing tag to (re)release, e.g. v0.1.0-alpha.1"
         required: true
+  # Called by auto-tag.yml after it creates the tag (tags pushed with the
+  # workflow token don't trigger `push: tags` themselves).
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
 
 permissions:
   contents: write
@@ -30,7 +37,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  TAG: ${{ inputs.tag || github.event.inputs.tag || github.ref_name }}
   PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
 
 jobs:
