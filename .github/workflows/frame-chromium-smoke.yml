@@ -7,6 +7,9 @@ name: frame-chromium-smoke
 on:
   release:
     types: [published]
+  # Changing this workflow re-tests the latest chromium-xr-frame-* release.
+  push:
+    paths: [.github/workflows/frame-chromium-smoke.yml]
   workflow_dispatch:
     inputs:
       tag:
@@ -18,7 +21,7 @@ permissions:
 
 jobs:
   smoke:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'chromium-xr-frame-')
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'chromium-xr-frame-')
     runs-on: ubuntu-24.04-arm
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
@@ -26,6 +29,12 @@ jobs:
     steps:
       - name: Download the release
         run: |
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release list -R "$GITHUB_REPOSITORY" --json tagName,createdAt \
+              -q '[.[] | select(.tagName | startswith("chromium-xr-frame-"))] | sort_by(.createdAt) | last | .tagName')
+            echo "TAG=$TAG" >> "$GITHUB_ENV"
+          fi
+          echo "Testing $TAG"
           gh release download "$TAG" -R "$GITHUB_REPOSITORY" \
             -p 'ChromiumXR-Frame-arm64.zip' -p '*.json' -p 'chromium-xr-tests-arm64.tar.xz'
           ls -la
@@ -47,6 +56,10 @@ jobs:
           P
           unzip -q ChromiumXR-Frame-arm64.zip -d title
           mkdir tests && tar -xJf chromium-xr-tests-arm64.tar.xz -C tests
+          # Test binaries load ICU data and resource packs from beside themselves.
+          for f in title/chromium/icudtl.dat title/chromium/*.pak title/chromium/*.bin; do
+            ln -s "$PWD/$f" tests/
+          done
 
       - name: Runtime libraries
         run: |
