@@ -33,6 +33,7 @@ pub const CUBE: &str = "\u{E1DA}";
 pub const DATABASE: &str = "\u{E1DE}";
 pub const DEVICE_MOBILE: &str = "\u{E1E0}";
 pub const DOTS_THREE: &str = "\u{E1FE}";
+pub const DOWNLOAD_SIMPLE: &str = "\u{E20C}";
 pub const EYE: &str = "\u{E220}";
 pub const EYE_SLASH: &str = "\u{E224}";
 pub const EYEGLASSES: &str = "\u{E7BA}";

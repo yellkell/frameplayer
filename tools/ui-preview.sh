@@ -43,17 +43,30 @@ screen settings about
 panel main settings-about
 # Hover state on the first library card.
 screen library
-point main 0.12 0.3
-frames 5
+point main 0.12 0.32
+frames 8
 panel main library-hover
+# The keyboard, from the search field.
+point main 0.12 0.15
+click
+frames 8
+panel keyboard keyboard
+button secondary
+frames 3
 # The player.
 open $home/Videos/Sunset Beach Walk_180_LR.mp4
 wait-playing
 wait 1
 point bar 0.5 0.5
-frames 5
+frames 8
 panel bar player-bar
 sbs player-scene
+# The adjustments panel, from its button on the bar.
+point bar 0.684 0.626
+click
+frames 8
+panel adjust adjust
+panel bar player-bar-adjust
 EOF
 
 cargo build -p frameplayer
