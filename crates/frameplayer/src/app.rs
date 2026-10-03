@@ -27,6 +27,29 @@ pub struct FrameInput {
     pub head: Option<(Vec3, Quat)>,
     pub hands: [Hand; 2],
     pub passthrough_available: bool,
+    /// The compositor can draw panels and rays as quad layers (OpenXR);
+    /// otherwise (the desktop preview) everything is drawn into the eyes.
+    pub layers: bool,
+}
+
+/// A panel or pointer ray for the compositor to draw as its own quad layer,
+/// so it stays put as the head moves.
+#[derive(Clone, Copy, Debug)]
+pub enum LayerDraw {
+    Panel {
+        /// Stable per panel: the layer's swapchain is kept under it.
+        key: u64,
+        panel: fp_render::PanelId,
+        px: [u32; 2],
+        pose: Mat4,
+        size: Vec2,
+    },
+    Ray {
+        /// The active hand's ray is the brighter one.
+        active: bool,
+        pose: (Vec3, Quat),
+        size: Vec2,
+    },
 }
 
 /// What to draw and do this frame.
@@ -34,6 +57,8 @@ pub struct FrameOutput {
     pub frame: Option<Arc<VideoFrame>>,
     pub video: VideoParams,
     pub quads: Vec<QuadDraw>,
+    /// Drawn on top of the eyes' pictures, in order (see [`LayerDraw`]).
+    pub layers: Vec<LayerDraw>,
     pub passthrough: bool,
     /// (hand, amplitude, milliseconds)
     pub buzz: Vec<(usize, f32, i64)>,
@@ -1348,16 +1373,34 @@ impl App {
             let db = (self.panels[b].pose.w_axis.truncate() - eye).length();
             db.total_cmp(&da)
         });
+        let mut layers = Vec::new();
         for i in order {
-            quads.extend(self.panels[i].quad());
+            let p = &self.panels[i];
+            match p.id {
+                // Fully shown: the compositor draws it. Fading: drawn into
+                // the eyes, where opacity works.
+                Some(panel) if input.layers && p.fully_shown() => layers.push(LayerDraw::Panel {
+                    key: i as u64,
+                    panel,
+                    px: p.px,
+                    pose: p.pose,
+                    size: p.size,
+                }),
+                _ => quads.extend(p.quad()),
+            }
         }
         let any_ui = self.panels.iter().any(|p| p.visible);
-        quads.extend(self.pointer.quads(eye, any_ui));
+        if input.layers {
+            layers.extend(self.pointer.ray_layers(eye, any_ui));
+        } else {
+            quads.extend(self.pointer.quads(eye, any_ui));
+        }
 
         FrameOutput {
             frame,
             video,
             quads,
+            layers,
             passthrough,
             buzz,
             quit: self.quit,

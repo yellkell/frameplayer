@@ -19,9 +19,9 @@ mod settings;
 mod ui;
 mod world;
 
-use app::{App, FrameInput};
+use app::{App, FrameInput, LayerDraw};
 use fp_render::{Gpu, Renderer};
-use fp_xr::{SessionEvent, XrContext, XrSession};
+use fp_xr::{QuadSubmit, SessionEvent, XrContext, XrSession};
 use settings::Settings;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -251,6 +251,26 @@ fn bench(file: &str, opts: &fp_media::bench::BenchOptions) -> Result<(), Error> 
     Ok(())
 }
 
+/// Quad layer keys of the two pointer rays (panels use their index).
+const RAY_LAYER: u64 = 100;
+const RAY_PX: [u32; 2] = [64, 8];
+
+/// The pointer ray's picture: light blue, soft across its width, fainter
+/// for the hand that isn't pointing. Premultiplied, as the compositor
+/// expects.
+fn ray_picture(active: bool) -> Vec<u8> {
+    let peak = if active { 0.85 } else { 0.35 };
+    let across = [0.12, 0.5, 0.9, 1.0, 1.0, 0.9, 0.5, 0.12];
+    let mut px = Vec::with_capacity((RAY_PX[0] * RAY_PX[1] * 4) as usize);
+    for a in across {
+        let a = a * peak;
+        for _ in 0..RAY_PX[0] {
+            px.extend([140.0 * a, 190.0 * a, 255.0 * a, 255.0 * a].map(|c: f32| c.round() as u8));
+        }
+    }
+    px
+}
+
 fn run_xr(args: &Args) -> Result<(), Error> {
     // Coming back from a WebXR browser, SteamVR may still be closing its
     // session: keep trying for a while instead of quitting.
@@ -325,6 +345,18 @@ fn run_xr(args: &Args) -> Result<(), Error> {
     let mut last = Instant::now();
     let mut quitting = false;
     let (mut frames, mut video_frames) = (0u64, 0u64);
+    let layers = session.supports_quad_layers();
+    log::info!(
+        "UI as compositor quad layers: {}",
+        if layers {
+            "yes"
+        } else {
+            "no (drawn into the eyes)"
+        }
+    );
+    // Panel picture each quad layer holds: (panel, paint version).
+    let mut copied: std::collections::HashMap<u64, (fp_render::PanelId, u64)> =
+        std::collections::HashMap::new();
     loop {
         match session.poll()? {
             SessionEvent::Exit => break,
@@ -347,20 +379,62 @@ fn run_xr(args: &Args) -> Result<(), Error> {
                 head: frame.head,
                 hands: input.hands,
                 passthrough_available: session.supports_passthrough_blend(),
+                layers,
             },
         );
         frames += 1;
         video_frames += out.frame.is_some() as u64;
         renderer.set_video(out.frame.as_ref())?;
+        let mut submits = Vec::new();
         if let (Some(targets), Some(eyes)) = (frame.targets, frame.eyes) {
             renderer.draw(&targets, &eyes, &out.video, &out.quads)?;
+            for l in &out.layers {
+                match *l {
+                    LayerDraw::Panel {
+                        key,
+                        panel,
+                        px,
+                        pose,
+                        size,
+                    } => {
+                        let version = renderer.panel_version(panel);
+                        if version == 0 {
+                            continue;
+                        }
+                        // Only a changed picture is copied; the compositor
+                        // keeps showing the last one.
+                        if copied.get(&key) != Some(&(panel, version))
+                            || !session.quad_layer_ready(key)
+                        {
+                            let image = session.quad_layer_image(key, px[0], px[1])?;
+                            renderer.copy_panel_to(panel, image)?;
+                            copied.insert(key, (panel, version));
+                        }
+                        let (_, rot, pos) = pose.to_scale_rotation_translation();
+                        submits.push(QuadSubmit {
+                            key,
+                            pose: (pos, rot),
+                            size,
+                        });
+                    }
+                    LayerDraw::Ray { active, pose, size } => {
+                        let key = RAY_LAYER + active as u64;
+                        session.static_quad_layer(key, RAY_PX[0], RAY_PX[1], |image| {
+                            renderer
+                                .upload_rgba(image, RAY_PX[0], RAY_PX[1], &ray_picture(active))
+                                .map_err(|e| e.to_string())
+                        })?;
+                        submits.push(QuadSubmit { key, pose, size });
+                    }
+                }
+            }
         }
         renderer.end_frame()?;
         session.set_passthrough(out.passthrough);
         for (hand, amp, ms) in out.buzz {
             session.buzz(hand, amp, ms);
         }
-        session.end_frame(frame)?;
+        session.end_frame(frame, &submits)?;
         let timed_out = args
             .exit_after
             .is_some_and(|t| start.elapsed().as_secs_f64() > t);

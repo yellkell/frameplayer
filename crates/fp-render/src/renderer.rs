@@ -117,6 +117,8 @@ struct Panel {
     set: vk::DescriptorSet,
     textures: HashMap<TextureId, Tex>,
     painted: bool,
+    /// Bumped by every paint, so copies of the picture know when to update.
+    version: u64,
 }
 
 struct Slot {
@@ -574,6 +576,7 @@ impl Renderer {
             set,
             textures: HashMap::new(),
             painted: false,
+            version: 0,
         };
         match self.panels.iter().position(|p| p.is_none()) {
             Some(i) => {
@@ -962,6 +965,7 @@ impl Renderer {
         // Free textures egui no longer needs (after this frame).
         if let Some(Some(p)) = self.panels.get_mut(panel) {
             p.painted = true;
+            p.version += 1;
             let slot = &mut self.slots[self.current];
             for id in &delta.free {
                 if let Some(t) = p.textures.remove(id) {
@@ -1224,6 +1228,160 @@ impl Renderer {
         }
         self.recording = false;
         Ok(())
+    }
+
+    /// How many times a panel has been painted (0: never, or no such panel).
+    pub fn panel_version(&self, panel: PanelId) -> u64 {
+        match self.panels.get(panel) {
+            Some(Some(p)) if p.painted => p.version,
+            _ => 0,
+        }
+    }
+
+    /// Copies a panel's picture into `dst`, an image of the same size and a
+    /// compatible RGBA8 format (an OpenXR quad layer's swapchain image, left
+    /// in COLOR_ATTACHMENT_OPTIMAL as OpenXR expects). Recorded into this
+    /// frame, after the panel's paint; call between `begin_frame` and
+    /// `end_frame`.
+    pub fn copy_panel_to(&mut self, panel: PanelId, dst: vk::Image) -> Result<()> {
+        let Some(Some(p)) = self.panels.get(panel) else {
+            return Err(crate::Error::Unsupported("no such panel".into()));
+        };
+        if !self.recording {
+            return Err(crate::Error::Unsupported("copy outside a frame".into()));
+        }
+        let (src, extent) = (p.image.image, p.image.extent);
+        let cmd = self.slots[self.current].cmd;
+        let gpu = &self.gpu;
+        // The whole image is overwritten: its old contents can go.
+        mem::barrier(
+            gpu,
+            cmd,
+            dst,
+            mem::range(0, 1),
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            mem::TOP,
+            mem::TRANSFER_WRITE,
+        );
+        mem::barrier(
+            gpu,
+            cmd,
+            src,
+            mem::range(0, 1),
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            mem::SHADER_READ,
+            mem::TRANSFER_READ,
+        );
+        let layers = vk::ImageSubresourceLayers {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            mip_level: 0,
+            base_array_layer: 0,
+            layer_count: 1,
+        };
+        let region = vk::ImageCopy::default()
+            .src_subresource(layers)
+            .dst_subresource(layers)
+            .extent(vk::Extent3D {
+                width: extent.width,
+                height: extent.height,
+                depth: 1,
+            });
+        // SAFETY: recording; both images are extent-sized and in the
+        // transfer layouts set above.
+        unsafe {
+            gpu.device.cmd_copy_image(
+                cmd,
+                src,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                dst,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &[region],
+            )
+        };
+        mem::barrier(
+            gpu,
+            cmd,
+            src,
+            mem::range(0, 1),
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            mem::TRANSFER_READ,
+            mem::SHADER_READ,
+        );
+        mem::barrier(
+            gpu,
+            cmd,
+            dst,
+            mem::range(0, 1),
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            mem::TRANSFER_WRITE,
+            mem::COLOR_WRITE,
+        );
+        Ok(())
+    }
+
+    /// Fills `dst` (`width`×`height`, RGBA8, e.g. an OpenXR swapchain image)
+    /// with `rgba` and leaves it in COLOR_ATTACHMENT_OPTIMAL. Waits for the
+    /// GPU; for small, static pictures.
+    pub fn upload_rgba(&self, dst: vk::Image, width: u32, height: u32, rgba: &[u8]) -> Result<()> {
+        let mut staging = Buffer::new(
+            &self.gpu,
+            rgba.len() as u64,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            MemoryLocation::CpuToGpu,
+            "upload",
+        )?;
+        staging.bytes()[..rgba.len()].copy_from_slice(rgba);
+        let buf = staging.buffer;
+        let r = self.one_shot(|gpu, cmd| {
+            mem::barrier(
+                gpu,
+                cmd,
+                dst,
+                mem::range(0, 1),
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                mem::TOP,
+                mem::TRANSFER_WRITE,
+            );
+            let region = vk::BufferImageCopy::default()
+                .image_subresource(vk::ImageSubresourceLayers {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    mip_level: 0,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                })
+                .image_extent(vk::Extent3D {
+                    width,
+                    height,
+                    depth: 1,
+                });
+            // SAFETY: recording; the buffer holds width*height texels.
+            unsafe {
+                gpu.device.cmd_copy_buffer_to_image(
+                    cmd,
+                    buf,
+                    dst,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &[region],
+                )
+            };
+            mem::barrier(
+                gpu,
+                cmd,
+                dst,
+                mem::range(0, 1),
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                mem::TRANSFER_WRITE,
+                mem::COLOR_WRITE,
+            );
+        });
+        staging.destroy(&self.gpu);
+        r
     }
 
     /// Blocks until all submitted frames are done.

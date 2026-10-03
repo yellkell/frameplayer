@@ -79,6 +79,7 @@ impl Sim {
                 head,
                 hands,
                 passthrough_available: true,
+                layers: false,
             },
         );
         self.renderer.set_video(out.frame.as_ref())?;

@@ -27,6 +27,33 @@ struct Eye {
     views: Vec<vk::ImageView>,
 }
 
+/// A flat picture the compositor draws itself, at its own place in the
+/// world (`XrCompositionLayerQuad`): UI panels and the pointer. The
+/// compositor puts it at its pose for every displayed frame, so it stays put
+/// as the head moves, where content in the projection layer is re-warped as
+/// if it were far away.
+struct QuadLayer {
+    swapchain: xr::Swapchain<xr::Vulkan>,
+    images: Vec<vk::Image>,
+    width: u32,
+    height: u32,
+    /// Acquired this frame, to release before xrEndFrame.
+    acquired: bool,
+    /// An image has been released at least once: the layer can be shown.
+    ready: bool,
+}
+
+/// A quad layer to show this frame.
+#[derive(Clone, Copy, Debug)]
+pub struct QuadSubmit {
+    /// The key the layer was created under.
+    pub key: u64,
+    /// Centre and orientation in the play space; the picture faces +Z.
+    pub pose: (Vec3, Quat),
+    /// Width and height in metres.
+    pub size: glam::Vec2,
+}
+
 pub struct XrSession {
     ctx: Arc<XrContext>,
     gpu: Arc<Gpu>,
@@ -45,6 +72,7 @@ pub struct XrSession {
     event_buf: xr::EventDataBuffer,
     /// Offset of our play space within the runtime's LOCAL space.
     space_origin: (Vec3, Quat),
+    quads: std::collections::HashMap<u64, QuadLayer>,
 }
 
 /// One frame in progress.
@@ -152,6 +180,7 @@ impl XrSession {
             blend_mode,
             event_buf: xr::EventDataBuffer::new(),
             space_origin: (Vec3::ZERO, Quat::IDENTITY),
+            quads: std::collections::HashMap::new(),
         })
     }
 
@@ -295,9 +324,115 @@ impl XrSession {
         Ok(ctx)
     }
 
-    /// Releases the images and submits the projection layer.
-    pub fn end_frame(&mut self, ctx: FrameCtx) -> Result<()> {
+    /// Quad layers need RGBA8 sRGB swapchains (the format panels are
+    /// painted in); otherwise everything stays in the projection layer.
+    pub fn supports_quad_layers(&self) -> bool {
+        self.format == vk::Format::R8G8B8A8_SRGB
+    }
+
+    fn quad_layer(&mut self, key: u64, width: u32, height: u32) -> Result<&mut QuadLayer> {
+        let stale = self
+            .quads
+            .get(&key)
+            .is_some_and(|q| (q.width, q.height) != (width, height));
+        if stale {
+            self.quads.remove(&key);
+        }
+        if !self.quads.contains_key(&key) {
+            let swapchain = self
+                .session
+                .create_swapchain(&xr::SwapchainCreateInfo {
+                    create_flags: xr::SwapchainCreateFlags::EMPTY,
+                    usage_flags: xr::SwapchainUsageFlags::COLOR_ATTACHMENT
+                        | xr::SwapchainUsageFlags::TRANSFER_DST,
+                    format: self.format.as_raw() as u32,
+                    sample_count: 1,
+                    width,
+                    height,
+                    face_count: 1,
+                    array_size: 1,
+                    mip_count: 1,
+                })
+                .ctx("xrCreateSwapchain (quad layer)")?;
+            let images = swapchain
+                .enumerate_images()
+                .ctx("xrEnumerateSwapchainImages")?
+                .into_iter()
+                .map(vk::Image::from_raw)
+                .collect();
+            self.quads.insert(
+                key,
+                QuadLayer {
+                    swapchain,
+                    images,
+                    width,
+                    height,
+                    acquired: false,
+                    ready: false,
+                },
+            );
+        }
+        Ok(self.quads.get_mut(&key).expect("inserted above"))
+    }
+
+    /// The image to draw a quad layer's new picture into this frame
+    /// (created on first use, `width`x`height`). The caller records the
+    /// writes into this frame's GPU work; [`XrSession::end_frame`] releases
+    /// it. Call at most once per key and frame.
+    pub fn quad_layer_image(&mut self, key: u64, width: u32, height: u32) -> Result<vk::Image> {
+        let q = self.quad_layer(key, width, height)?;
+        let i = q
+            .swapchain
+            .acquire_image()
+            .ctx("xrAcquireSwapchainImage (quad layer)")? as usize;
+        q.swapchain
+            .wait_image(xr::Duration::INFINITE)
+            .ctx("xrWaitSwapchainImage (quad layer)")?;
+        q.acquired = true;
+        Ok(q.images[i])
+    }
+
+    /// Whether a quad layer has a picture to show.
+    pub fn quad_layer_ready(&self, key: u64) -> bool {
+        self.quads.get(&key).is_some_and(|q| q.ready || q.acquired)
+    }
+
+    /// A quad layer whose picture never changes: `fill` writes it once,
+    /// waiting for the GPU, and it is released straight away.
+    pub fn static_quad_layer(
+        &mut self,
+        key: u64,
+        width: u32,
+        height: u32,
+        fill: impl FnOnce(vk::Image) -> std::result::Result<(), String>,
+    ) -> Result<()> {
+        if self.quad_layer_ready(key) {
+            return Ok(());
+        }
+        let image = self.quad_layer_image(key, width, height)?;
+        fill(image).map_err(Error::Runtime)?;
+        let q = self.quads.get_mut(&key).expect("created above");
+        q.swapchain
+            .release_image()
+            .ctx("xrReleaseSwapchainImage (quad layer)")?;
+        q.acquired = false;
+        q.ready = true;
+        Ok(())
+    }
+
+    /// Releases the images and submits the projection layer, then `quads`
+    /// on top of it in order.
+    pub fn end_frame(&mut self, ctx: FrameCtx, quads: &[QuadSubmit]) -> Result<()> {
         let time = ctx.state.predicted_display_time;
+        for q in self.quads.values_mut() {
+            if q.acquired {
+                q.swapchain
+                    .release_image()
+                    .ctx("xrReleaseSwapchainImage (quad layer)")?;
+                q.acquired = false;
+                q.ready = true;
+            }
+        }
         if ctx.targets.is_none() {
             return self
                 .stream
@@ -338,8 +473,40 @@ impl XrSession {
             .layer_flags(flags)
             .space(&self.space)
             .views(&views);
+        let quad_layers: Vec<xr::CompositionLayerQuad<xr::Vulkan>> = quads
+            .iter()
+            .filter_map(|s| {
+                let q = self.quads.get(&s.key).filter(|q| q.ready)?;
+                Some(
+                    xr::CompositionLayerQuad::new()
+                        // Rounded corners and the ray's soft edges are alpha.
+                        .layer_flags(xr::CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA)
+                        .space(&self.space)
+                        .eye_visibility(xr::EyeVisibility::BOTH)
+                        .sub_image(
+                            xr::SwapchainSubImage::new()
+                                .swapchain(&q.swapchain)
+                                .image_rect(xr::Rect2Di {
+                                    offset: xr::Offset2Di { x: 0, y: 0 },
+                                    extent: xr::Extent2Di {
+                                        width: q.width as i32,
+                                        height: q.height as i32,
+                                    },
+                                })
+                                .image_array_index(0),
+                        )
+                        .pose(crate::to_pose(s.pose.0, s.pose.1))
+                        .size(xr::Extent2Df {
+                            width: s.size.x,
+                            height: s.size.y,
+                        }),
+                )
+            })
+            .collect();
+        let mut all: Vec<&xr::CompositionLayerBase<xr::Vulkan>> = vec![&*layer];
+        all.extend(quad_layers.iter().map(|q| &**q));
         self.stream
-            .end(time, self.blend_mode, &[&layer])
+            .end(time, self.blend_mode, &all)
             .ctx("xrEndFrame")
     }
 

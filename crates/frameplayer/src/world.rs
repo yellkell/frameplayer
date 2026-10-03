@@ -129,7 +129,21 @@ impl Panel {
             focused: true,
             ..Default::default()
         };
-        let out = self.ctx.run(input, ui);
+        let hovered = self.hovered;
+        let mut ui = ui;
+        let out = self.ctx.run(input, |ctx| {
+            ui(ctx);
+            // The pointer's dot, drawn with the panel so it sits exactly on
+            // it (a quad layer would cover one drawn in the scene).
+            if hovered && let Some(p) = ctx.input(|i| i.pointer.hover_pos()) {
+                let painter = ctx.layer_painter(egui::LayerId::new(
+                    egui::Order::Debug,
+                    egui::Id::new("pointer-dot"),
+                ));
+                painter.circle_filled(p, 7.0, egui::Color32::from_black_alpha(110));
+                painter.circle_filled(p, 5.0, egui::Color32::WHITE);
+            }
+        });
         let repaint = out
             .viewport_output
             .get(&egui::ViewportId::ROOT)
@@ -151,6 +165,11 @@ impl Panel {
         } else {
             (self.fade - dt / 0.25).max(0.0)
         };
+    }
+
+    /// Visible and done fading in: nothing about its look is animating.
+    pub fn fully_shown(&self) -> bool {
+        self.visible && self.fade >= 1.0 && self.opacity >= 0.999
     }
 
     /// Drawn at all: visible, or still fading out.
@@ -405,15 +424,39 @@ impl Pointer {
                 eye,
                 color,
             ));
-            if a.hit.is_some() {
-                // A small cross-shaped cursor facing the viewer.
-                let to_eye = (eye - end).normalize_or_zero();
-                let right = Vec3::Y.cross(to_eye).normalize_or_zero() * 0.009;
-                let up = to_eye.cross(right).normalize_or_zero() * 0.009;
-                let c = [1.0 * alpha, 1.0 * alpha, 1.0 * alpha, alpha];
-                out.push(QuadDraw::line(end - right, end + right, 0.007, eye, c));
-                out.push(QuadDraw::line(end - up, end + up, 0.007, eye, c));
+        }
+        out
+    }
+
+    /// The rays as quad layers: each a thin strip from the hand to what it
+    /// points at, turned to face the eye. (The dot is drawn on the panel.)
+    pub fn ray_layers(&self, eye: Vec3, show: bool) -> Vec<crate::app::LayerDraw> {
+        let mut out = Vec::new();
+        if !show {
+            return out;
+        }
+        for (i, aim) in self.aims.iter().enumerate() {
+            let Some(a) = aim else { continue };
+            let active = i == self.active;
+            let len = a.hit.map(|h| h.1).unwrap_or(2.0).min(5.0) - 0.02;
+            if len <= 0.01 {
+                continue;
             }
+            let start = a.origin + a.dir * 0.02;
+            let centre = start + a.dir * (len / 2.0);
+            let x = a.dir.normalize_or_zero();
+            let to_eye = eye - centre;
+            let z = (to_eye - x * to_eye.dot(x)).normalize_or_zero();
+            if z == Vec3::ZERO {
+                continue;
+            }
+            let y = z.cross(x);
+            let rot = Quat::from_mat3(&glam::Mat3::from_cols(x, y, z));
+            out.push(crate::app::LayerDraw::Ray {
+                active,
+                pose: (centre, rot),
+                size: Vec2::new(len, if active { 0.006 } else { 0.004 }),
+            });
         }
         out
     }

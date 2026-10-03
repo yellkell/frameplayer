@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 input.hands.map(|h| (h.active, h.aim.is_some()))
             );
         }
-        session.end_frame(frame)?;
+        session.end_frame(frame, &[])?;
         frames += 1;
     }
     renderer.wait_idle();
