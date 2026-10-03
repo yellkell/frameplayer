@@ -98,7 +98,8 @@ The same as DeoVR's defaults on Quest, so muscle memory carries over:
 | A / X | Play / pause |
 | B / Y | Back: closes the open panel, then shows the library over the video, then returns to the video |
 | Thumbstick left / right | Seek back / forward 10 s (adjustable; hold to repeat). Pointing at a list: previous / next page |
-| Thumbstick up / down | Volume (or scroll a menu you point at) |
+| Right thumbstick up / down | Tilt the picture up / down |
+| Left thumbstick up / down | Volume (or scroll a menu you point at) |
 | Thumbstick press | Reset the image (zoom and drag) |
 | Hold grip + trigger, move | Drag the picture (the dome follows your hand) |
 | Grip + thumbstick right / left | Next / previous video in the list you opened it from |

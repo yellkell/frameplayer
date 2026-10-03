@@ -1,7 +1,7 @@
 //! Playback UI: the control bar, the adjustments panel and subtitles.
 
 use super::theme::Weight;
-use super::widgets::Kind;
+use super::widgets::{Kind, Tip};
 use super::{Action, View, fmt_time, icons, theme, widgets};
 use egui::{Align, Color32, Layout, RichText, Sense, Vec2};
 use fp_core::format::{Projection, StereoLayout, VideoFormat};
@@ -129,14 +129,14 @@ pub fn control_bar(ctx: &egui::Context, v: &mut View) {
         );
         left.spacing_mut().item_spacing.x = 8.0;
         if widgets::icon_button(&mut left, icons::SQUARES_FOUR, 52.0, false)
-            .on_hover_text("Library")
+            .tip("Library")
             .clicked()
         {
             v.actions.push(Action::ShowBrowser(true));
         }
         let speed = pb.player.speed();
         if widgets::chip(&mut left, &fmt_speed(speed), (speed - 1.0).abs() > 1e-3)
-            .on_hover_text("Playback speed")
+            .tip("Speed")
             .clicked()
         {
             v.actions.push(Action::SetSpeed(next_speed(speed)));
@@ -151,7 +151,7 @@ pub fn control_bar(ctx: &egui::Context, v: &mut View) {
             icons::SPEAKER_HIGH
         };
         if widgets::icon_button(&mut left, speaker, 48.0, false)
-            .on_hover_text(if vol <= 0.001 { "Unmute" } else { "Mute" })
+            .tip(if vol <= 0.001 { "Unmute" } else { "Mute" })
             .clicked()
         {
             if vol <= 0.001 {
@@ -176,19 +176,16 @@ pub fn control_bar(ctx: &egui::Context, v: &mut View) {
                 .layout(Layout::left_to_right(Align::Center)),
         );
         mid.spacing_mut().item_spacing.x = 16.0;
-        if skip_button(&mut mid, -step).on_hover_text("Back").clicked() {
+        if skip_button(&mut mid, -step).tip("Rewind").clicked() {
             v.actions.push(Action::SeekRelative(-step));
         }
         if play_button(&mut mid, paused)
-            .on_hover_text(if paused { "Play" } else { "Pause" })
+            .tip(if paused { "Play" } else { "Pause" })
             .clicked()
         {
             v.actions.push(Action::TogglePause);
         }
-        if skip_button(&mut mid, step)
-            .on_hover_text("Forward")
-            .clicked()
-        {
+        if skip_button(&mut mid, step).tip("Forward").clicked() {
             v.actions.push(Action::SeekRelative(step));
         }
 
@@ -199,32 +196,32 @@ pub fn control_bar(ctx: &egui::Context, v: &mut View) {
         );
         right.spacing_mut().item_spacing.x = 8.0;
         if widgets::icon_button(&mut right, icons::X, 52.0, false)
-            .on_hover_text("Close video")
+            .tip("Close")
             .clicked()
         {
             v.actions.push(Action::ClosePlayback);
         }
         if widgets::icon_button(&mut right, icons::EYE_SLASH, 52.0, false)
-            .on_hover_text("Hide controls (pull the trigger to bring them back)")
+            .tip("Hide")
             .clicked()
         {
             v.actions.push(Action::HideControls);
         }
         if v.passthrough_available
             && widgets::icon_button(&mut right, icons::EYEGLASSES, 52.0, v.settings.passthrough)
-                .on_hover_text("Passthrough")
+                .tip("Passthrough")
                 .clicked()
         {
             v.actions.push(Action::TogglePassthrough);
         }
         if widgets::icon_button(&mut right, icons::CROSSHAIR, 52.0, false)
-            .on_hover_text("Recenter")
+            .tip("Recenter")
             .clicked()
         {
             v.actions.push(Action::Recenter);
         }
         if widgets::icon_button(&mut right, icons::BOOKMARK_SIMPLE, 52.0, false)
-            .on_hover_text("Add bookmark")
+            .tip("Bookmark")
             .clicked()
         {
             v.actions.push(Action::AddBookmark);
@@ -235,7 +232,7 @@ pub fn control_bar(ctx: &egui::Context, v: &mut View) {
             52.0,
             v.state.adjust_open,
         )
-        .on_hover_text("Format and adjustments")
+        .tip("Adjust")
         .clicked()
         {
             v.state.adjust_open = !v.state.adjust_open;
@@ -677,7 +674,7 @@ pub fn adjust_panel(ctx: &egui::Context, v: &mut View) {
                     v.actions.push(Action::ResetView);
                 }
                 if widgets::icon_button(ui, icons::TIMER, 48.0, false)
-                    .on_hover_text("Keyframe here: settings change smoothly between keyframes")
+                    .tip("Keyframe")
                     .clicked()
                 {
                     v.actions.push(Action::AddKeyframe);
@@ -764,7 +761,7 @@ fn audio_and_text(ui: &mut egui::Ui, pb: &crate::playback::Playback, actions: &m
             for (t, name) in &pb.markers {
                 r.row(name, Some(fmt_time(*t).as_str()), |ui| {
                     if widgets::icon_button(ui, icons::PLAY, 40.0, false)
-                        .on_hover_text("Go there")
+                        .tip("Go")
                         .clicked()
                     {
                         actions.push(Action::Seek(*t));

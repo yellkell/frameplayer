@@ -20,6 +20,51 @@ fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
     a.lerp_to_gamma(b, t.clamp(0.0, 1.0))
 }
 
+/// A one-word label over a control while the pointer is on it. egui's own
+/// tooltips wait for the pointer to rest, which a controller ray never
+/// quite does, so they never showed in the headset.
+pub trait Tip {
+    fn tip(self, word: &str) -> Self;
+}
+
+impl Tip for Response {
+    fn tip(self, word: &str) -> Response {
+        let t = self
+            .ctx
+            .animate_bool_with_time(self.id.with("tip"), self.hovered(), 0.1);
+        if t > 0.01 {
+            let painter = self.ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Tooltip,
+                self.id.with("tip"),
+            ));
+            let g = painter.layout_no_wrap(
+                word.to_string(),
+                theme::font(Weight::SemiBold, 15.0),
+                theme::BG,
+            );
+            let size = g.size() + Vec2::new(18.0, 10.0);
+            let screen = self.ctx.screen_rect();
+            // Above the control, or below it at the top edge of the panel.
+            let above = self.rect.top() - size.y - 8.0;
+            let y = if above >= screen.top() + 2.0 {
+                above + (1.0 - t) * 4.0
+            } else {
+                self.rect.bottom() + 8.0 - (1.0 - t) * 4.0
+            };
+            let x = (self.rect.center().x - size.x / 2.0)
+                .clamp(screen.left() + 4.0, screen.right() - size.x - 4.0);
+            let r = Rect::from_min_size(Pos2::new(x, y), size);
+            painter.rect_filled(r, CornerRadius::same(8), theme::TEXT.gamma_multiply(t));
+            painter.galley_with_override_text_color(
+                r.min + Vec2::new(9.0, 5.0),
+                g,
+                theme::BG.gamma_multiply(t),
+            );
+        }
+        self
+    }
+}
+
 /// What a button is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -397,7 +442,7 @@ pub fn slider_control(
             theme::icon(20.0),
             mix(theme::TEXT_2, Color32::WHITE, t),
         );
-        if resp.on_hover_text("Reset").clicked() {
+        if resp.tip("Reset").clicked() {
             *value = default;
             changed = true;
         }

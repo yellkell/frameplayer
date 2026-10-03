@@ -1016,6 +1016,12 @@ impl App {
                         self.apply(Action::SetVolume(v));
                     }
                 }
+                Cmd::Pitch(d) => {
+                    if let Some(p) = &mut self.playback {
+                        p.settings.pitch = (p.settings.pitch + d).clamp(-90.0, 90.0);
+                        p.settings_dirty = true;
+                    }
+                }
                 Cmd::Zoom(d) => {
                     if let Some(p) = &mut self.playback {
                         p.settings.zoom = (p.settings.zoom + d).clamp(0.5, 2.5);

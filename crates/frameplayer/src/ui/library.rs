@@ -2,7 +2,7 @@
 
 use super::theme::{self, Weight};
 use super::thumbs::paint_cover_rounded;
-use super::widgets::{self, Kind};
+use super::widgets::{self, Kind, Tip};
 use super::{Action, FormatFilter, HomeRows, Screen, View, fmt_size, fmt_time, icons};
 use crate::playback::OpenRequest;
 use egui::{Align, Align2, Color32, Layout, RichText, Sense, Vec2};
@@ -99,20 +99,20 @@ fn nav(ui: &mut egui::Ui, v: &mut View) {
                     v.actions.push(Action::ShowBrowser(false));
                 }
             } else if widgets::icon_button(ui, icons::POWER, 48.0, false)
-                .on_hover_text("Quit FramePlayer")
+                .tip("Quit")
                 .clicked()
             {
                 v.actions.push(Action::Quit);
             }
             if v.passthrough_available
                 && widgets::icon_button(ui, icons::EYEGLASSES, 48.0, v.settings.passthrough)
-                    .on_hover_text("Passthrough")
+                    .tip("Passthrough")
                     .clicked()
             {
                 v.actions.push(Action::TogglePassthrough);
             }
             if widgets::icon_button(ui, icons::CROSSHAIR, 48.0, false)
-                .on_hover_text("Recenter (or squeeze both grips)")
+                .tip("Recenter")
                 .clicked()
             {
                 v.actions.push(Action::Recenter);
@@ -357,7 +357,7 @@ fn card(ui: &mut egui::Ui, v: &mut View, r: &MediaRecord) -> (bool, bool) {
         theme::icon(24.0),
         theme::TEXT_2.lerp_to_gamma(Color32::WHITE, m.max(t * 0.6)),
     );
-    let more_clicked = more_resp.on_hover_text("Details").clicked();
+    let more_clicked = more_resp.tip("Details").clicked();
     (resp.clicked() && !more_clicked, more_clicked)
 }
 
@@ -638,7 +638,7 @@ fn search_field(ui: &mut egui::Ui, text: &mut String) -> bool {
                 changed |= r.changed();
                 if !text.is_empty()
                     && widgets::icon_button(ui, icons::X, 30.0, false)
-                        .on_hover_text("Clear")
+                        .tip("Clear")
                         .clicked()
                 {
                     text.clear();
@@ -918,7 +918,7 @@ fn details_side(ui: &mut egui::Ui, v: &mut View, r: &MediaRecord) {
                     theme::TEXT_3.lerp_to_gamma(theme::WARN, t)
                 },
             );
-            if resp.on_hover_text(format!("{n} of 5")).clicked() {
+            if resp.tip(&format!("{n}/5")).clicked() {
                 v.actions
                     .push(Action::SetRating(r.id, if r.rating == n { 0 } else { n }));
             }

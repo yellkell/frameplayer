@@ -1,7 +1,7 @@
 //! Network and local sources: list, browse, add.
 
 use super::theme::{self, Weight};
-use super::widgets::{self, Kind};
+use super::widgets::{self, Kind, Tip};
 use super::{Action, SourceForm, View, fmt_size, fmt_time, icons};
 use crate::playback::OpenRequest;
 use egui::{Align, Align2, Color32, Layout, RichText, Sense, Vec2};
@@ -140,7 +140,7 @@ pub fn sources(ui: &mut egui::Ui, v: &mut View) {
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 if !builtin
                                     && widgets::icon_button(ui, icons::TRASH, 44.0, false)
-                                        .on_hover_text("Remove")
+                                        .tip("Remove")
                                         .clicked()
                                 {
                                     v.actions.push(Action::RemoveSource(id.clone()));
@@ -183,7 +183,7 @@ fn browse(ui: &mut egui::Ui, v: &mut View) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 12.0;
         if widgets::icon_button(ui, icons::ARROW_LEFT, 48.0, false)
-            .on_hover_text("Back")
+            .tip("Back")
             .clicked()
         {
             match v.state.browse.as_mut().and_then(|b| b.stack.pop()) {
@@ -223,7 +223,6 @@ fn browse(ui: &mut egui::Ui, v: &mut View) {
                 Kind::Secondary,
                 44.0,
             )
-            .on_hover_text("Index every video here so it shows in Library")
             .clicked()
             {
                 v.actions.push(Action::ImportFolder {
@@ -232,7 +231,7 @@ fn browse(ui: &mut egui::Ui, v: &mut View) {
                 });
             }
             if widgets::icon_button(ui, icons::ARROWS_CLOCKWISE, 44.0, false)
-                .on_hover_text("Refresh")
+                .tip("Refresh")
                 .clicked()
             {
                 v.actions.push(Action::Browse {
@@ -453,7 +452,7 @@ fn add_form(ui: &mut egui::Ui, v: &mut View) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 12.0;
         if widgets::icon_button(ui, icons::ARROW_LEFT, 48.0, false)
-            .on_hover_text("Cancel")
+            .tip("Cancel")
             .clicked()
         {
             cancel = true;

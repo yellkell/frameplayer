@@ -3,7 +3,7 @@
 //! saves them and applies them to the subsystems.
 
 use super::theme::{self, Weight};
-use super::widgets::{self, Kind};
+use super::widgets::{self, Kind, Tip};
 use super::{Action, SettingsTab, View, icons};
 use crate::settings::HapticDeviceConfig;
 use egui::{Align, Align2, Color32, Layout, RichText, Sense, Vec2};
@@ -244,7 +244,7 @@ fn library(ui: &mut egui::Ui, v: &mut View) {
                 missing.then_some("Not found"),
                 |ui| {
                     if widgets::icon_button(ui, icons::TRASH, 40.0, false)
-                        .on_hover_text("Remove")
+                        .tip("Remove")
                         .clicked()
                     {
                         remove = Some(i);
@@ -396,7 +396,7 @@ fn haptics(ui: &mut egui::Ui, v: &mut View) {
             };
             r.row(&cfg.label(), Some(desc.as_str()), |ui| {
                 if widgets::icon_button(ui, icons::TRASH, 40.0, false)
-                    .on_hover_text("Remove")
+                    .tip("Remove")
                     .clicked()
                 {
                     v.actions.push(Action::RemoveDevice(i));
@@ -569,7 +569,6 @@ fn remote(ui: &mut egui::Ui, v: &mut View) {
                                         "New pairing code",
                                         Kind::Secondary,
                                     )
-                                    .on_hover_text("Disconnects paired phones")
                                     .clicked()
                                     {
                                         v.actions.push(Action::RegenerateToken);
@@ -755,7 +754,11 @@ fn about(ui: &mut egui::Ui, v: &mut View) {
                 "Thumbstick left / right",
                 "Seek (hold to repeat); page lists you point at",
             ),
-            ("Thumbstick up / down", "Volume; scroll menus you point at"),
+            ("Right thumbstick up / down", "Tilt the picture up / down"),
+            (
+                "Left thumbstick up / down",
+                "Volume; scroll menus you point at",
+            ),
             ("Thumbstick press", "Reset the image (zoom and drag)"),
             ("Hold grip + trigger", "Drag the picture to move it"),
             ("Grip + thumbstick left / right", "Previous / next video"),
