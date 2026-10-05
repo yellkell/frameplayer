@@ -1,19 +1,25 @@
-//! Controller bindings, modelled on DeoVR's Quest defaults so its users feel
-//! at home:
+//! Controller bindings. Each button does one thing; the right hand runs
+//! playback and the left hand the picture. Play/pause is on both (A and the
+//! D-pad's down), and the sticks seek on both, so the commonest actions are
+//! under either thumb.
 //!
-//! | Input | Action |
-//! |---|---|
-//! | A / X (left D-pad down / left) | Play / pause |
-//! | B / Y (left D-pad up / right) | Back (close a panel, leave the library, show the library) |
-//! | Thumbstick left / right | Seek back / forward (repeats while held); pages the library when pointing at it |
-//! | Thumbstick up / down | Tilt the picture up / down (pitch) |
-//! | Thumbstick press | Reset the image (zoom and dome drag) |
-//! | Hold grip + trigger, move | Drag the dome (rotate / move the picture) |
-//! | Grip + thumbstick right / left | Next / previous video |
-//! | Grip + thumbstick down / up | Zoom in / out |
-//! | Trigger | Click; on empty space, show or hide the controls |
-//! | Menu | Library |
-//! | Both grips (no trigger) | Recenter |
+//! | Input | Right hand | Left hand |
+//! |---|---|---|
+//! | Thumbstick left / right | Seek back / forward (repeats while held) | the same |
+//! | Thumbstick up / down | Volume | Tilt the picture |
+//! | Thumbstick press | Mute | Reset the picture |
+//! | A / D-pad down | Play / pause | Play / pause |
+//! | B / D-pad right | Back | (spare) |
+//! | X / D-pad left | Previous video | Adjust panel |
+//! | Y / D-pad up | Next video | Show or hide the controls |
+//! | Menu / View | Library | Recenter |
+//! | Bumper | Forward 1 minute | Back 1 minute |
+//! | Grip + thumbstick | (nothing) | Left / right turns the picture, up / down zooms |
+//! | Hold grip + trigger, move | Drag the picture | Drag the picture |
+//! | Trigger | Click; on empty space, show or hide the controls | the same |
+//!
+//! Pointing at a list, thumbstick left / right pages it; both grips together
+//! recenter too.
 
 use fp_xr::Hand;
 use glam::{Quat, Vec3};
@@ -24,12 +30,19 @@ pub enum Cmd {
     TogglePause,
     Back,
     Menu,
-    /// -1 back, +1 forward.
+    /// -1 back, +1 forward, by the seek step.
     Seek(i32),
-    /// Picture pitch change (degrees per frame; up positive).
+    /// -1 back, +1 forward, by a minute.
+    Skip(i32),
+    /// Picture pitch change (degrees this frame; up positive).
     Pitch(f32),
-    /// Zoom change (factor delta per frame).
+    /// Picture yaw change (degrees this frame; left positive).
+    Yaw(f32),
+    /// Zoom change (factor delta this frame).
     Zoom(f32),
+    /// Volume change (this frame; 1.0 is full).
+    Volume(f32),
+    ToggleMute,
     Next,
     Previous,
     ResetImage,
@@ -42,6 +55,7 @@ pub enum Cmd {
     DragEnd,
     Recenter,
     ToggleUi,
+    ToggleAdjust,
     /// Page the pointed-at list: -1 back, +1 forward.
     Page(i32),
 }
@@ -58,12 +72,20 @@ pub struct Context {
     pub dt: f32,
 }
 
-/// How fast the right thumbstick tilts the picture, in degrees a second.
+const LEFT: usize = 0;
+const RIGHT: usize = 1;
+
+/// How fast a thumbstick tilts or turns the picture, in degrees a second.
 const PITCH_SPEED: f32 = 30.0;
+const YAW_SPEED: f32 = 45.0;
+/// Volume change a second at full stick.
+const VOLUME_SPEED: f32 = 0.6;
 const GRIP: f32 = 0.7;
 const TRIGGER: f32 = 0.7;
 const STICK: f32 = 0.75;
 const STICK_RELEASE: f32 = 0.35;
+/// Stick deflection before a continuous action (tilt, volume...) starts.
+const STICK_HOLD: f32 = 0.5;
 const REPEAT_DELAY: f32 = 0.5;
 const REPEAT_EVERY: f32 = 0.35;
 
@@ -78,8 +100,6 @@ pub struct Controls {
     prev: [Hand; 2],
     /// Direction held on the thumbstick (x axis) and for how long.
     held: [(i32, f32); 2],
-    /// Grip + thumbstick x already fired until the stick returns.
-    grip_latch: [bool; 2],
     drag: Option<Drag>,
 }
 
@@ -129,14 +149,12 @@ impl Controls {
                         && prev[i].trigger <= TRIGGER
                         && let Some((_, rot)) = h.aim
                     {
-                        {
-                            self.drag = Some(Drag {
-                                hand: i,
-                                start: angles(rot, anchor),
-                            });
-                            out.push(Cmd::DragBegin);
-                            break;
-                        }
+                        self.drag = Some(Drag {
+                            hand: i,
+                            start: angles(rot, anchor),
+                        });
+                        out.push(Cmd::DragBegin);
+                        break;
                     }
                 }
             }
@@ -144,39 +162,64 @@ impl Controls {
         }
         let any_grip = hands.iter().any(gripping);
 
-        for (i, hand) in hands.iter().enumerate() {
-            if pressed(i, |h| h.primary) && ctx.playing {
-                out.push(Cmd::TogglePause);
-            }
-            if pressed(i, |h| h.secondary) {
-                out.push(Cmd::Back);
-            }
-            if pressed(i, |h| h.menu) {
-                out.push(Cmd::Menu);
-            }
-            if pressed(i, |h| h.stick_click) && ctx.playing {
-                out.push(Cmd::ResetImage);
-            }
+        // Buttons: one action each, by hand.
+        let playing = ctx.playing;
+        if pressed(RIGHT, |h| h.south) && playing {
+            out.push(Cmd::TogglePause);
+        }
+        if pressed(LEFT, |h| h.south) && playing {
+            out.push(Cmd::TogglePause);
+        }
+        if pressed(RIGHT, |h| h.east) {
+            out.push(Cmd::Back);
+        }
+        if pressed(RIGHT, |h| h.west) && playing {
+            out.push(Cmd::Previous);
+        }
+        if pressed(RIGHT, |h| h.north) && playing {
+            out.push(Cmd::Next);
+        }
+        if pressed(RIGHT, |h| h.menu) {
+            out.push(Cmd::Menu);
+        }
+        if pressed(RIGHT, |h| h.shoulder) && playing {
+            out.push(Cmd::Skip(1));
+        }
+        if pressed(RIGHT, |h| h.stick_click) && playing {
+            out.push(Cmd::ToggleMute);
+        }
+        if pressed(LEFT, |h| h.north) && playing {
+            out.push(Cmd::ToggleUi);
+        }
+        if pressed(LEFT, |h| h.west) && playing {
+            out.push(Cmd::ToggleAdjust);
+        }
+        if pressed(LEFT, |h| h.menu) {
+            out.push(Cmd::Recenter);
+        }
+        if pressed(LEFT, |h| h.shoulder) && playing {
+            out.push(Cmd::Skip(-1));
+        }
+        if pressed(LEFT, |h| h.stick_click) && playing {
+            out.push(Cmd::ResetImage);
+        }
 
+        for (i, hand) in hands.iter().enumerate() {
             let s = hand.stick;
             if gripping(hand) {
-                // Grip + stick: next/previous video, zoom.
+                // Left grip + stick: turn and zoom the picture.
                 self.held[i] = (0, 0.0);
-                if ctx.playing {
-                    if s.x.abs() > STICK && !self.grip_latch[i] {
-                        self.grip_latch[i] = true;
-                        out.push(if s.x > 0.0 { Cmd::Next } else { Cmd::Previous });
-                    } else if s.x.abs() < STICK_RELEASE {
-                        self.grip_latch[i] = false;
+                if i == LEFT && playing && !ctx.over_ui {
+                    if s.x.abs() > STICK_HOLD {
+                        out.push(Cmd::Yaw(-s.x * ctx.dt * YAW_SPEED));
                     }
-                    if s.y.abs() > 0.3 && s.x.abs() < STICK_RELEASE {
+                    if s.y.abs() > STICK_HOLD {
                         // Down zooms in, as in DeoVR.
                         out.push(Cmd::Zoom(-s.y * ctx.dt * 0.8));
                     }
                 }
                 continue;
             }
-            self.grip_latch[i] = false;
 
             // Stick left/right: seek (or page a list), repeating while held.
             let dir = if s.x > STICK {
@@ -193,9 +236,7 @@ impl Controls {
                 self.held[i] = (0, 0.0);
             } else if dir != was {
                 self.held[i] = (dir, 0.0);
-                out.push(if ctx.over_ui {
-                    Cmd::Page(dir)
-                } else if ctx.playing {
+                out.push(if playing && !ctx.over_ui {
                     Cmd::Seek(dir)
                 } else {
                     Cmd::Page(dir)
@@ -210,15 +251,19 @@ impl Controls {
                         ((t - REPEAT_DELAY) / REPEAT_EVERY).floor()
                     }
                 };
-                if fires(t2) > fires(t) && ctx.playing && !ctx.over_ui {
+                if fires(t2) > fires(t) && playing && !ctx.over_ui {
                     out.push(Cmd::Seek(dir));
                 }
                 self.held[i] = (dir, t2);
             }
-            // Stick up/down: tilt the picture (menus scroll through the
-            // pointer instead). Volume is on the control bar.
-            if ctx.playing && !ctx.over_ui && s.y.abs() > 0.5 && s.x.abs() < STICK_RELEASE {
-                out.push(Cmd::Pitch(s.y * ctx.dt * PITCH_SPEED));
+            // Stick up/down: volume (right) or tilt (left). Menus pointed at
+            // scroll through the pointer instead.
+            if playing && !ctx.over_ui && s.y.abs() > STICK_HOLD && s.x.abs() < STICK_RELEASE {
+                out.push(if i == RIGHT {
+                    Cmd::Volume(s.y * ctx.dt * VOLUME_SPEED)
+                } else {
+                    Cmd::Pitch(s.y * ctx.dt * PITCH_SPEED)
+                });
             }
         }
 
@@ -226,7 +271,7 @@ impl Controls {
         if both(hands) && !both(&prev) && self.drag.is_none() {
             out.push(Cmd::Recenter);
         }
-        if ctx.click_outside && !any_grip && ctx.playing {
+        if ctx.click_outside && !any_grip && playing {
             out.push(Cmd::ToggleUi);
         }
         self.prev = *hands;
@@ -260,81 +305,114 @@ mod tests {
         c.update(h, Quat::IDENTITY, cx)
     }
 
-    #[test]
-    fn buttons() {
+    /// Presses and releases one button, returning what the press did.
+    fn press(hand: usize, set: fn(&mut Hand, bool), playing: bool) -> Vec<Cmd> {
         let mut c = Controls::default();
         let mut h = hands();
-        h[1].primary = true;
-        assert_eq!(run(&mut c, &h, ctx(true)), vec![Cmd::TogglePause]);
-        assert_eq!(run(&mut c, &h, ctx(true)), vec![], "edge only");
-        h[1].primary = false;
-        h[0].secondary = true;
-        assert_eq!(run(&mut c, &h, ctx(true)), vec![Cmd::Back]);
-        h[0].secondary = false;
-        h[1].stick_click = true;
-        assert_eq!(run(&mut c, &h, ctx(true)), vec![Cmd::ResetImage]);
-        h[1].stick_click = false;
-        h[0].menu = true;
-        assert_eq!(run(&mut c, &h, ctx(false)), vec![Cmd::Menu]);
+        set(&mut h[hand], true);
+        let out = run(&mut c, &h, ctx(playing));
+        assert_eq!(run(&mut c, &h, ctx(playing)), vec![], "edge only");
+        set(&mut h[hand], false);
+        run(&mut c, &h, ctx(playing));
+        out
     }
 
     #[test]
-    fn seek_repeats_while_held_and_pages_menus() {
+    fn every_button_has_one_job() {
+        type Set = fn(&mut Hand, bool);
+        let cases: [(usize, Set, Cmd); 13] = [
+            (RIGHT, |h, v| h.south = v, Cmd::TogglePause),
+            (LEFT, |h, v| h.south = v, Cmd::TogglePause),
+            (RIGHT, |h, v| h.east = v, Cmd::Back),
+            (RIGHT, |h, v| h.west = v, Cmd::Previous),
+            (RIGHT, |h, v| h.north = v, Cmd::Next),
+            (RIGHT, |h, v| h.menu = v, Cmd::Menu),
+            (RIGHT, |h, v| h.shoulder = v, Cmd::Skip(1)),
+            (RIGHT, |h, v| h.stick_click = v, Cmd::ToggleMute),
+            (LEFT, |h, v| h.north = v, Cmd::ToggleUi),
+            (LEFT, |h, v| h.west = v, Cmd::ToggleAdjust),
+            (LEFT, |h, v| h.menu = v, Cmd::Recenter),
+            (LEFT, |h, v| h.shoulder = v, Cmd::Skip(-1)),
+            (LEFT, |h, v| h.stick_click = v, Cmd::ResetImage),
+        ];
+        for (hand, set, want) in cases {
+            assert_eq!(press(hand, set, true), vec![want], "{want:?}");
+        }
+        assert_eq!(press(LEFT, |h, v| h.east = v, true), vec![], "spare");
+        // In the library only navigation works.
+        assert_eq!(press(RIGHT, |h, v| h.east = v, false), vec![Cmd::Back]);
+        assert_eq!(press(RIGHT, |h, v| h.menu = v, false), vec![Cmd::Menu]);
+        assert_eq!(press(RIGHT, |h, v| h.south = v, false), vec![]);
+        assert_eq!(press(LEFT, |h, v| h.shoulder = v, false), vec![]);
+    }
+
+    #[test]
+    fn either_stick_seeks_and_repeats_while_held() {
+        for hand in [LEFT, RIGHT] {
+            let mut c = Controls::default();
+            let mut h = hands();
+            h[hand].stick = Vec2::new(0.9, 0.0);
+            let mut seeks = 0;
+            // 1.5 s held at 10 Hz: the first press, then repeats from 0.5 s every 0.35 s.
+            for _ in 0..15 {
+                seeks += run(&mut c, &h, ctx(true))
+                    .iter()
+                    .filter(|c| **c == Cmd::Seek(1))
+                    .count();
+            }
+            assert_eq!(seeks, 1 + 3, "hand {hand}");
+            h[hand].stick = Vec2::ZERO;
+            run(&mut c, &h, ctx(true));
+            h[hand].stick = Vec2::new(-0.9, 0.0);
+            let over = Context {
+                over_ui: true,
+                ..ctx(true)
+            };
+            assert_eq!(run(&mut c, &h, over), vec![Cmd::Page(-1)]);
+        }
+    }
+
+    #[test]
+    fn right_stick_up_is_volume_left_is_tilt() {
         let mut c = Controls::default();
         let mut h = hands();
-        h[1].stick = Vec2::new(0.9, 0.0);
-        let mut seeks = 0;
-        // 1.5 s held at 10 Hz: the first press, then repeats from 0.5 s every 0.35 s.
-        for _ in 0..15 {
-            seeks += run(&mut c, &h, ctx(true))
-                .iter()
-                .filter(|c| **c == Cmd::Seek(1))
-                .count();
-        }
-        assert_eq!(seeks, 1 + 3);
-        h[1].stick = Vec2::ZERO;
-        run(&mut c, &h, ctx(true));
-        h[1].stick = Vec2::new(-0.9, 0.0);
+        h[RIGHT].stick = Vec2::new(0.0, 1.0);
+        let up = run(&mut c, &h, ctx(true));
+        assert!(matches!(up[..], [Cmd::Volume(d)] if d > 0.0), "{up:?}");
+        h[RIGHT].stick = Vec2::ZERO;
+        h[LEFT].stick = Vec2::new(0.0, -1.0);
+        let down = run(&mut c, &h, ctx(true));
+        assert!(matches!(down[..], [Cmd::Pitch(d)] if d < 0.0), "{down:?}");
+        // Pointing at a menu, up/down scrolls it instead (through the pointer).
         let over = Context {
             over_ui: true,
             ..ctx(true)
         };
-        assert_eq!(run(&mut c, &h, over), vec![Cmd::Page(-1)]);
+        assert_eq!(run(&mut c, &h, over), vec![]);
     }
 
     #[test]
-    fn either_stick_tilts_the_picture() {
+    fn left_grip_and_stick_turn_and_zoom() {
         let mut c = Controls::default();
         let mut h = hands();
-        h[1].stick = Vec2::new(0.0, 1.0);
-        let up = run(&mut c, &h, ctx(true));
+        h[LEFT].squeeze = 1.0;
+        h[LEFT].stick = Vec2::new(0.9, 0.0);
+        let turn = run(&mut c, &h, ctx(true));
         assert!(
-            matches!(up[..], [Cmd::Pitch(d)] if d > 0.0),
-            "right up tilts up: {up:?}"
+            matches!(turn[..], [Cmd::Yaw(d)] if d < 0.0),
+            "right turns it right: {turn:?}"
         );
-        h[1].stick = Vec2::ZERO;
-        h[0].stick = Vec2::new(0.0, -1.0);
-        let down = run(&mut c, &h, ctx(true));
-        assert!(
-            matches!(down[..], [Cmd::Pitch(d)] if d < 0.0),
-            "left down tilts down: {down:?}"
-        );
-    }
-
-    #[test]
-    fn grip_and_stick_change_video_and_zoom() {
-        let mut c = Controls::default();
-        let mut h = hands();
-        h[0].squeeze = 1.0;
-        h[0].stick = Vec2::new(0.9, 0.0);
-        assert_eq!(run(&mut c, &h, ctx(true)), vec![Cmd::Next]);
-        assert_eq!(run(&mut c, &h, ctx(true)), vec![], "once per push");
-        h[0].stick = Vec2::new(0.0, -1.0);
+        h[LEFT].stick = Vec2::new(0.0, -1.0);
         let z = run(&mut c, &h, ctx(true));
         assert!(
             matches!(z[..], [Cmd::Zoom(d)] if d > 0.0),
             "down zooms in: {z:?}"
         );
+        // The right grip + stick does nothing (and does not seek).
+        let mut h = hands();
+        h[RIGHT].squeeze = 1.0;
+        h[RIGHT].stick = Vec2::new(0.9, 0.0);
+        assert_eq!(run(&mut Controls::default(), &h, ctx(true)), vec![]);
     }
 
     #[test]

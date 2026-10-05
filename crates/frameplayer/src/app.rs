@@ -1035,10 +1035,50 @@ impl App {
                     self.apply(Action::SeekRelative(self.settings.seek_step * dir as f64));
                     buzz.push((self.pointer.active, 0.15, 10));
                 }
+                Cmd::Skip(dir) => {
+                    self.apply(Action::SeekRelative(60.0 * dir as f64));
+                    self.ui.toast(if dir > 0 { "+1 min" } else { "−1 min" });
+                    buzz.push((if dir > 0 { 1 } else { 0 }, 0.2, 14));
+                }
                 Cmd::Pitch(d) => {
                     if let Some(p) = &mut self.playback {
                         p.settings.pitch = (p.settings.pitch + d).clamp(-90.0, 90.0);
                         p.settings_dirty = true;
+                    }
+                }
+                Cmd::Yaw(d) => {
+                    if let Some(p) = &mut self.playback {
+                        p.settings.yaw = (p.settings.yaw + d + 180.0).rem_euclid(360.0) - 180.0;
+                        p.settings_dirty = true;
+                    }
+                }
+                Cmd::Volume(d) => {
+                    if let Some(p) = &self.playback {
+                        let v = (p.player.volume() + d).clamp(0.0, 1.5);
+                        self.ui.unmute_volume = None;
+                        self.apply(Action::SetVolume(v));
+                        self.ui.toast(format!("Volume {:.0}%", v * 100.0));
+                    }
+                }
+                Cmd::ToggleMute => {
+                    if let Some(p) = &self.playback {
+                        let vol = p.player.volume();
+                        if vol <= 0.001 {
+                            let v = self.ui.unmute_volume.take().unwrap_or(1.0);
+                            self.apply(Action::SetVolume(v));
+                            self.ui.toast("Sound on");
+                        } else {
+                            self.ui.unmute_volume = Some(vol);
+                            self.apply(Action::SetVolume(0.0));
+                            self.ui.toast("Muted");
+                        }
+                    }
+                }
+                Cmd::ToggleAdjust => {
+                    self.ui.adjust_open = !self.ui.adjust_open;
+                    if self.ui.adjust_open {
+                        self.ui_visible = true;
+                        self.show_browser = false;
                     }
                 }
                 Cmd::Zoom(d) => {

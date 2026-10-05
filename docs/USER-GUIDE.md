@@ -91,24 +91,28 @@ Subtitles: SRT, ASS/SSA, WebVTT, and embedded text or picture subtitles.
 
 ## Controls
 
-The same as DeoVR's defaults on Quest, so muscle memory carries over:
+Each button does one thing: the right hand runs playback, the left hand the
+picture. Play/pause and seeking are under either thumb.
 
-| Control | Action |
-|---|---|
-| A / X (left D-pad down / left) | Play / pause |
-| B / Y (left D-pad up / right) | Back: closes the open panel, then shows the library over the video, then returns to the video |
-| Thumbstick left / right | Seek back / forward 10 s (adjustable; hold to repeat). Pointing at a list: previous / next page |
-| Thumbstick up / down | Tilt the picture up / down (or scroll a menu you point at); volume is on the control bar |
-| Thumbstick press | Reset the image (zoom and drag) |
-| Hold grip + trigger, move | Drag the picture (the dome follows your hand) |
-| Grip + thumbstick right / left | Next / previous video in the list you opened it from |
-| Grip + thumbstick down / up | Zoom in / out |
-| Trigger | Click; on empty space, show or hide the controls |
-| Menu | Library |
-| Both grips | Recenter |
+| Control | Right hand | Left hand |
+|---|---|---|
+| Thumbstick left / right | Seek back / forward 10 s (adjustable; hold to repeat). Pointing at a list: previous / next page | The same |
+| Thumbstick up / down | Volume (or scroll a menu you point at) | Tilt the picture (or scroll a menu you point at) |
+| Thumbstick press | Mute | Reset the picture |
+| A / D-pad down | Play / pause | Play / pause |
+| B / D-pad right | Back: closes the open panel, then shows the library over the video, then returns to the video | (spare) |
+| X / D-pad left | Previous video in the list you opened it from | Adjust panel |
+| Y / D-pad up | Next video | Show or hide the controls |
+| Menu / View | Library | Recenter |
+| Bumper | Forward 1 minute | Back 1 minute |
+| Grip + thumbstick | (nothing) | Left / right turns the picture, up / down zooms in / out |
+| Hold grip + trigger, move | Drag the picture (the dome follows your hand) | The same |
+| Trigger | Click; on empty space, show or hide the controls | The same |
 
-Drags and zoom count as adjustments: save them for that video under ⚙, or
-press the thumbstick to undo them.
+Both grips together also recenter.
+
+Drags, turns, tilts and zoom count as adjustments: save them for that video
+under ⚙, or press the left thumbstick to undo them.
 
 Text fields bring up a keyboard in front of you; you can also type on your
 phone through the web remote.
