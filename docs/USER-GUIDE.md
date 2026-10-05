@@ -111,6 +111,11 @@ picture. Play/pause and seeking are under either thumb.
 
 Both grips together also recenter.
 
+Every button and thumbstick direction above can be changed in Settings ›
+Controller (tap a row, pick an action; Reset to defaults puts this layout
+back). The trigger, grip + trigger drags, both grips and menu paging are
+fixed.
+
 Drags, turns, tilts and zoom count as adjustments: save them for that video
 under ⚙, or press the left thumbstick to undo them.
 

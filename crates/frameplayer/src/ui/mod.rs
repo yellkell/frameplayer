@@ -114,6 +114,7 @@ pub enum Screen {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingsTab {
     Playback,
+    Controller,
     Library,
     Haptics,
     Remote,
@@ -187,10 +188,19 @@ pub enum UpdateStatus {
     Failed(String),
 }
 
+/// A remappable controller input, by hand (see [`crate::bindings`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RemapSlot {
+    Button(usize, crate::bindings::Button),
+    Axis(usize, crate::bindings::Axis),
+}
+
 /// View-local UI state.
 pub struct UiState {
     pub screen: Screen,
     pub settings_tab: SettingsTab,
+    /// The controller input whose choices are open in Settings > Controller.
+    pub remap_open: Option<RemapSlot>,
     pub search: String,
     pub sort: fp_library::Sort,
     pub favorites_only: bool,
@@ -237,6 +247,7 @@ impl Default for UiState {
         UiState {
             screen: Screen::Home,
             settings_tab: SettingsTab::Playback,
+            remap_open: None,
             search: String::new(),
             sort: fp_library::Sort::Added,
             favorites_only: false,
