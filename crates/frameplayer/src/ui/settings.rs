@@ -767,6 +767,7 @@ fn about(ui: &mut egui::Ui, v: &mut View) {
             ("X / Y", "Previous / next video"),
             ("Left D-pad up", "Show or hide the controls"),
             ("Left D-pad left", "Adjust panel"),
+            ("Left D-pad right", "Passthrough on / off"),
             ("Right / left bumper", "Forward / back 1 minute"),
             (
                 "Left grip + thumbstick",

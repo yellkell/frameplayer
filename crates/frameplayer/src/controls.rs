@@ -9,7 +9,7 @@
 //! | Thumbstick up / down | Volume | Tilt the picture |
 //! | Thumbstick press | Mute | Reset the picture |
 //! | A / D-pad down | Play / pause | Play / pause |
-//! | B / D-pad right | Back | (spare) |
+//! | B / D-pad right | Back | Passthrough on / off |
 //! | X / D-pad left | Previous video | Adjust panel |
 //! | Y / D-pad up | Next video | Show or hide the controls |
 //! | Menu / View | Library | Recenter |
@@ -56,6 +56,7 @@ pub enum Cmd {
     Recenter,
     ToggleUi,
     ToggleAdjust,
+    TogglePassthrough,
     /// Page the pointed-at list: -1 back, +1 forward.
     Page(i32),
 }
@@ -194,6 +195,9 @@ impl Controls {
         if pressed(LEFT, |h| h.west) && playing {
             out.push(Cmd::ToggleAdjust);
         }
+        if pressed(LEFT, |h| h.east) {
+            out.push(Cmd::TogglePassthrough);
+        }
         if pressed(LEFT, |h| h.menu) {
             out.push(Cmd::Recenter);
         }
@@ -320,7 +324,7 @@ mod tests {
     #[test]
     fn every_button_has_one_job() {
         type Set = fn(&mut Hand, bool);
-        let cases: [(usize, Set, Cmd); 13] = [
+        let cases: [(usize, Set, Cmd); 14] = [
             (RIGHT, |h, v| h.south = v, Cmd::TogglePause),
             (LEFT, |h, v| h.south = v, Cmd::TogglePause),
             (RIGHT, |h, v| h.east = v, Cmd::Back),
@@ -331,6 +335,7 @@ mod tests {
             (RIGHT, |h, v| h.stick_click = v, Cmd::ToggleMute),
             (LEFT, |h, v| h.north = v, Cmd::ToggleUi),
             (LEFT, |h, v| h.west = v, Cmd::ToggleAdjust),
+            (LEFT, |h, v| h.east = v, Cmd::TogglePassthrough),
             (LEFT, |h, v| h.menu = v, Cmd::Recenter),
             (LEFT, |h, v| h.shoulder = v, Cmd::Skip(-1)),
             (LEFT, |h, v| h.stick_click = v, Cmd::ResetImage),
@@ -338,12 +343,16 @@ mod tests {
         for (hand, set, want) in cases {
             assert_eq!(press(hand, set, true), vec![want], "{want:?}");
         }
-        assert_eq!(press(LEFT, |h, v| h.east = v, true), vec![], "spare");
         // In the library only navigation works.
         assert_eq!(press(RIGHT, |h, v| h.east = v, false), vec![Cmd::Back]);
         assert_eq!(press(RIGHT, |h, v| h.menu = v, false), vec![Cmd::Menu]);
         assert_eq!(press(RIGHT, |h, v| h.south = v, false), vec![]);
         assert_eq!(press(LEFT, |h, v| h.shoulder = v, false), vec![]);
+        assert_eq!(
+            press(LEFT, |h, v| h.east = v, false),
+            vec![Cmd::TogglePassthrough],
+            "passthrough works in the library too"
+        );
     }
 
     #[test]

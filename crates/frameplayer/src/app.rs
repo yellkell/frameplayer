@@ -1074,6 +1074,23 @@ impl App {
                         }
                     }
                 }
+                Cmd::TogglePassthrough => {
+                    if !input.passthrough_available {
+                        self.ui.toast("Passthrough isn't available");
+                    } else {
+                        self.apply(Action::TogglePassthrough);
+                        let flat_or_none = self
+                            .playback
+                            .as_ref()
+                            .is_none_or(|p| p.format.projection == Projection::Flat);
+                        self.ui
+                            .toast(match (self.settings.passthrough, flat_or_none) {
+                                (false, _) => "Passthrough off",
+                                (true, true) => "Passthrough on",
+                                (true, false) => "Passthrough on: shows with flat videos",
+                            });
+                    }
+                }
                 Cmd::ToggleAdjust => {
                     self.ui.adjust_open = !self.ui.adjust_open;
                     if self.ui.adjust_open {
