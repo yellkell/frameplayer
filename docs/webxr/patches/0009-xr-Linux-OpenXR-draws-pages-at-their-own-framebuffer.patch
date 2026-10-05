@@ -1,0 +1,410 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Mon, 5 Oct 2026 14:30:00 +0000
+Subject: [PATCH 9/13] xr: Linux OpenXR draws pages at their own framebuffer
+ size
+
+A page that asks for XRWebGLLayer framebufferScaleFactor other than the
+default (Down asks for 0.82) stayed black on Linux: Blink attaches the
+shared image to a framebuffer whose depth buffer has the page's
+framebuffer size, but the Vulkan binding always made its shared images
+the swapchain's size, so the framebuffer was incomplete ("Attachments
+are not all the same size") and every draw failed.
+
+- The intermediate images, and the SharedImages made from them, have the
+  page's framebuffer size (the layer's transfer size, which
+  UpdateLayerBounds sets), and ResizeSharedBuffer replaces only the slot
+  it is given instead of all of them.
+- OnSwapchainImageReady resizes the slot the page draws into next, as
+  the Android binding does, so slots follow a new size as they come up.
+- RenderLayer scales an image of another size to fill the swapchain image
+  with vkCmdBlitImage (linear filter), as Android draws a full-viewport
+  quad; same-size images are still copied with vkCmdCopyImage.
+  gpu::VulkanFunctionPointers has no vkCmdBlitImage, so the context
+  resolves it with vkGetDeviceProcAddr.
+
+Touches only device/vr/openxr/linux, which no other patch changes.
+---
+ .../linux/openxr_graphics_binding_vulkan.cc   | 169 +++++++++++-------
+ .../linux/openxr_graphics_binding_vulkan.h    |  12 ++
+ .../vr/openxr/linux/openxr_vulkan_context.cc  |  43 ++++-
+ .../vr/openxr/linux/openxr_vulkan_context.h   |  13 +-
+ 4 files changed, 165 insertions(+), 72 deletions(-)
+
+diff --git a/device/vr/openxr/linux/openxr_graphics_binding_vulkan.cc b/device/vr/openxr/linux/openxr_graphics_binding_vulkan.cc
+index 44e4cdeca4..2803807fe7 100644
+--- a/device/vr/openxr/linux/openxr_graphics_binding_vulkan.cc
++++ b/device/vr/openxr/linux/openxr_graphics_binding_vulkan.cc
+@@ -41,6 +41,19 @@ constexpr VkFormat kSupportedFormats[] = {
+     VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_SRGB,
+     VK_FORMAT_R8G8B8A8_UNORM};
+ 
++constexpr VkImageUsageFlags kIntermediateUsage =
++    VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
++    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
++
++// The size the page draws at: the framebuffer size it reported through
++// UpdateLayerBounds, which is not the swapchain's when it asked for a
++// framebufferScaleFactor other than the default. Until it reports one, the
++// swapchain's.
++gfx::Size GetPageImageSize(OpenXrCompositionLayer& layer) {
++  const gfx::Size size = layer.GetTransferSize();
++  return size.IsEmpty() ? layer.GetSwapchainImageSize() : size;
++}
++
+ }  // namespace
+ 
+ // static
+@@ -213,13 +226,14 @@ void OpenXrGraphicsBindingVulkan::CreateSharedImages(
+     return;
+   }
+ 
+-  const gfx::Size size = layer.GetSwapchainImageSize();
+-  DVLOG(1) << __func__ << ": SwapchainImageSize=" << size.ToString()
+-           << " TransferSize=" << layer.GetTransferSize().ToString();
+-  if (size.IsEmpty()) {
++  if (layer.GetSwapchainImageSize().IsEmpty()) {
+     DLOG(ERROR) << __func__ << ": Swapchain image size is empty";
+     return;
+   }
++  const gfx::Size size = GetPageImageSize(layer);
++  DVLOG(1) << __func__
++           << ": SwapchainImageSize=" << layer.GetSwapchainImageSize().ToString()
++           << " page image size=" << size.ToString();
+   // GetSwapchainFormat() runs during swapchain creation, which always precedes
+   // this, and only leaves swapchain_format_ undefined by returning 0 -- which
+   // fails swapchain creation, so we would not be here.
+@@ -228,6 +242,41 @@ void OpenXrGraphicsBindingVulkan::CreateSharedImages(
+   // Destroy any previously created intermediate images.
+   DestroyIntermediateImages();
+ 
++  auto swapchain_images = layer.GetSwapchainImages();
++  intermediate_images_.resize(swapchain_images.size());
++
++  // Preferred path: let the GPU process allocate via Ozone/GBM, which applies
++  // the driver's modifier validation. Fallback: allocate LINEAR images in
++  // Vulkan and export their DMA-BUFs; the only path when no GBM device exists.
++  for (bool use_gbm : {true, false}) {
++    use_gbm_ = use_gbm;
++    size_t i = 0;
++    while (i < swapchain_images.size() &&
++           CreateIntermediateImage(layer, i, size, sii)) {
++      ++i;
++    }
++    if (i == swapchain_images.size()) {
++      return;
++    }
++    // All slots must share one allocation path; restart with LINEAR.
++    DVLOG(1) << __func__ << ": slot " << i << " unusable via "
++             << (use_gbm ? "GBM" : "LINEAR export");
++    DestroyIntermediateImages();
++    intermediate_images_.resize(swapchain_images.size());
++    for (size_t j = 0; j < i; ++j) {
++      swapchain_images[j].shared_image.reset();
++      swapchain_images[j].sync_token = gpu::SyncToken();
++    }
++  }
++  DLOG(ERROR) << __func__ << ": Failed to create intermediate images";
++  DestroyIntermediateImages();
++}
++
++bool OpenXrGraphicsBindingVulkan::CreateIntermediateImage(
++    OpenXrCompositionLayer& layer,
++    size_t index,
++    const gfx::Size& size,
++    gpu::SharedImageInterface* sii) {
+   // Match the SharedImage channel order to the negotiated swapchain format so
+   // colors are not swizzled. Both SRGB and UNORM BGRA map to kBGRA_8888.
+   const viz::SharedImageFormat si_format =
+@@ -241,63 +290,31 @@ void OpenXrGraphicsBindingVulkan::CreateSharedImages(
+   const gpu::SharedImageInfo si_info{si_format, size,
+                                      gfx::ColorSpace::CreateSRGB(),
+                                      shared_image_usage, "OpenXrVulkanBinding"};
+-  constexpr VkImageUsageFlags kIntermediateUsage =
+-      VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+-      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+ 
+-  auto swapchain_images = layer.GetSwapchainImages();
+-  intermediate_images_.resize(swapchain_images.size());
+-
+-  // Preferred path: let the GPU process allocate via Ozone/GBM, which applies
+-  // the driver's modifier validation. SCANOUT usage forces a renderable
+-  // allocation; the returned DMA-BUF is imported for the RenderLayer blit.
+-  bool use_gbm = true;
+-  for (size_t i = 0; i < swapchain_images.size(); ++i) {
+-    scoped_refptr<gpu::ClientSharedImage> client_si =
+-        ImportGbmImageAsSharedImage(sii, si_info, size, swapchain_format_,
+-                                    kIntermediateUsage,
+-                                    &intermediate_images_[i]);
++  OpenXrVulkanContext::IntermediateImage& image = intermediate_images_[index];
++  scoped_refptr<gpu::ClientSharedImage> client_si;
++  if (use_gbm_) {
++    // SCANOUT usage forces a renderable allocation; the returned DMA-BUF is
++    // imported for the RenderLayer blit.
++    client_si = ImportGbmImageAsSharedImage(
++        sii, si_info, size, swapchain_format_, kIntermediateUsage, &image);
++  } else if (vulkan_->CreateExportableImage(size, swapchain_format_,
++                                            kIntermediateUsage, &image)) {
++    // No SHARED_IMAGE_USAGE_SCANOUT here: no backing factory satisfies SCANOUT
++    // for a modifier-0 NativePixmap.
++    client_si = ExportLinearImageAsSharedImage(sii, si_info, image);
+     if (!client_si) {
+-      // All slots must share one allocation path; restart with LINEAR.
+-      DVLOG(1) << __func__ << ": slot " << i
+-               << " GBM path unusable; falling back to LINEAR export";
+-      DestroyIntermediateImages();
+-      intermediate_images_.resize(swapchain_images.size());
+-      for (size_t j = 0; j < i; ++j) {
+-        swapchain_images[j].shared_image.reset();
+-        swapchain_images[j].sync_token = gpu::SyncToken();
+-      }
+-      use_gbm = false;
+-      break;
++      vulkan_->DestroyIntermediateImage(image);
+     }
+-    DVLOG(1) << __func__ << ": slot " << i << " via GBM native pixmap";
+-    swapchain_images[i].shared_image = std::move(client_si);
+-    swapchain_images[i].sync_token = sii->GenVerifiedSyncToken();
+   }
+-  if (use_gbm) {
+-    return;
+-  }
+-
+-  // Fallback: allocate LINEAR images in Vulkan and export their DMA-BUFs; the
+-  // only path when no GBM device exists. No SHARED_IMAGE_USAGE_SCANOUT here:
+-  // no backing factory satisfies SCANOUT for a modifier-0 NativePixmap.
+-  for (size_t i = 0; i < swapchain_images.size(); ++i) {
+-    if (!vulkan_->CreateExportableImage(size, swapchain_format_,
+-                                        kIntermediateUsage,
+-                                        &intermediate_images_[i])) {
+-      DLOG(ERROR) << "Failed to create intermediate image " << i;
+-      DestroyIntermediateImages();
+-      return;
+-    }
+-    swapchain_images[i].shared_image =
+-        ExportLinearImageAsSharedImage(sii, si_info, intermediate_images_[i]);
+-    if (!swapchain_images[i].shared_image) {
+-      DLOG(ERROR) << "LINEAR export failed for slot " << i;
+-      DestroyIntermediateImages();
+-      return;
+-    }
+-    swapchain_images[i].sync_token = sii->GenVerifiedSyncToken();
++  if (!client_si) {
++    image = {};
++    return false;
+   }
++  OpenXrSwapchainInfo& swap_chain_info = layer.GetSwapchainImages()[index];
++  swap_chain_info.shared_image = std::move(client_si);
++  swap_chain_info.sync_token = sii->GenVerifiedSyncToken();
++  return true;
+ }
+ 
+ bool OpenXrGraphicsBindingVulkan::WaitOnFence(OpenXrCompositionLayer& layer,
+@@ -368,7 +385,11 @@ bool OpenXrGraphicsBindingVulkan::SetOverlayTexture(
+ void OpenXrGraphicsBindingVulkan::OnSwapchainImageReady(
+     OpenXrCompositionLayer& layer,
+     gpu::SharedImageInterface* sii) {
+-  // No-op for direct-write: the active swapchain image is already ready.
++  // Bring the slot the page draws into next to its framebuffer size, as the
++  // Android binding does; the others follow as they come up.
++  if (OpenXrSwapchainInfo* swap_chain_info = layer.GetActiveSwapchainImage()) {
++    ResizeSharedBuffer(layer, *swap_chain_info, sii);
++  }
+ }
+ 
+ bool OpenXrGraphicsBindingVulkan::SupportsLayers() const {
+@@ -379,9 +400,37 @@ void OpenXrGraphicsBindingVulkan::ResizeSharedBuffer(
+     OpenXrCompositionLayer& layer,
+     OpenXrSwapchainInfo& swap_chain_info,
+     gpu::SharedImageInterface* sii) {
+-  // Re-create all shared images for the layer at the new size.
+-  DestroyIntermediateImages();
+-  CreateSharedImages(layer, sii);
++  if (!vulkan_ || !vulkan_->has_external_memory_fd() ||
++      intermediate_images_.empty()) {
++    return;
++  }
++  base::span<OpenXrSwapchainInfo> swapchain_images = layer.GetSwapchainImages();
++  const size_t index =
++      static_cast<size_t>(&swap_chain_info - swapchain_images.data());
++  if (index >= intermediate_images_.size()) {
++    return;
++  }
++  // Blink attaches the shared image to a framebuffer whose depth buffer has
++  // the page's framebuffer size; at any other size the framebuffer is
++  // incomplete and the page draws nothing (framebufferScaleFactor 0.82: black).
++  const gfx::Size size = GetPageImageSize(layer);
++  if (intermediate_images_[index].size == size) {
++    return;
++  }
++
++  // Replace only this slot. Its previous image is idle: CopyToSwapchainImage
++  // waited for the last blit from it.
++  if (swap_chain_info.shared_image) {
++    swap_chain_info.shared_image->UpdateDestructionSyncToken(
++        swap_chain_info.sync_token);
++    swap_chain_info.shared_image.reset();
++  }
++  vulkan_->DestroyIntermediateImage(intermediate_images_[index]);
++  intermediate_images_[index] = {};
++  if (!CreateIntermediateImage(layer, index, size, sii)) {
++    DLOG(ERROR) << __func__ << ": no " << size.ToString() << " image for slot "
++                << index;
++  }
+ }
+ 
+ bool OpenXrGraphicsBindingVulkan::ShouldFlipSubmittedImage(
+diff --git a/device/vr/openxr/linux/openxr_graphics_binding_vulkan.h b/device/vr/openxr/linux/openxr_graphics_binding_vulkan.h
+index 6d6ad6c2de..eff79866b5 100644
+--- a/device/vr/openxr/linux/openxr_graphics_binding_vulkan.h
++++ b/device/vr/openxr/linux/openxr_graphics_binding_vulkan.h
+@@ -91,6 +91,14 @@ class DEVICE_VR_EXPORT OpenXrGraphicsBindingVulkan
+       const gpu::SharedImageInfo& si_info,
+       const OpenXrVulkanContext::IntermediateImage& image);
+ 
++  // Allocates intermediate image `index` of `layer` at `size` and hands it to
++  // the swapchain slot as a SharedImage, through GBM if `use_gbm_` else as a
++  // LINEAR export. Returns false, leaving the slot empty, on failure.
++  bool CreateIntermediateImage(OpenXrCompositionLayer& layer,
++                               size_t index,
++                               const gfx::Size& size,
++                               gpu::SharedImageInterface* sii);
++
+   // Destroys all intermediate images and frees their Vulkan memory.
+   void DestroyIntermediateImages();
+ 
+@@ -104,6 +112,10 @@ class DEVICE_VR_EXPORT OpenXrGraphicsBindingVulkan
+   // The format negotiated by GetSwapchainFormat(), cached so that
+   // CreateSharedImages() creates matching intermediate images.
+   mutable VkFormat swapchain_format_ = VK_FORMAT_UNDEFINED;
++
++  // Whether the intermediate images come from GBM (else LINEAR exports); all
++  // of them share one allocation path.
++  bool use_gbm_ = true;
+ };
+ 
+ }  // namespace device
+diff --git a/device/vr/openxr/linux/openxr_vulkan_context.cc b/device/vr/openxr/linux/openxr_vulkan_context.cc
+index abad727041..7180d8ab3a 100644
+--- a/device/vr/openxr/linux/openxr_vulkan_context.cc
++++ b/device/vr/openxr/linux/openxr_vulkan_context.cc
+@@ -295,6 +295,8 @@ bool OpenXrVulkanContext::Initialize(XrInstance instance, XrSystemId system) {
+     DestroyVulkanState();
+     return false;
+   }
++  vk_cmd_blit_image_ = reinterpret_cast<PFN_vkCmdBlitImage>(
++      vkGetDeviceProcAddr(vk_device_, "vkCmdBlitImage"));
+ 
+   // --- Step 8: Retrieve the VkQueue and create a command pool ---------------
+   // Only needed when has_external_memory_fd_ is true; without it the copy and
+@@ -447,6 +449,7 @@ bool OpenXrVulkanContext::CreateExportableImage(const gfx::Size& size,
+   out_image->stride = static_cast<uint32_t>(layout.rowPitch);
+   out_image->offset = static_cast<uint32_t>(layout.offset);
+   out_image->allocation_size = layout.size;
++  out_image->size = size;
+   return true;
+ }
+ 
+@@ -587,6 +590,7 @@ bool OpenXrVulkanContext::ImportDmaBufImage(
+   out_image->stride = handle.planes[0].stride;
+   out_image->offset = handle.planes[0].offset;
+   out_image->allocation_size = mem_reqs.size;
++  out_image->size = size;
+   return true;
+ }
+ 
+@@ -670,7 +674,7 @@ bool OpenXrVulkanContext::WaitOnSyncFd(int fence_fd) {
+ 
+ bool OpenXrVulkanContext::CopyToSwapchainImage(IntermediateImage& src_image,
+                                                VkImage dst,
+-                                               const gfx::Size& size) {
++                                               const gfx::Size& dst_size) {
+   VkImage src = src_image.image;
+   vkResetCommandBuffer(vk_command_buffer_, 0);
+ 
+@@ -712,14 +716,35 @@ bool OpenXrVulkanContext::CopyToSwapchainImage(IntermediateImage& src_image,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                        nullptr, 2, pre_copy_barriers);
+ 
+-  // Copy the intermediate image to the swapchain image.
+-  VkImageCopy region{};
+-  region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+-  region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+-  region.extent = {static_cast<uint32_t>(size.width()),
+-                   static_cast<uint32_t>(size.height()), 1};
+-  vkCmdCopyImage(vk_command_buffer_, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+-                 dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
++  if (src_image.size == dst_size || !vk_cmd_blit_image_) {
++    // Copy the intermediate image to the swapchain image.
++    VkImageCopy region{};
++    region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
++    region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
++    region.extent = {
++        static_cast<uint32_t>(std::min(src_image.size.width(),
++                                       dst_size.width())),
++        static_cast<uint32_t>(std::min(src_image.size.height(),
++                                       dst_size.height())),
++        1};
++    vkCmdCopyImage(vk_command_buffer_, src,
++                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst,
++                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
++  } else {
++    // The page drew at its own framebuffer size (framebufferScaleFactor) and
++    // the projection views cover the whole swapchain image, so scale it to
++    // fill, as the Android binding does by drawing a full-viewport quad.
++    VkImageBlit region{};
++    region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
++    region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
++    region.srcOffsets[1] = {src_image.size.width(), src_image.size.height(),
++                            1};
++    region.dstOffsets[1] = {dst_size.width(), dst_size.height(), 1};
++    vk_cmd_blit_image_(vk_command_buffer_, src,
++                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst,
++                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
++                       VK_FILTER_LINEAR);
++  }
+ 
+   {
+     // Transition dst back: TRANSFER_DST_OPTIMAL -> COLOR_ATTACHMENT_OPTIMAL.
+diff --git a/device/vr/openxr/linux/openxr_vulkan_context.h b/device/vr/openxr/linux/openxr_vulkan_context.h
+index 2d3f05bca5..32c9101c02 100644
+--- a/device/vr/openxr/linux/openxr_vulkan_context.h
++++ b/device/vr/openxr/linux/openxr_vulkan_context.h
+@@ -32,6 +32,9 @@ class DEVICE_VR_EXPORT OpenXrVulkanContext {
+     uint32_t stride = 0;           // Row pitch from VkSubresourceLayout
+     uint32_t offset = 0;           // Plane offset
+     uint64_t allocation_size = 0;  // Total allocation size
++    // Size the image was created with: the page's framebuffer size, smaller
++    // than the swapchain's when it asked for a framebufferScaleFactor below 1.
++    gfx::Size size;
+     // Tracks the current Vulkan image layout so CopyToSwapchainImage can
+     // supply the correct oldLayout in pipeline barriers across frames.
+     VkImageLayout current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+@@ -91,11 +94,12 @@ class DEVICE_VR_EXPORT OpenXrVulkanContext {
+   bool WaitOnSyncFd(int fence_fd);
+ 
+   // Records and submits the src -> dst blit and waits for it. dst must be an
+-  // OpenXR swapchain image: it is left in COLOR_ATTACHMENT_OPTIMAL as
+-  // xrReleaseSwapchainImage expects; src returns to GENERAL for the next frame.
++  // OpenXR swapchain image of `dst_size`: it is left in
++  // COLOR_ATTACHMENT_OPTIMAL as xrReleaseSwapchainImage expects; src returns
++  // to GENERAL for the next frame. A src of another size is scaled to fill dst.
+   bool CopyToSwapchainImage(IntermediateImage& src,
+                             VkImage dst,
+-                            const gfx::Size& size);
++                            const gfx::Size& dst_size);
+ 
+  private:
+   // Cleans up the command pool and command buffer.
+@@ -130,6 +134,9 @@ class DEVICE_VR_EXPORT OpenXrVulkanContext {
+   // Reusable fence for GPU-synchronized submit/wait. Replaces per-call
+   // vkQueueWaitIdle, scoping the CPU stall to the specific submit.
+   VkFence vk_frame_fence_ = VK_NULL_HANDLE;
++  // vkCmdBlitImage, for pages drawing at another size than the swapchain's.
++  // gpu::VulkanFunctionPointers has no entry for it, so it is resolved here.
++  PFN_vkCmdBlitImage vk_cmd_blit_image_ = nullptr;
+ 
+   // Maximum texture dimensions queried from VkPhysicalDeviceLimits.
+   // Defaults to 4096 until Initialize() queries the real value.
+-- 
+2.43.0

@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Mon, 5 Oct 2026 16:00:00 +0000
+Subject: [PATCH 13/13] xr: 2x antialiasing for WebXR on Linux arm64
+
+XRWebGLDrawingBuffer uses 2 samples instead of 4 on Android to leave
+fill-rate-bound pages more room. Linux arm64 headsets (the Steam Frame:
+Adreno 750) are the same kind of GPU: Fire Fight 2 needed 19 ms of GPU
+per frame with 4 samples, over the 18.5 ms of two 108 Hz refreshes, and
+15 ms with 2.
+
+Applies on top of 0005.
+---
+diff --git a/third_party/blink/renderer/platform/graphics/gpu/xr_webgl_drawing_buffer.cc b/third_party/blink/renderer/platform/graphics/gpu/xr_webgl_drawing_buffer.cc
+index ef75b15426..d01b0a8a16 100644
+--- a/third_party/blink/renderer/platform/graphics/gpu/xr_webgl_drawing_buffer.cc
++++ b/third_party/blink/renderer/platform/graphics/gpu/xr_webgl_drawing_buffer.cc
+@@ -203,9 +203,10 @@ bool XRWebGLDrawingBuffer::Initialize(const gfx::Size& size,
+   DVLOG(2) << __func__
+            << ": anti_aliasing_mode_=" << static_cast<int>(anti_aliasing_mode_);
+ 
+-#if BUILDFLAG(IS_ANDROID)
+-  // On Android devices use a smaller number of samples to provide more breathing
+-  // room for fill-rate-bound applications.
++#if BUILDFLAG(IS_ANDROID) || (BUILDFLAG(IS_LINUX) && defined(ARCH_CPU_ARM64))
++  // On Android devices, and Linux arm64 headsets such as the Steam Frame, use a
++  // smaller number of samples to provide more breathing room for
++  // fill-rate-bound applications.
+   sample_count_ = std::min(2, max_sample_count);
+ #else
+   sample_count_ = std::min(4, max_sample_count);
+-- 
+2.43.0

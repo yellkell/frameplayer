@@ -253,7 +253,60 @@ frequency); `reset()` stops it. The effect resolves `"complete"` after its
 duration, or `"preempted"` when another effect or `reset()` replaces it.
 `gamepad.hapticActuators[0].pulse()` (the older extension) is not
 implemented. Run with `--vmodule=openxr_input_helper=1` to log each
-`xrApplyHapticFeedback` result.
+`xrApplyHapticFeedback` result. Patch 0012 scales every amplitude by 0.35:
+Frame controllers vibrate much harder than Quest's at the same value, so
+games tuned on Quest felt heavy. `CHROMIUM_XR_HAPTICS_SCALE` (0 to 1) in the
+browser's environment overrides it.
+
+### Games other than Fish & Chips (2026-10-05): patches 0009-0013
+
+Measured on the headset with DevTools (frame times and WebGL timer queries
+from the page) and SteamVR stereo screenshots. Down and Fire Fight 2 are
+IWSDK 0.4.2 games from yellkell.com/vrmenu that run well on Quest 3.
+
+- **Down was black: patch 0009.** It asks for `framebufferScaleFactor: 0.82`.
+  The Vulkan binding made its shared images the swapchain's size, Blink's
+  depth buffer had the page's size, and every draw failed ("Attachments are
+  not all the same size"). Shared images now have the page's framebuffer
+  size, and the binding scales them into the swapchain with `vkCmdBlitImage`.
+- **No antialiasing anywhere: patch 0010.** Chromium offers it only when the
+  runtime's `maxSwapchainSampleCount` is above 1; SteamVR reports 1. That
+  limit doesn't apply on Linux, where Blink resolves into its own SharedImage.
+  Patch 0013 uses 2 samples on Linux arm64, as Android does.
+- **Fire Fight 2 was laggy: fill rate, and no overlap.** Its script takes
+  3-4 ms a frame, its GPU work 19 ms at 2160x2160 per eye. With no GPU fence
+  (ANGLE on desktop OpenGL over zink, the default) the render loop
+  `glFinish`es every frame, and the Vulkan binding then waited on the CPU
+  twice more, so a frame cost script + GPU time. Patch 0011 removes the
+  binding's waits; the launcher puts ANGLE on Vulkan, which has the fence; and
+  it now defaults to SteamVR's 1728 per eye instead of 2160. Copies that are
+  no longer waited for must still finish before `xrDestroySwapchain`: one
+  that didn't faulted the GPU when a session ended (kernel `gpu fault ...
+  dir=WRITE`), every GL context was lost and Chromium blocked WebGL for the
+  sites. `OnSwapchainDestroying()` waits for them.
+- **Antialiased pages were black on ANGLE's Vulkan backend.** Blink's
+  implicit resolve (`GL_EXT_multisampled_render_to_texture`) never reached
+  the headset. The launcher disables those extensions, so Blink resolves
+  with a blit.
+
+Fire Fight 2 with all of it: a steady 54 fps (half of 108 Hz, p99 frame
+18.9 ms, GPU 15 ms). Down: 108 fps, GPU 4 ms. Fish & Chips renders as before.
+
+| Fire Fight 2, 108 Hz | GPU per frame | Frame rate |
+|---|---|---|
+| 2160, no AA, zink (before) | 19 ms | 36-38 fps |
+| 1728, no AA, zink | 11 ms | 53 fps |
+| 1728, 4x AA, zink | 17 ms | 38 fps |
+| 1728, 4x AA, Vulkan, 0011 | 19 ms | 47 fps |
+| 1728, 2x AA, Vulkan, 0011 | 15 ms | 54 fps |
+
+Patches 0011, 0012 and 0013 build on 0009, 0008 and 0005; the build script's
+one-by-one `git apply --check` doesn't handle patches that stack (it already
+didn't for 0004, 0006 and 0008).
+
+The launcher reads extra Chromium flags from `~/.config/chromium-xr-frame/flags`
+(one per line) for experiments, e.g. `--use-angle=gl` and
+`--enable-features=OpenXR` to go back to zink.
 
 ## 9. What this does not solve
 
