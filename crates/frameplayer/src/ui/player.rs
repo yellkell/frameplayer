@@ -491,8 +491,14 @@ pub fn adjust_panel(ctx: &egui::Context, v: &mut View) {
                                 v.actions.push(Action::SetFormat(None));
                             }
                             for (label, f) in format_choices() {
-                                if widgets::chip(ui, label, user && pb.format == f).clicked() {
-                                    v.actions.push(Action::SetFormat(Some(f)));
+                                // The chips set the layout; a packed mask stays.
+                                if widgets::chip(ui, label, user && pb.format.same_layout(&f))
+                                    .clicked()
+                                {
+                                    v.actions.push(Action::SetFormat(Some(VideoFormat {
+                                        alpha_packed: pb.format.alpha_packed,
+                                        ..f
+                                    })));
                                 }
                             }
                         });
@@ -630,7 +636,7 @@ pub fn adjust_panel(ctx: &egui::Context, v: &mut View) {
                             r.slider("Sharpen", None, &mut s.sharpen, 0.0..=1.0, 0.0, "", 2);
                         });
                     }
-                    4 => chroma_tab(ui, s, v.passthrough_available),
+                    4 => chroma_tab(ui, s, pb.format, v.passthrough_available, v.actions),
                     5 => audio_and_text(ui, pb, v.actions),
                     _ => haptics_tab(ui, pb.script_count, v.settings, v.devices),
                 }
@@ -695,11 +701,30 @@ const KEY_COLORS: [(&str, [f32; 3]); 3] = [
     ("Magenta", [1.0, 0.0, 1.0]),
 ];
 
-/// Passthrough tab: chroma key, so a video's green or blue background turns
-/// see-through and the room shows behind it (saved per video).
-fn chroma_tab(ui: &mut egui::Ui, s: &mut ViewSettings, passthrough_available: bool) {
+/// Passthrough tab: the video's own packed mask (`_alpha` videos) or a
+/// chroma key, so the room shows where the video's background was (saved per
+/// video).
+fn chroma_tab(
+    ui: &mut egui::Ui,
+    s: &mut ViewSettings,
+    format: VideoFormat,
+    passthrough_available: bool,
+    actions: &mut Vec<Action>,
+) {
     let d = ViewSettings::default();
     widgets::rows(ui, |r| {
+        let mut packed = format.alpha_packed;
+        let desc = if packed && format.alpha_pack_scale().is_none() {
+            "Only side-by-side videos can carry a mask: set the format to a side-by-side one."
+        } else {
+            "For passthrough videos that carry a see-through mask, like SLR's. On by itself              when the file name has _alpha in it."
+        };
+        if r.switch("Use the video's mask", Some(desc), &mut packed) {
+            actions.push(Action::SetFormat(Some(VideoFormat {
+                alpha_packed: packed,
+                ..format
+            })));
+        }
         r.switch(
             "Remove the background",
             Some(if passthrough_available {

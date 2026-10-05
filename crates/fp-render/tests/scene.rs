@@ -130,6 +130,60 @@ fn chroma_key_makes_the_green_screen_see_through() {
 }
 
 #[test]
+fn alpha_packed_mask_cuts_out_each_eye() {
+    let Some((mut r, mut e)) = setup() else {
+        return;
+    };
+    // SLR-style side-by-side fisheye: a blue picture in each eye, and in the
+    // red channel outside the circles each eye's mask scaled to 0.4, the left
+    // half's centred on the top middle, the right half's on the corner. The
+    // masks keep the right half of each eye (eye u > 0.5): frame x in
+    // (0.5, 0.6] and (0, 0.1], at the top and bottom edges.
+    let f = frame(512, 256, |u, v| {
+        if v < 0.15 || v > 0.85 {
+            if (u > 0.5 && u <= 0.6) || u <= 0.1 {
+                [255, 0, 0]
+            } else {
+                [0, 0, 0]
+            }
+        } else {
+            [20, 20, 230]
+        }
+    });
+    let mut p = params(
+        Projection::fisheye(180.0),
+        StereoLayout::SideBySide,
+        ViewSettings::default(),
+    );
+    p.format.alpha_packed = true;
+    p.background = [0.0; 4];
+    let (cut, kept) = ((SIZE / 4, SIZE / 2), (3 * SIZE / 4, SIZE / 2));
+    let eyes = render(&mut r, &mut e, Some(&f), &p, &[]);
+    for (i, img) in eyes.iter().enumerate() {
+        assert!(
+            alpha(img, cut.0, cut.1) < 10,
+            "eye {i}: masked out, alpha {}",
+            alpha(img, cut.0, cut.1)
+        );
+        assert!(
+            alpha(img, kept.0, kept.1) > 245,
+            "eye {i}: kept, alpha {}",
+            alpha(img, kept.0, kept.1)
+        );
+        assert!(
+            is_blue(px(img, kept.0, kept.1)),
+            "eye {i}: picture colour {:?}",
+            px(img, kept.0, kept.1)
+        );
+    }
+
+    // Without the flag the mask is ignored.
+    p.format.alpha_packed = false;
+    let [l, _] = render(&mut r, &mut e, Some(&f), &p, &[]);
+    assert!(alpha(&l, cut.0, cut.1) > 245);
+}
+
+#[test]
 fn side_by_side_and_top_bottom_pick_each_eye() {
     let Some((mut r, mut e)) = setup() else {
         return;

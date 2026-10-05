@@ -195,7 +195,12 @@ pub(crate) fn build(
         ),
         bg_color: Vec4::from(video.background),
         key: Vec4::new(kc.x, kc.y, s.key_similarity, s.key_smoothness),
-        key2: Vec4::new(s.key_spill, s.chroma_key as u32 as f32, 0.0, 0.0),
+        key2: Vec4::new(
+            s.key_spill,
+            s.chroma_key as u32 as f32,
+            video.format.alpha_pack_scale().unwrap_or(0.0),
+            0.0,
+        ),
     }
 }
 

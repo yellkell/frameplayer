@@ -88,7 +88,17 @@ pub struct VideoFormat {
     /// The file packs the right eye first (`_RL`, `_BT`).
     #[serde(default)]
     pub eyes_swapped: bool,
+    /// A passthrough video carrying its own see-through mask (`_ALPHA`, as
+    /// SLR's): each eye's mask, scaled to [`ALPHA_PACK_SCALE`], sits in the
+    /// red channel outside the fisheye circles of a side-by-side frame.
+    #[serde(default)]
+    pub alpha_packed: bool,
 }
+
+/// Size of an alpha-packed video's masks relative to the eye they belong
+/// to. The left half's mask is centred on the frame's top middle, the right
+/// half's on its corner (wrapping round the edges).
+pub const ALPHA_PACK_SCALE: f32 = 0.4;
 
 impl Default for VideoFormat {
     fn default() -> Self {
@@ -96,6 +106,7 @@ impl Default for VideoFormat {
             projection: Projection::Flat,
             stereo: StereoLayout::Mono,
             eyes_swapped: false,
+            alpha_packed: false,
         }
     }
 }
@@ -109,6 +120,7 @@ impl VideoFormat {
         projection: Projection::EQUIRECT_180,
         stereo: StereoLayout::SideBySide,
         eyes_swapped: false,
+        alpha_packed: false,
     };
 
     pub const fn new(projection: Projection, stereo: StereoLayout) -> Self {
@@ -116,6 +128,7 @@ impl VideoFormat {
             projection,
             stereo,
             eyes_swapped: false,
+            alpha_packed: false,
         }
     }
 
@@ -124,6 +137,20 @@ impl VideoFormat {
             StereoLayout::Mono => format!("{} mono", self.projection.label()),
             s => format!("{} {}", self.projection.label(), s.label()),
         }
+    }
+
+    /// Scale of the packed passthrough mask, if the video has one that can
+    /// be read (the packing is only defined for side-by-side frames).
+    pub fn alpha_pack_scale(&self) -> Option<f32> {
+        (self.alpha_packed && self.stereo == StereoLayout::SideBySide).then_some(ALPHA_PACK_SCALE)
+    }
+
+    /// Same projection, stereo layout and eye order (the alpha mask aside).
+    pub fn same_layout(&self, other: &VideoFormat) -> bool {
+        VideoFormat {
+            alpha_packed: other.alpha_packed,
+            ..*self
+        } == *other
     }
 }
 
@@ -181,13 +208,15 @@ fn tokens(name: &str) -> Vec<String> {
 /// Follows the conventions DeoVR and HereSphere document: `_LR`/`_SBS`/`_3DH`
 /// for side by side, `_TB`/`_OU`/`_3DV` for top/bottom, `_180`/`_360`,
 /// `_FISHEYE`, `_FISHEYE190`, `_MKX200`, `_MKX220`, `_RF52`, `_VRCA220`,
-/// `_EAC`, `_FLAT`/`_2D`/`_MONO`. Returns `None` when the name says nothing.
+/// `_EAC`, `_FLAT`/`_2D`/`_MONO`, and `_ALPHA` for a packed passthrough
+/// mask. Returns `None` when the name says nothing about the layout.
 pub fn detect_from_name(name: &str) -> Option<VideoFormat> {
     let toks = tokens(name);
     let has = |t: &str| toks.iter().any(|x| x == t);
     let mut projection = None;
     let mut stereo = None;
     let mut swapped = false;
+    let alpha = has("ALPHA");
 
     for t in &toks {
         match t.as_str() {
@@ -255,6 +284,7 @@ pub fn detect_from_name(name: &str) -> Option<VideoFormat> {
         projection,
         stereo,
         eyes_swapped: swapped,
+        alpha_packed: alpha,
     })
 }
 
@@ -323,11 +353,13 @@ pub fn resolve(
             .or(from_name.map(|f| f.stereo))
             .unwrap_or_default();
         let eyes_swapped = from_name.is_some_and(|f| f.eyes_swapped);
+        let alpha_packed = from_name.is_some_and(|f| f.alpha_packed);
         return DetectedFormat {
             format: VideoFormat {
                 projection,
                 stereo,
                 eyes_swapped,
+                alpha_packed,
             },
             evidence: Evidence::Metadata,
         };
@@ -414,6 +446,36 @@ mod tests {
         assert_eq!(d("Movie_FLAT_OU.mp4"), Some((P::Flat, S::TopBottom, false)));
         assert_eq!(d("Movie.mkv"), None);
         assert_eq!(d("Holiday 2024.mp4"), None);
+    }
+
+    #[test]
+    fn alpha_packed_passthrough() {
+        let f = detect_from_name(
+            "SLR_VRSpy_Pass-Through_ Gal Ritchie On Demand_4096p_79889_FISHEYE190_alpha.mp4",
+        )
+        .unwrap();
+        assert_eq!(f.projection, P::fisheye(190.0));
+        assert_eq!(f.stereo, S::SideBySide);
+        assert!(f.alpha_packed);
+        assert!(!detect_from_name("Scene_180_LR.mp4").unwrap().alpha_packed);
+        assert!(
+            !detect_from_name("Alphabet_180_LR.mp4")
+                .unwrap()
+                .alpha_packed
+        );
+        // Container metadata decides the layout; the name still says alpha.
+        let hints = ContainerHints {
+            projection: Some(P::EQUIRECT_180),
+            stereo: Some(S::SideBySide),
+        };
+        assert!(
+            resolve(None, hints, "x_180_LR_alpha.mp4", 8192, 4096)
+                .format
+                .alpha_packed
+        );
+        let plain = VideoFormat::new(P::fisheye(190.0), S::SideBySide);
+        assert!(f.same_layout(&plain) && plain.same_layout(&f));
+        assert!(!f.same_layout(&VideoFormat::new(P::EQUIRECT_180, S::SideBySide)));
     }
 
     #[test]

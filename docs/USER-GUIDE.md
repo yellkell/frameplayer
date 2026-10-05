@@ -133,7 +133,24 @@ under ⚙, or press the left thumbstick to undo them.
 Text fields bring up a keyboard in front of you; you can also type on your
 phone through the web remote.
 
-## Passthrough videos (chroma key)
+## Passthrough videos
+
+The adjust panel's **Passthrough** tab (the sliders button on the control
+bar, then the glasses tab) makes part of a video see-through so your room
+shows behind it. The glasses button on the bar itself only turns passthrough
+on and off.
+
+### Videos with their own mask (`_alpha`)
+
+Passthrough videos from SLR and others carry a see-through mask inside the
+picture, and their names end in `_alpha` (for example
+`Scene_4096p_FISHEYE190_alpha.mp4`). FramePlayer reads the mask by itself:
+only the people stay and the room shows around them, with nothing to set.
+**Use the video's mask** in the Passthrough tab turns it on or off for a
+file, for example one renamed without `_alpha`. Only side-by-side videos
+can carry a mask.
+
+### Green and blue screens (chroma key)
 
 Videos filmed against a green or blue screen can show your room instead of
 the screen: open the adjust panel's **Passthrough** tab, turn on **Remove the

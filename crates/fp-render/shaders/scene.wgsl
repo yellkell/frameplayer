@@ -37,7 +37,7 @@ struct Params {
     bg_color: vec4<f32>,
     // Chroma key: x, y the key colour's Cb, Cr; z similarity; w smoothness
     key: vec4<f32>,
-    // x spill, y on
+    // x spill, y on, z alpha-packed mask scale (0 off)
     key2: vec4<f32>,
 };
 
@@ -310,6 +310,17 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         alpha = pow(clamp(d / max(params.key.w, 1e-4), 0.0, 1.0), 1.5);
         let spill = pow(clamp(d / max(params.key2.x, 1e-4), 0.0, 1.0), 1.5);
         rgb = mix(vec3<f32>(dot(c, vec3<f32>(0.2126, 0.7152, 0.0722))), rgb, spill);
+    }
+
+    // Alpha-packed passthrough video (SLR's `_alpha`): each eye's mask, scaled
+    // down, sits in the red channel outside the fisheye circles, centred on
+    // the frame's top middle for the left half and on its corner for the
+    // right half, wrapping round the frame's edges.
+    if (params.key2.z > 0.0) {
+        let slot = f32(eye ^ params.mode.z);
+        let k = params.key2.z;
+        let m = fract(vec2<f32>((1.0 - slot) * 0.5 + (uv.x - 0.5) * k * 0.5, (uv.y - 0.5) * k));
+        alpha *= clamp((sample_yuv(m).r - 0.08) / 0.84, 0.0, 1.0);
     }
 
     // Sharpen: unsharp mask on luma.

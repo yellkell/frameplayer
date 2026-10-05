@@ -1448,12 +1448,12 @@ impl App {
             .playback
             .as_ref()
             .is_none_or(|p| p.format.projection == Projection::Flat);
-        // A chroma-keyed video shows the room where its background was,
-        // whatever its projection and whether or not passthrough is on.
-        let keyed = self
-            .playback
-            .as_ref()
-            .is_some_and(|p| p.current_settings().chroma_key);
+        // A chroma-keyed or alpha-packed video shows the room where its
+        // background was, whatever its projection and whether or not
+        // passthrough is on.
+        let keyed = self.playback.as_ref().is_some_and(|p| {
+            p.current_settings().chroma_key || p.format.alpha_pack_scale().is_some()
+        });
         let passthrough =
             passthrough_available && ((self.settings.passthrough && flat_or_none) || keyed);
         if passthrough {
