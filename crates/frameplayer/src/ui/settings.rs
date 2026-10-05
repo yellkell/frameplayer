@@ -745,29 +745,40 @@ fn about(ui: &mut egui::Ui, v: &mut View) {
     heading(ui, "Controller");
     widgets::rows(ui, |r| {
         for (k, d) in [
-            ("A / X, left D-pad down / left", "Play or pause"),
+            ("A or left D-pad down", "Play or pause"),
             (
-                "B / Y, left D-pad up / right",
-                "Back: close a panel, library, then the video again",
-            ),
-            (
-                "Thumbstick left / right",
+                "Either thumbstick left / right",
                 "Seek (hold to repeat); page lists you point at",
             ),
             (
-                "Thumbstick up / down",
+                "Right thumbstick up / down",
+                "Volume; scroll menus you point at",
+            ),
+            (
+                "Left thumbstick up / down",
                 "Tilt the picture; scroll menus you point at",
             ),
-            ("Thumbstick press", "Reset the image (zoom and drag)"),
+            ("Right thumbstick press", "Mute"),
+            (
+                "Left thumbstick press",
+                "Reset the picture (turn, tilt, zoom)",
+            ),
+            ("B", "Back: close a panel, library, then the video again"),
+            ("X / Y", "Previous / next video"),
+            ("Left D-pad up", "Show or hide the controls"),
+            ("Left D-pad left", "Adjust panel"),
+            ("Right / left bumper", "Forward / back 1 minute"),
+            (
+                "Left grip + thumbstick",
+                "Turn the picture (left / right), zoom (up / down)",
+            ),
             ("Hold grip + trigger", "Drag the picture to move it"),
-            ("Grip + thumbstick left / right", "Previous / next video"),
-            ("Grip + thumbstick down / up", "Zoom in / out"),
             (
                 "Trigger",
                 "Click; on empty space, show or hide the controls",
             ),
             ("Menu", "Library"),
-            ("Both grips", "Recenter"),
+            ("View, or both grips", "Recenter"),
         ] {
             r.row(k, None, |ui| {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {

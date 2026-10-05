@@ -12,7 +12,7 @@
 //! | `aim YAW PITCH` | controller ray direction in degrees |
 //! | `point PANEL X Y` | aim at a panel (`main`, `bar`, `adjust`, `keyboard`) at fractional X, Y |
 //! | `click` | pull and release the trigger |
-//! | `button primary/secondary/menu` | press and release a button |
+//! | `button a/b/x/y/menu/stick/shoulder` | press and release a right-hand button |
 //! | `stick X Y FRAMES` | hold the thumbstick |
 //! | `squeeze` | squeeze and release the grip |
 //! | `grip V` / `trigger V` | hold the grip / trigger at V (0..1) until changed |
@@ -259,11 +259,16 @@ impl Sim {
             }
             Some("button") => {
                 let b = parts.get(1).copied().unwrap_or("primary");
+                // The simulated hand is the right one: A/south plays, B/east
+                // goes back ("primary"/"secondary" are the old names).
                 let set = |h: &mut Hand, v: bool| match b {
-                    "secondary" => h.secondary = v,
+                    "east" | "b" | "secondary" => h.east = v,
+                    "north" | "y" => h.north = v,
+                    "west" | "x" => h.west = v,
                     "stick" => h.stick_click = v,
                     "menu" => h.menu = v,
-                    _ => h.primary = v,
+                    "shoulder" => h.shoulder = v,
+                    _ => h.south = v,
                 };
                 set(&mut self.hand, true);
                 self.run_frames(2)?;
