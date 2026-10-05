@@ -640,7 +640,7 @@ pub fn adjust_panel(ctx: &egui::Context, v: &mut View) {
                     4 => {
                         unlocked_header(
                             ui,
-                            "Your room shows where this video's background was.",
+                            "This video's settings, saved with its adjustments.",
                             true,
                             v.state,
                         );
@@ -733,8 +733,7 @@ fn chroma_tab(
         let desc = if packed && format.alpha_pack_scale().is_none() {
             "Only side-by-side videos can carry a mask: set the format to a side-by-side one."
         } else {
-            "For passthrough videos that carry a see-through mask. On by itself when the \
-             file name has _alpha in it."
+            "For videos with a built-in see-through mask. On by itself for _alpha files."
         };
         if r.switch("Use the video's mask", Some(desc), &mut packed) {
             actions.push(Action::SetFormat(Some(VideoFormat {
@@ -746,9 +745,9 @@ fn chroma_tab(
         if r.switch(
             "Own settings for this video",
             Some(if own {
-                "Changes here are for this video only. Turn off to follow Settings > Passthrough."
+                "Saved with this video. Turn off to use the global settings."
             } else {
-                "Following Settings > Passthrough. Change anything below to give this video its own."
+                "Using the global settings. Change anything below to adjust this video."
             }),
             &mut own,
         ) {

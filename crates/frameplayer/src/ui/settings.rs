@@ -292,7 +292,7 @@ fn passthrough(ui: &mut egui::Ui, v: &mut View) {
     }
     super::player::unlocked_header(
         ui,
-        "Every video uses these. To change one video, open the sliders button while it plays, then the Passthrough tab.",
+        "Global settings. Each video can be individually adjusted and will save its adjustments.",
         false,
         v.state,
     );
