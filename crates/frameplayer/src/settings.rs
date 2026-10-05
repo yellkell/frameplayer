@@ -62,6 +62,8 @@ pub struct Settings {
     pub check_updates: bool,
     /// UI text size multiplier.
     pub ui_scale: f32,
+    /// What the controller buttons and thumbsticks do.
+    pub controls: crate::bindings::Bindings,
 }
 
 impl Default for Settings {
@@ -92,6 +94,7 @@ impl Default for Settings {
             update_channel: "stable".into(),
             check_updates: true,
             ui_scale: 1.0,
+            controls: crate::bindings::Bindings::default(),
         }
     }
 }

@@ -994,6 +994,7 @@ impl App {
                 playing,
                 dt: input.dt,
             },
+            &self.settings.controls,
         );
         if over_ui && (0..2).any(|i| h[i].trigger > 0.7 && self.trigger_prev[i] <= 0.7) {
             buzz.push((self.pointer.active, 0.2, 8));

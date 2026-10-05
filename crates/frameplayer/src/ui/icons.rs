@@ -45,6 +45,7 @@ pub const FOLDERS: &str = "\u{E260}";
 pub const FRAME_CORNERS: &str = "\u{E626}";
 pub const FUNNEL: &str = "\u{E266}";
 pub const GAUGE: &str = "\u{E628}";
+pub const GAME_CONTROLLER: &str = "\u{E26E}";
 pub const GEAR_SIX: &str = "\u{E272}";
 pub const GLOBE: &str = "\u{E288}";
 pub const HARD_DRIVE: &str = "\u{E29E}";
