@@ -140,6 +140,13 @@ bar, then the glasses tab) makes part of a video see-through so your room
 shows behind it. The glasses button on the bar itself only turns passthrough
 on and off.
 
+Passthrough videos are a one-time $4.99 unlock. Press **Unlock** in either
+Passthrough tab, then on your phone or computer go to yellkell.com/unlock and
+enter the code FramePlayer shows. It unlocks a few seconds after you pay. To
+unlock again on another headset or after a reinstall, enter the new code and
+restore with the email you paid with. Showing your room around flat videos and
+the menus is free.
+
 ### Videos with their own mask (`_alpha`)
 
 Many passthrough videos carry a see-through mask inside the
