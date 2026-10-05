@@ -15,8 +15,8 @@ use std::time::Duration;
 const BODY: Color32 = Color32::from_rgb(52, 60, 72);
 const BODY_EDGE: Color32 = Color32::from_rgb(74, 84, 99);
 const KEY: Color32 = Color32::from_rgb(30, 35, 43);
-const LABEL_W: f32 = 220.0;
-const GAP: f32 = 18.0;
+const LABEL_W: f32 = 170.0;
+const GAP: f32 = 14.0;
 
 /// A remappable place on the drawing.
 #[derive(Clone, Copy)]
@@ -92,19 +92,19 @@ impl Spot {
     fn lines(self, map: &HandBindings) -> Vec<String> {
         match self {
             Spot::Round(.., b, _) | Spot::Pill(_, _, b) | Spot::Arm(_, _, b) => {
-                vec![map.button(b).label().to_string()]
+                vec![map.button(b).short_label().to_string()]
             }
-            Spot::Bumper => vec![map.button(Button::Shoulder).label().to_string()],
+            Spot::Bumper => vec![map.button(Button::Shoulder).short_label().to_string()],
             Spot::Stick(..) => {
                 let mut l = vec![
-                    format!("←→  {}", map.axis(Axis::StickX).label()),
-                    format!("↑↓  {}", map.axis(Axis::StickY).label()),
-                    format!("Press  {}", map.button(Button::StickClick).label()),
+                    format!("←→ {}", map.axis(Axis::StickX).short_label()),
+                    format!("↑↓ {}", map.axis(Axis::StickY).short_label()),
+                    format!("Press {}", map.button(Button::StickClick).short_label()),
                 ];
                 for (axis, arrows) in [(Axis::GripX, "←→"), (Axis::GripY, "↑↓")] {
                     let a = map.axis(axis);
                     if a != AxisAction::Nothing {
-                        l.push(format!("Grip {arrows}  {}", short(a)));
+                        l.push(format!("Grip {arrows} {}", a.short_label()));
                     }
                 }
                 l
@@ -115,7 +115,7 @@ impl Spot {
 
 /// Width of a label holding `lines`.
 fn label_width(ui: &egui::Ui, lines: &[String]) -> f32 {
-    let font = theme::font(Weight::Medium, 15.0);
+    let font = theme::font(Weight::Medium, 14.0);
     let widest = lines
         .iter()
         .map(|s| {
@@ -126,14 +126,6 @@ fn label_width(ui: &egui::Ui, lines: &[String]) -> f32 {
         })
         .fold(0.0, f32::max);
     widest.min(LABEL_W - 20.0) + 20.0
-}
-
-fn short(a: AxisAction) -> &'static str {
-    match a {
-        AxisAction::Tilt => "Tilt",
-        AxisAction::Turn => "Turn",
-        other => other.label(),
-    }
 }
 
 /// Both controllers, then the chosen input's choices.
@@ -162,7 +154,12 @@ pub fn controller_map(ui: &mut egui::Ui, v: &mut View) {
         let x0 = rect.left() + i as f32 * (each + 24.0);
         // Centred in its half, then nudged so both label columns fit.
         let [lw, rw] = cols[i];
-        let cx = (x0 + each / 2.0).clamp(x0 + lw + GAP + r, x0 + each - rw - GAP - r);
+        let (lo, hi) = (x0 + lw + GAP + r, x0 + each - rw - GAP - r);
+        let cx = if lo <= hi {
+            (x0 + each / 2.0).clamp(lo, hi)
+        } else {
+            (lo + hi) / 2.0
+        };
         let centre = Pos2::new(cx, rect.top() + 30.0 + r * 1.45);
         draw_hand(ui, v, hand, centre, r, t);
         ui.painter().text(
@@ -278,7 +275,7 @@ fn draw_hand(ui: &mut egui::Ui, v: &mut View, hand: usize, c: Pos2, r: f32, t: f
         mine.sort_by(|a, b| a.1.y.total_cmp(&b.1.y));
         let mut next_top = f32::MIN;
         for (_, pos, lines, lit) in mine {
-            let font = theme::font(Weight::Medium, 15.0);
+            let font = theme::font(Weight::Medium, 14.0);
             let galleys: Vec<_> = lines
                 .iter()
                 .map(|s| p.layout_no_wrap(s.clone(), font.clone(), theme::TEXT))

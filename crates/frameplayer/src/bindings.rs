@@ -71,6 +71,21 @@ impl ButtonAction {
             ButtonAction::Recenter => "Recenter",
         }
     }
+
+    /// A shorter label, for the controller picture.
+    pub fn short_label(self) -> &'static str {
+        match self {
+            ButtonAction::PlayPause => "Play/pause",
+            ButtonAction::PreviousVideo => "Previous",
+            ButtonAction::NextVideo => "Next",
+            ButtonAction::BackOneMinute => "−1 min",
+            ButtonAction::ForwardOneMinute => "+1 min",
+            ButtonAction::ResetPicture => "Reset view",
+            ButtonAction::ShowHideControls => "Show/hide UI",
+            ButtonAction::AdjustPanel => "Adjust",
+            other => other.label(),
+        }
+    }
 }
 
 /// What a thumbstick axis does. Right and up are the positive directions:
@@ -105,6 +120,15 @@ impl AxisAction {
             AxisAction::Tilt => "Tilt the picture",
             AxisAction::Turn => "Turn the picture",
             AxisAction::Zoom => "Zoom",
+        }
+    }
+
+    /// A shorter label, for the controller picture.
+    pub fn short_label(self) -> &'static str {
+        match self {
+            AxisAction::Tilt => "Tilt",
+            AxisAction::Turn => "Turn",
+            other => other.label(),
         }
     }
 }
