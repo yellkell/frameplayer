@@ -4,12 +4,17 @@
 
 use super::theme::{self, Weight};
 use super::widgets::{self, Kind, Tip};
-use super::{Action, SettingsTab, View, icons};
+use super::{Action, RemapSlot, SettingsTab, View, icons};
 use crate::settings::HapticDeviceConfig;
-use egui::{Align, Align2, Color32, Layout, RichText, Sense, Vec2};
+use egui::{Align2, Color32, RichText, Sense, Vec2};
 
-const TABS: [(SettingsTab, &str, &str); 6] = [
+const TABS: [(SettingsTab, &str, &str); 7] = [
     (SettingsTab::Playback, icons::PLAY_CIRCLE, "Playback"),
+    (
+        SettingsTab::Controller,
+        icons::GAME_CONTROLLER,
+        "Controller",
+    ),
     (SettingsTab::Library, icons::SQUARES_FOUR, "Library"),
     (SettingsTab::Haptics, icons::VIBRATE, "Haptics"),
     (SettingsTab::Remote, icons::DEVICE_MOBILE, "Remote control"),
@@ -46,6 +51,7 @@ pub fn settings(ui: &mut egui::Ui, v: &mut View) {
                 );
                 match v.state.settings_tab {
                     SettingsTab::Playback => playback(ui, v),
+                    SettingsTab::Controller => controller(ui, v),
                     SettingsTab::Library => library(ui, v),
                     SettingsTab::Haptics => haptics(ui, v),
                     SettingsTab::Remote => remote(ui, v),
@@ -111,6 +117,103 @@ fn note(ui: &mut egui::Ui, text: &str) {
             .font(theme::font(Weight::Regular, 15.0))
             .color(theme::TEXT_3),
     );
+}
+
+fn controller(ui: &mut egui::Ui, v: &mut View) {
+    use crate::bindings::{Axis, AxisAction, Bindings, Button, ButtonAction, LEFT, RIGHT};
+    note(
+        ui,
+        "What each button and thumbstick does. Point at one and pull the trigger to \
+         change it.",
+    );
+    for (hand, title) in [(RIGHT, "Right controller"), (LEFT, "Left controller")] {
+        heading(ui, title);
+        widgets::rows(ui, |r| {
+            for b in Button::ALL {
+                let slot = RemapSlot::Button(hand, b);
+                let current = v.settings.controls.hand(hand).button(b);
+                let open = v.state.remap_open == Some(slot);
+                if r.row(b.label(hand), None, |ui| choice(ui, current.label(), open))
+                    .clicked()
+                {
+                    v.state.remap_open = (!open).then_some(slot);
+                }
+                if open {
+                    r.content(|ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            for a in ButtonAction::ALL {
+                                if widgets::chip(ui, a.label(), a == current).clicked() {
+                                    *v.settings.controls.hand_mut(hand).button_mut(b) = a;
+                                    v.state.remap_open = None;
+                                }
+                            }
+                        });
+                    });
+                }
+            }
+            for a in Axis::ALL {
+                let slot = RemapSlot::Axis(hand, a);
+                let current = v.settings.controls.hand(hand).axis(a);
+                let open = v.state.remap_open == Some(slot);
+                if r.row(a.label(), None, |ui| choice(ui, current.label(), open))
+                    .clicked()
+                {
+                    v.state.remap_open = (!open).then_some(slot);
+                }
+                if open {
+                    r.content(|ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            for x in AxisAction::ALL {
+                                if widgets::chip(ui, x.label(), x == current).clicked() {
+                                    *v.settings.controls.hand_mut(hand).axis_mut(a) = x;
+                                    v.state.remap_open = None;
+                                }
+                            }
+                        });
+                    });
+                }
+            }
+        });
+    }
+    heading(ui, "Always");
+    widgets::rows(ui, |r| {
+        for (k, d) in [
+            (
+                "Trigger",
+                "Click; on empty space, show or hide the controls",
+            ),
+            ("Hold grip + trigger", "Drag the picture to move it"),
+            ("Both grips", "Recenter"),
+            (
+                "Pointing at a menu",
+                "Thumbstick left / right pages it, up / down scrolls it",
+            ),
+        ] {
+            r.row(k, None, |ui| {
+                ui.label(RichText::new(d).color(theme::TEXT_2));
+            });
+        }
+    });
+    ui.add_space(6.0);
+    let defaults = Bindings::default();
+    ui.add_enabled_ui(v.settings.controls != defaults, |ui| {
+        if widgets::button(
+            ui,
+            Some(icons::ARROW_COUNTER_CLOCKWISE),
+            "Reset to defaults",
+            Kind::Secondary,
+        )
+        .clicked()
+        {
+            v.settings.controls = defaults;
+            v.state.remap_open = None;
+        }
+    });
+}
+
+/// The current choice on a remap row; open while its choices show.
+fn choice(ui: &mut egui::Ui, label: &str, open: bool) -> egui::Response {
+    widgets::chip_icon(ui, Some(icons::CARET_DOWN), label, open)
 }
 
 fn playback(ui: &mut egui::Ui, v: &mut View) {
@@ -741,52 +844,6 @@ fn about(ui: &mut egui::Ui, v: &mut View) {
                 RichText::new(crate::logger::log_path().display().to_string()).color(theme::TEXT_2),
             );
         });
-    });
-    heading(ui, "Controller");
-    widgets::rows(ui, |r| {
-        for (k, d) in [
-            ("A or left D-pad down", "Play or pause"),
-            (
-                "Either thumbstick left / right",
-                "Seek (hold to repeat); page lists you point at",
-            ),
-            (
-                "Right thumbstick up / down",
-                "Volume; scroll menus you point at",
-            ),
-            (
-                "Left thumbstick up / down",
-                "Tilt the picture; scroll menus you point at",
-            ),
-            ("Right thumbstick press", "Mute"),
-            (
-                "Left thumbstick press",
-                "Reset the picture (turn, tilt, zoom)",
-            ),
-            ("B", "Back: close a panel, library, then the video again"),
-            ("X / Y", "Previous / next video"),
-            ("Left D-pad up", "Show or hide the controls"),
-            ("Left D-pad left", "Adjust panel"),
-            ("Left D-pad right", "Passthrough on / off"),
-            ("Right / left bumper", "Forward / back 1 minute"),
-            (
-                "Left grip + thumbstick",
-                "Turn the picture (left / right), zoom (up / down)",
-            ),
-            ("Hold grip + trigger", "Drag the picture to move it"),
-            (
-                "Trigger",
-                "Click; on empty space, show or hide the controls",
-            ),
-            ("Menu", "Library"),
-            ("View, or both grips", "Recenter"),
-        ] {
-            r.row(k, None, |ui| {
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(RichText::new(d).color(theme::TEXT_2));
-                });
-            });
-        }
     });
     ui.add_space(6.0);
     note(

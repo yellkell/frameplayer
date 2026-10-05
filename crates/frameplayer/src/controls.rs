@@ -1,7 +1,6 @@
-//! Controller bindings. Each button does one thing; the right hand runs
-//! playback and the left hand the picture. Play/pause is on both (A and the
-//! D-pad's down), and the sticks seek on both, so the commonest actions are
-//! under either thumb.
+//! Controller input to commands. What each button and thumbstick axis does
+//! comes from [`Bindings`] (remappable in Settings > Controller); the
+//! defaults:
 //!
 //! | Input | Right hand | Left hand |
 //! |---|---|---|
@@ -15,12 +14,12 @@
 //! | Menu / View | Library | Recenter |
 //! | Bumper | Forward 1 minute | Back 1 minute |
 //! | Grip + thumbstick | (nothing) | Left / right turns the picture, up / down zooms |
-//! | Hold grip + trigger, move | Drag the picture | Drag the picture |
-//! | Trigger | Click; on empty space, show or hide the controls | the same |
 //!
-//! Pointing at a list, thumbstick left / right pages it; both grips together
-//! recenter too.
+//! Fixed: the trigger clicks (on empty space it shows or hides the
+//! controls), grip + trigger drags the picture, both grips recenter, and a
+//! thumbstick pointed at a list pages it left / right.
 
+use crate::bindings::{Axis, AxisAction, Bindings, Button, ButtonAction};
 use fp_xr::Hand;
 use glam::{Quat, Vec3};
 
@@ -73,9 +72,6 @@ pub struct Context {
     pub dt: f32,
 }
 
-const LEFT: usize = 0;
-const RIGHT: usize = 1;
-
 /// How fast a thumbstick tilts or turns the picture, in degrees a second.
 const PITCH_SPEED: f32 = 30.0;
 const YAW_SPEED: f32 = 45.0;
@@ -99,8 +95,8 @@ struct Drag {
 #[derive(Default)]
 pub struct Controls {
     prev: [Hand; 2],
-    /// Direction held on the thumbstick (x axis) and for how long.
-    held: [(i32, f32); 2],
+    /// Per hand and axis: the direction held (seeking or paging) and for how long.
+    held: [[(i32, f32); 4]; 2],
     drag: Option<Drag>,
 }
 
@@ -119,10 +115,15 @@ fn wrap(deg: f32) -> f32 {
 }
 
 impl Controls {
-    pub fn update(&mut self, hands: &[Hand; 2], anchor: Quat, ctx: Context) -> Vec<Cmd> {
+    pub fn update(
+        &mut self,
+        hands: &[Hand; 2],
+        anchor: Quat,
+        ctx: Context,
+        bindings: &Bindings,
+    ) -> Vec<Cmd> {
         let mut out = Vec::new();
         let prev = self.prev;
-        let pressed = |i: usize, f: fn(&Hand) -> bool| f(&hands[i]) && !f(&prev[i]);
         let gripping = |h: &Hand| h.squeeze > GRIP;
 
         // Dome drag: grip held, then trigger, on a hand not pointing at a panel.
@@ -163,111 +164,57 @@ impl Controls {
         }
         let any_grip = hands.iter().any(gripping);
 
-        // Buttons: one action each, by hand.
         let playing = ctx.playing;
-        if pressed(RIGHT, |h| h.south) && playing {
-            out.push(Cmd::TogglePause);
-        }
-        if pressed(LEFT, |h| h.south) && playing {
-            out.push(Cmd::TogglePause);
-        }
-        if pressed(RIGHT, |h| h.east) {
-            out.push(Cmd::Back);
-        }
-        if pressed(RIGHT, |h| h.west) && playing {
-            out.push(Cmd::Previous);
-        }
-        if pressed(RIGHT, |h| h.north) && playing {
-            out.push(Cmd::Next);
-        }
-        if pressed(RIGHT, |h| h.menu) {
-            out.push(Cmd::Menu);
-        }
-        if pressed(RIGHT, |h| h.shoulder) && playing {
-            out.push(Cmd::Skip(1));
-        }
-        if pressed(RIGHT, |h| h.stick_click) && playing {
-            out.push(Cmd::ToggleMute);
-        }
-        if pressed(LEFT, |h| h.north) && playing {
-            out.push(Cmd::ToggleUi);
-        }
-        if pressed(LEFT, |h| h.west) && playing {
-            out.push(Cmd::ToggleAdjust);
-        }
-        if pressed(LEFT, |h| h.east) {
-            out.push(Cmd::TogglePassthrough);
-        }
-        if pressed(LEFT, |h| h.menu) {
-            out.push(Cmd::Recenter);
-        }
-        if pressed(LEFT, |h| h.shoulder) && playing {
-            out.push(Cmd::Skip(-1));
-        }
-        if pressed(LEFT, |h| h.stick_click) && playing {
-            out.push(Cmd::ResetImage);
-        }
-
         for (i, hand) in hands.iter().enumerate() {
+            let map = bindings.hand(i);
+            for b in Button::ALL {
+                if b.pressed(hand)
+                    && !b.pressed(&prev[i])
+                    && let Some(cmd) = button_cmd(map.button(b), playing)
+                {
+                    out.push(cmd);
+                }
+            }
+
             let s = hand.stick;
-            if gripping(hand) {
-                // Left grip + stick: turn and zoom the picture.
-                self.held[i] = (0, 0.0);
-                if i == LEFT && playing && !ctx.over_ui {
-                    if s.x.abs() > STICK_HOLD {
-                        out.push(Cmd::Yaw(-s.x * ctx.dt * YAW_SPEED));
-                    }
-                    if s.y.abs() > STICK_HOLD {
-                        // Down zooms in, as in DeoVR.
-                        out.push(Cmd::Zoom(-s.y * ctx.dt * 0.8));
-                    }
+            let grip = gripping(hand);
+            if !grip && (!playing || ctx.over_ui) {
+                // Menus: left / right pages the list pointed at (up / down
+                // scrolls it, through the pointer).
+                if let Some(dir) = self.step(i, Axis::StickX, s.x, ctx.dt, false) {
+                    out.push(Cmd::Page(dir));
                 }
                 continue;
             }
-
-            // Stick left/right: seek (or page a list), repeating while held.
-            let dir = if s.x > STICK {
-                1
-            } else if s.x < -STICK {
-                -1
-            } else if s.x.abs() < STICK_RELEASE {
-                0
+            let (ax, ay, other) = if grip {
+                (Axis::GripX, Axis::GripY, [Axis::StickX, Axis::StickY])
             } else {
-                self.held[i].0
+                (Axis::StickX, Axis::StickY, [Axis::GripX, Axis::GripY])
             };
-            let (was, t) = self.held[i];
-            if dir == 0 {
-                self.held[i] = (0, 0.0);
-            } else if dir != was {
-                self.held[i] = (dir, 0.0);
-                out.push(if playing && !ctx.over_ui {
-                    Cmd::Seek(dir)
-                } else {
-                    Cmd::Page(dir)
-                });
-            } else {
-                let t2 = t + ctx.dt;
-                // Fire each time the hold crosses delay + k * interval.
-                let fires = |t: f32| {
-                    if t < REPEAT_DELAY {
-                        -1.0
-                    } else {
-                        ((t - REPEAT_DELAY) / REPEAT_EVERY).floor()
-                    }
-                };
-                if fires(t2) > fires(t) && playing && !ctx.over_ui {
-                    out.push(Cmd::Seek(dir));
-                }
-                self.held[i] = (dir, t2);
+            for a in other {
+                self.held[i][a.index()] = (0, 0.0);
             }
-            // Stick up/down: volume (right) or tilt (left). Menus pointed at
-            // scroll through the pointer instead.
-            if playing && !ctx.over_ui && s.y.abs() > STICK_HOLD && s.x.abs() < STICK_RELEASE {
-                out.push(if i == RIGHT {
-                    Cmd::Volume(s.y * ctx.dt * VOLUME_SPEED)
-                } else {
-                    Cmd::Pitch(s.y * ctx.dt * PITCH_SPEED)
-                });
+            for (axis, v, cross) in [(ax, s.x, s.y), (ay, s.y, s.x)] {
+                match map.axis(axis) {
+                    AxisAction::Nothing => {}
+                    AxisAction::Seek => {
+                        if let Some(dir) = self.step(i, axis, v, ctx.dt, true) {
+                            out.push(Cmd::Seek(dir));
+                        }
+                    }
+                    // Continuous: only along the axis the stick mostly points.
+                    action if v.abs() > STICK_HOLD && cross.abs() < v.abs() => {
+                        let d = v * ctx.dt;
+                        out.push(match action {
+                            AxisAction::Volume => Cmd::Volume(d * VOLUME_SPEED),
+                            AxisAction::Tilt => Cmd::Pitch(d * PITCH_SPEED),
+                            AxisAction::Turn => Cmd::Yaw(-d * YAW_SPEED),
+                            // Down zooms in, as in DeoVR.
+                            _ => Cmd::Zoom(-d * 0.8),
+                        });
+                    }
+                    _ => {}
+                }
             }
         }
 
@@ -275,17 +222,78 @@ impl Controls {
         if both(hands) && !both(&prev) && self.drag.is_none() {
             out.push(Cmd::Recenter);
         }
-        if ctx.click_outside && !any_grip && playing {
+        if ctx.click_outside && !any_grip && ctx.playing {
             out.push(Cmd::ToggleUi);
         }
         self.prev = *hands;
         out
     }
+
+    /// Edge-triggered stick direction on `axis` of hand `i`: a push fires
+    /// once, and with `repeat` again while held (after a delay).
+    fn step(&mut self, i: usize, axis: Axis, v: f32, dt: f32, repeat: bool) -> Option<i32> {
+        let held = &mut self.held[i][axis.index()];
+        let dir = if v > STICK {
+            1
+        } else if v < -STICK {
+            -1
+        } else if v.abs() < STICK_RELEASE {
+            0
+        } else {
+            held.0
+        };
+        let (was, t) = *held;
+        if dir == 0 {
+            *held = (0, 0.0);
+            return None;
+        }
+        if dir != was {
+            *held = (dir, 0.0);
+            return Some(dir);
+        }
+        let t2 = t + dt;
+        *held = (dir, t2);
+        // Fire each time the hold crosses delay + k * interval.
+        let fires = |t: f32| {
+            if t < REPEAT_DELAY {
+                -1.0
+            } else {
+                ((t - REPEAT_DELAY) / REPEAT_EVERY).floor()
+            }
+        };
+        (repeat && fires(t2) > fires(t)).then_some(dir)
+    }
+}
+
+/// The command for a pressed button, if it does anything now.
+fn button_cmd(action: ButtonAction, playing: bool) -> Option<Cmd> {
+    use ButtonAction as B;
+    let cmd = match action {
+        B::Nothing => return None,
+        B::Back => Cmd::Back,
+        B::Library => Cmd::Menu,
+        B::Passthrough => Cmd::TogglePassthrough,
+        B::Recenter => Cmd::Recenter,
+        _ if !playing => return None,
+        B::PlayPause => Cmd::TogglePause,
+        B::PreviousVideo => Cmd::Previous,
+        B::NextVideo => Cmd::Next,
+        B::SeekBack => Cmd::Seek(-1),
+        B::SeekForward => Cmd::Seek(1),
+        B::BackOneMinute => Cmd::Skip(-1),
+        B::ForwardOneMinute => Cmd::Skip(1),
+        B::Mute => Cmd::ToggleMute,
+        B::ResetPicture => Cmd::ResetImage,
+        B::ShowHideControls => Cmd::ToggleUi,
+        B::AdjustPanel => Cmd::ToggleAdjust,
+    };
+    Some(cmd)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bindings::{LEFT, RIGHT};
     use glam::Vec2;
 
     fn ctx(playing: bool) -> Context {
@@ -306,7 +314,7 @@ mod tests {
     }
 
     fn run(c: &mut Controls, h: &[Hand; 2], cx: Context) -> Vec<Cmd> {
-        c.update(h, Quat::IDENTITY, cx)
+        c.update(h, Quat::IDENTITY, cx, &Bindings::default())
     }
 
     /// Presses and releases one button, returning what the press did.
@@ -422,6 +430,33 @@ mod tests {
         h[RIGHT].squeeze = 1.0;
         h[RIGHT].stick = Vec2::new(0.9, 0.0);
         assert_eq!(run(&mut Controls::default(), &h, ctx(true)), vec![]);
+    }
+
+    #[test]
+    fn remapped_buttons_and_axes_follow_the_bindings() {
+        let mut b = Bindings::default();
+        b.right.south = ButtonAction::NextVideo;
+        b.left.stick_x = AxisAction::Turn;
+        b.right.stick_y = AxisAction::Nothing;
+        let mut c = Controls::default();
+        let mut h = hands();
+        h[RIGHT].south = true;
+        assert_eq!(c.update(&h, Quat::IDENTITY, ctx(true), &b), vec![Cmd::Next]);
+        let mut h = hands();
+        h[LEFT].stick = Vec2::new(-0.9, 0.0);
+        h[RIGHT].stick = Vec2::new(0.0, 0.9);
+        let out = c.update(&h, Quat::IDENTITY, ctx(true), &b);
+        assert!(
+            matches!(out[..], [Cmd::Yaw(d)] if d > 0.0),
+            "left turns left: {out:?}"
+        );
+        // Pointed at a menu, the stick pages whatever it is bound to.
+        let over = Context {
+            over_ui: true,
+            ..ctx(true)
+        };
+        let mut c = Controls::default();
+        assert_eq!(c.update(&h, Quat::IDENTITY, over, &b), vec![Cmd::Page(-1)]);
     }
 
     #[test]

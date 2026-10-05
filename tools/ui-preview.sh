@@ -31,6 +31,10 @@ screen sources
 panel main sources
 screen settings playback
 panel main settings-playback
+screen settings controller
+panel main settings-controller
+screen settings controller-open
+panel main settings-controller-open
 screen settings library
 panel main settings-library
 screen settings haptics

@@ -210,9 +210,19 @@ impl Sim {
                 let ui = &mut self.app.ui;
                 ui.screen = screen;
                 ui.details = None;
+                ui.remap_open = None;
                 if let Some(tab) = parts.get(2) {
                     ui.settings_tab = match *tab {
                         "playback" => SettingsTab::Playback,
+                        "controller" => SettingsTab::Controller,
+                        // The Controller tab with the right A button's choices open.
+                        "controller-open" => {
+                            ui.remap_open = Some(crate::ui::RemapSlot::Button(
+                                crate::bindings::RIGHT,
+                                crate::bindings::Button::South,
+                            ));
+                            SettingsTab::Controller
+                        }
                         "library" => SettingsTab::Library,
                         "haptics" => SettingsTab::Haptics,
                         "remote" => SettingsTab::Remote,
