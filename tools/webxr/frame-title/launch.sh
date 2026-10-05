@@ -99,6 +99,14 @@ flags=(
 # --test-type hides the "unsupported command-line flag" bar the flag below
 # would put over every page (the flag is deliberate; see docs/webxr).
 [[ $sandboxed == 1 ]] || flags+=(--disable-seccomp-filter-sandbox --test-type)
+# Chromium reopens its window where it was last saved, and on gamescope's
+# screen (no window manager) a window saved partly off-screen stays there:
+# the panel shows all of it, but the pointer only reaches the on-screen part,
+# so the back button at its left edge was out of reach. Always open at the
+# top-left, the size of the screen.
+size=$(xdpyinfo 2>/dev/null | awk '/dimensions:/ {print $2; exit}')
+[[ $size =~ ^[0-9]+x[0-9]+$ ]] || size=1280x720
+flags+=(--window-position=0,0 --window-size="${size/x/,}")
 # Steam Frame controller models where pages ask for Quest Touch ones: the
 # extension made by tools/webxr/frame-models, shipped in the title. Chromium
 # only loads extensions from the command line with this feature off.
