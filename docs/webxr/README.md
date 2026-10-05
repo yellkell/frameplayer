@@ -90,9 +90,11 @@ returns the sandboxed process's values.
 ## 4. The patches
 
 In `docs/webxr/patches/`, generated with `git format-patch` against
-`chromium/main` at 2026-10-02 (post `e0f937bba4ff`), each verified to apply
-cleanly to that snapshot. Apply with
-`tools/webxr/apply-chromium-patches.sh /path/to/chromium/src`.
+`chromium/main` at 2026-10-02 (post `e0f937bba4ff`). Together with IWFDK's
+controller patch 0004 they form one series, applied in file-name order:
+later patches build on earlier ones. Apply it as commits with
+`tools/webxr/apply-chromium-patches.sh /path/to/chromium/src` (it fetches
+IWFDK's 0004 itself).
 
 **0001 Linux sandbox: broker answers for the bare /proc/self link**
 `broker_host.cc`: `RewritePathname()` also maps exact `/proc/self` to
@@ -186,8 +188,10 @@ tmux new -d -s chromium-xr 'tools/webxr/build-frame-chromium.sh > ~/chromium-xr/
 tail -F ~/chromium-xr/stage
 ```
 
-The script fetches the IWFDK patch itself, checks that all four patches
-apply before syncing, and resumes when re-run. Output:
+The script fetches the IWFDK patch itself, checks before syncing that the
+whole series applies in order (to a scratch index, `~/chromium-xr/patches.index`),
+and resumes when re-run: it skips applying when the patched files already
+match the series, and stops on a partly patched or hand-edited tree. Output:
 `~/chromium-xr/chromium-xr-arm64.tar.xz`, then the arm64 `device_unittests`
 and `sandbox_linux_unittests` in `src/out/XR`. On Windows, keep the WSL
 distro and its swap file on a drive with the space, and check out this repo
@@ -300,9 +304,9 @@ Fire Fight 2 with all of it: a steady 54 fps (half of 108 Hz, p99 frame
 | 1728, 4x AA, Vulkan, 0011 | 19 ms | 47 fps |
 | 1728, 2x AA, Vulkan, 0011 | 15 ms | 54 fps |
 
-Patches 0011, 0012 and 0013 build on 0009, 0008 and 0005; the build script's
-one-by-one `git apply --check` doesn't handle patches that stack (it already
-didn't for 0004, 0006 and 0008).
+Patches 0011, 0012 and 0013 build on 0009, 0008 and 0005 (as 0006 and 0008
+build on 0004), so the build script checks and applies the patches as one
+ordered series.
 
 The launcher reads extra Chromium flags from `~/.config/chromium-xr-frame/flags`
 (one per line) for experiments, e.g. `--use-angle=gl` and

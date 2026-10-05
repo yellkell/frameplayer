@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build the Steam Frame WebXR browser: arm64 Chromium with immersive WebXR
-# through SteamVR, plus FramePlayer's patches (docs/webxr/patches: 0001-0003
-# sandbox, 0005 rendering) and IWFDK's Frame controller patch (0004).
+# through SteamVR, plus FramePlayer's patches (docs/webxr/patches) and IWFDK's
+# Frame controller patch (0004), applied as one series in file-name order.
 #
 # Adapted from saphid/chromium-webxr-steam-frame build/build.sh (BSD-3).
 # Differences: the OpenXR-on-Linux CL it pinned (8132979) has merged, so this
@@ -51,6 +51,11 @@ cp "$FP"/docs/webxr/patches/*.patch "$P/"
 git clone -q --depth 1 --filter=blob:none --sparse -b "$IWFDK_REF" "$IWFDK_REPO" "$W/iwfdk"
 git -C "$W/iwfdk" sparse-checkout set platform/chromium/patches
 cp "$W"/iwfdk/platform/chromium/patches/*.patch "$P/"
+# A patch checked out on Windows with CRLF endings no longer matches the
+# source lines (git apply reports it as not applying at its first hunk).
+for p in "$P"/*.patch; do
+  if grep -q $'\r$' "$p"; then stage "ABORT: $(basename "$p") has CRLF line endings"; exit 4; fi
+done
 stage "patches: $(cd "$P" && ls | tr '\n' ' ')(iwfdk $(git -C "$W/iwfdk" rev-parse --short HEAD), frameplayer $(git -C "$FP" rev-parse --short HEAD 2>/dev/null || echo '?'))"
 
 if [ ! -x depot_tools/gclient ]; then
@@ -84,13 +89,20 @@ fi
 guard
 stage "src at $(git -C src log -1 --format='%h %cI %s')"
 
-# Fail now, not after hours of syncing, if a patch doesn't fit this checkout.
-# Each patch touches its own files, so checking them one by one is enough.
+# Fail now, not after hours of syncing, if the patches don't fit this
+# checkout. They stack (0006 and 0008 on 0004, 0011 on 0009, 0012 on 0008,
+# 0013 on 0005), so apply them in order to a scratch index of HEAD: each sees
+# the ones before it, and the working tree may be clean or already patched.
+# The result, $PI, is what the patched files must look like.
+PI="$W/patches.index"
+GIT_INDEX_FILE="$PI" git -C src read-tree HEAD
 for p in "$P"/*.patch; do
-  git -C src apply --reverse --check "$p" 2>/dev/null || git -C src apply --check "$p" ||
-    { stage "ABORT: $(basename "$p") does not apply to $BASE"; exit 4; }
+  GIT_INDEX_FILE="$PI" git -C src apply --cached "$p" ||
+    { stage "ABORT: $(basename "$p") does not apply to $BASE after the patches before it"; exit 4; }
 done
-stage "all patches apply"
+mapfile -t PFILES < <(GIT_INDEX_FILE="$PI" git -C src diff --cached --name-only HEAD)
+mapfile -t PNEW < <(GIT_INDEX_FILE="$PI" git -C src diff --cached --name-only --diff-filter=A HEAD)
+stage "all patches apply in order (${#PFILES[@]} files)"
 
 rev=$(git -C src rev-parse HEAD)
 # Sync once per revision; gclient sync refuses a checkout with applied patches.
@@ -106,12 +118,28 @@ fi
 guard
 
 cd src
-for p in "$P"/*.patch; do
-  if ! git apply --reverse --check "$p" 2>/dev/null; then
+# The patched files are either exactly the series' result (a resumed run:
+# nothing to do) or untouched at HEAD (apply the series). Anything else is a
+# partly patched or hand-edited tree: stop rather than guess.
+if GIT_INDEX_FILE="$PI" git diff --quiet -- "${PFILES[@]}"; then
+  stage "patches already applied"
+else
+  for f in "${PNEW[@]}"; do
+    [ ! -e "$f" ] ||
+      { stage "ABORT: $f, new in the patches, already exists: tree is partly patched"; exit 5; }
+  done
+  if ! git diff --quiet HEAD -- "${PFILES[@]}"; then
+    stage "ABORT: patched files match neither HEAD nor the patch series:"
+    GIT_INDEX_FILE="$PI" git diff --stat -- "${PFILES[@]}" | tee -a "$W/stage"
+    exit 5
+  fi
+  for p in "$P"/*.patch; do
     git apply "$p"
     stage "applied $(basename "$p")"
-  fi
-done
+  done
+  GIT_INDEX_FILE="$PI" git diff --quiet -- "${PFILES[@]}" ||
+    { stage "ABORT: the applied tree doesn't match the checked series"; exit 5; }
+fi
 
 mkdir -p out/XR
 # Rewritten on every run: change build settings here, not in out/XR/args.gn.
