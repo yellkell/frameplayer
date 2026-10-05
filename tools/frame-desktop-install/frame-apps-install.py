@@ -61,7 +61,7 @@ APPS = {
         'asset': re.compile(r'^frameplayer-.*-aarch64\.zip$'),
         'dir': 'frameplayer',
         'exe': 'frameplayer.sh',
-        'icon': 'assets/steam/icon.png',
+        'icons': ['assets/steam/icon.png'],
         'art': 'assets/steam',
         'process': 'frameplayer/frameplayer',
     },
@@ -71,11 +71,15 @@ APPS = {
         'asset': re.compile(r'^ChromiumXR-Frame-arm64\.zip$'),
         'dir': 'chromium-xr-frame',
         'exe': 'chromium-xr.sh',
-        'icon': 'chromium/product_logo_256.png',
+        'icons': ['assets/steam/icon.png', 'chromium/product_logo_256.png'],
         'art': 'assets/steam',
+        # Builds before test build 5 ship no Steam artwork: fetch it.
+        'art_url': 'https://yellkell.com/frameapps/art/chromium-xr/',
         'process': 'chromium/chrome --user',
     },
 }
+
+ART_FILES = ['portrait.png', 'hero.png', 'logo.png', 'capsule.png', 'icon.png']
 
 # (file in the release's art folder, file in Steam's config/grid/, DevTools asset type)
 GRID_ART = [
@@ -100,8 +104,8 @@ def ask(question):
     if os.environ.get('FRAME_APPS_YES') == '1':
         return True
     if os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'):
-        for cmd in (['kdialog', '--title', 'Frame Apps', '--yesno', question],
-                    ['zenity', '--question', '--title=Frame Apps', f'--text={question}']):
+        for cmd in (['kdialog', '--title', 'Frame Tools', '--yesno', question],
+                    ['zenity', '--question', '--title=Frame Tools', f'--text={question}']):
             if shutil.which(cmd[0]):
                 return subprocess.run(cmd).returncode == 0
     if sys.stdin.isatty():
@@ -177,6 +181,28 @@ def extract(zip_path, dest):
                 shutil.copyfileobj(src, out, 1 << 20)
             if mode:
                 os.chmod(target, mode)
+
+
+def fetch_art(app, dest):
+    """Downloads the app's Steam artwork into its art folder when the release
+    has none. Best effort: the app works without it."""
+    art = os.path.join(dest, app['art'])
+    if not app.get('art_url') or os.path.isfile(os.path.join(art, 'portrait.png')):
+        return
+    os.makedirs(art, exist_ok=True)
+    got = 0
+    for name in ART_FILES:
+        try:
+            with urllib.request.urlopen(app['art_url'] + name, timeout=30) as r:
+                data = r.read()
+            if data.startswith(b'\x89PNG'):
+                with open(os.path.join(art, name), 'wb') as f:
+                    f.write(data)
+                got += 1
+        except OSError:
+            pass
+    if got:
+        say(f'  Library artwork: {got} images.')
 
 
 def running(app, dest):
@@ -641,11 +667,11 @@ def main():
         os.makedirs(parent, exist_ok=True)
         install_files(app, zip_path, dest)
         say(f'  Installed in {dest}')
+        fetch_art(app, dest)
 
         if args.steam != 'none':
-            icon = os.path.join(dest, app['icon'])
-            methods.add(add_to_steam(args.steam, name, exe, dest,
-                                     icon if os.path.isfile(icon) else '', os.path.join(dest, app['art'])))
+            icon = next((p for p in (os.path.join(dest, i) for i in app['icons']) if os.path.isfile(p)), '')
+            methods.add(add_to_steam(args.steam, name, exe, dest, icon, os.path.join(dest, app['art'])))
 
     say('\nDone.')
     if 'file' in methods and os.environ.get('XDG_CURRENT_DESKTOP') and shutil.which('steamos-session-select'):

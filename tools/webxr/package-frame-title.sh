@@ -32,6 +32,10 @@ install -m 755 "$FP"/tools/webxr/frame-title/launch.sh "$stage/chromium/"
 FRAME_MODELS_EXT=${FRAME_MODELS_EXT:?set FRAME_MODELS_EXT to the controller models extension}
 [[ -f $FRAME_MODELS_EXT/manifest.json ]] || { echo "no manifest.json in $FRAME_MODELS_EXT" >&2; exit 1; }
 cp -r "$FRAME_MODELS_EXT" "$stage/frame-models"
+# Steam library artwork (tools/webxr/make-chromium-xr-artwork.py), where
+# frame-apps-install.py and Frame Control look for it.
+mkdir -p "$stage/assets/steam"
+cp "$FP"/tools/webxr/frame-title/steam/*.png "$stage/assets/steam/"
 cd "$B"
 files=(chrome chrome_crashpad_handler *.pak *.bin icudtl.dat locales product_logo_256.png BUILD-INFO.txt)
 for f in libEGL.so libGLESv2.so libvk_swiftshader.so libvulkan.so.1 vk_swiftshader_icd.json; do
