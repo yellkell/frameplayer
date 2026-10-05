@@ -223,6 +223,14 @@ impl Sim {
                             ));
                             SettingsTab::Controller
                         }
+                        // ...and with the left thumbstick's choices open.
+                        "controller-stick" => {
+                            ui.remap_open = Some(crate::ui::RemapSlot::Axis(
+                                crate::bindings::LEFT,
+                                crate::bindings::Axis::StickX,
+                            ));
+                            SettingsTab::Controller
+                        }
                         "library" => SettingsTab::Library,
                         "haptics" => SettingsTab::Haptics,
                         "remote" => SettingsTab::Remote,
