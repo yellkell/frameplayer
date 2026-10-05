@@ -261,6 +261,12 @@ impl Sim {
                 self.app.repaint_all();
                 self.run_frames(3)?;
             }
+            // Passthrough videos as if bought (crate::unlock).
+            Some("unlocked") => {
+                self.app.unlocked = true;
+                self.app.repaint_all();
+                self.run_frames(3)?;
+            }
             // Turns chroma key on for the open video (the Passthrough tab).
             Some("chroma") => {
                 if let Some(p) = &mut self.app.playback {

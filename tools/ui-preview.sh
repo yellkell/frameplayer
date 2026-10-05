@@ -32,6 +32,9 @@ panel main sources
 screen settings playback
 panel main settings-playback
 screen settings passthrough
+panel main settings-passthrough-locked
+unlocked
+screen settings passthrough
 panel main settings-passthrough
 screen settings controller
 panel main settings-controller
@@ -78,7 +81,7 @@ adjust
 frames 8
 panel adjust adjust
 panel bar player-bar-adjust
-# The Passthrough tab, with chroma key on.
+# The Passthrough tab, with chroma key on (unlocked above).
 adjust 4
 chroma
 frames 8

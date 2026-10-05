@@ -1206,6 +1206,7 @@ dependencies = [
  "image",
  "log",
  "png",
+ "ring",
  "serde",
  "serde_json",
  "ureq",

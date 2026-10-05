@@ -18,6 +18,7 @@ mod prober;
 mod services;
 mod settings;
 mod ui;
+mod unlock;
 mod world;
 
 use app::{App, FrameInput, LayerDraw};

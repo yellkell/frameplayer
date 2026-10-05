@@ -94,6 +94,9 @@ pub enum Action {
     RegenerateToken,
     CheckUpdates,
     InstallUpdate,
+    /// Start or stop buying the passthrough videos unlock.
+    StartUnlock,
+    CancelUnlock,
     Recenter,
     TogglePassthrough,
     /// Show the library/browser panel (during playback).
@@ -329,6 +332,9 @@ pub struct View<'a> {
     pub actions: &'a mut Vec<Action>,
     pub passthrough_available: bool,
     pub devices: &'a [fp_haptics::DeviceStatus],
+    /// Passthrough videos are unlocked; else the purchase in progress.
+    pub unlocked: bool,
+    pub purchase: Option<&'a crate::unlock::Status>,
 }
 
 #[cfg(test)]

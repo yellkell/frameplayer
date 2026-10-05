@@ -286,6 +286,10 @@ fn passthrough(ui: &mut egui::Ui, v: &mut View) {
         }
     });
     heading(ui, "Passthrough videos");
+    if !v.unlocked {
+        super::player::unlock_card(ui, v.purchase, v.actions);
+        return;
+    }
     ui.label(
         RichText::new(
             "Every video uses these. To change one video, open the sliders button \

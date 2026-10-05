@@ -460,7 +460,7 @@ pub fn adjust_panel(ctx: &egui::Context, v: &mut View) {
         }
         ui.add_space(10.0);
         // Save and reset stay at the bottom while the page scrolls.
-        let footer = v.state.adjust_tab <= 4;
+        let footer = v.state.adjust_tab <= 3 || (v.state.adjust_tab == 4 && v.unlocked);
         let footer_h = if footer { 64.0 } else { 0.0 };
         let page = ui.available_height() - footer_h;
         egui::ScrollArea::vertical()
@@ -636,6 +636,7 @@ pub fn adjust_panel(ctx: &egui::Context, v: &mut View) {
                             r.slider("Sharpen", None, &mut s.sharpen, 0.0..=1.0, 0.0, "", 2);
                         });
                     }
+                    4 if !v.unlocked => unlock_card(ui, v.purchase, v.actions),
                     4 => chroma_tab(
                         ui,
                         s,
@@ -754,6 +755,98 @@ fn chroma_tab(
         s.set_key(&shown);
         s.key_own = Some(true);
     }
+}
+
+/// Passthrough videos are a one-time purchase (crate::unlock). Until then
+/// this card stands in for their controls: it offers the unlock, then shows
+/// the code to enter at yellkell.com/unlock while FramePlayer waits for the
+/// payment.
+pub(super) fn unlock_card(
+    ui: &mut egui::Ui,
+    purchase: Option<&crate::unlock::Status>,
+    actions: &mut Vec<Action>,
+) {
+    use crate::unlock::Status;
+    let text = |s: &str, size: f32, color| {
+        RichText::new(s)
+            .font(theme::font(Weight::Regular, size))
+            .color(color)
+    };
+    widgets::card(ui, |ui| {
+        egui::Frame::new()
+            .inner_margin(egui::Margin::same(20))
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 10.0;
+                match purchase {
+                    Some(Status::Waiting { code, page, price }) => {
+                        ui.label(text("On your phone or computer, go to", 17.0, theme::TEXT_2));
+                        ui.label(
+                            RichText::new(page.as_str())
+                                .font(theme::font(Weight::Bold, 26.0))
+                                .color(theme::ACCENT),
+                        );
+                        ui.label(text("and enter this code:", 17.0, theme::TEXT_2));
+                        ui.label(
+                            RichText::new(code.as_str())
+                                .font(theme::font(Weight::Bold, 52.0))
+                                .extra_letter_spacing(10.0)
+                                .color(theme::TEXT),
+                        );
+                        ui.label(text(
+                            &format!(
+                                "Pay {price} there and FramePlayer unlocks by itself a few \
+                                 seconds later. Bought it before? Restore it there with your email."
+                            ),
+                            16.0,
+                            theme::TEXT_2,
+                        ));
+                        ui.horizontal(|ui| {
+                            ui.add(egui::Spinner::new().size(18.0).color(theme::TEXT_3));
+                            ui.label(text("Waiting for payment", 16.0, theme::TEXT_3));
+                        });
+                        if widgets::button(ui, None, "Cancel", Kind::Ghost).clicked() {
+                            actions.push(Action::CancelUnlock);
+                        }
+                    }
+                    Some(Status::Starting) => {
+                        ui.horizontal(|ui| {
+                            ui.add(egui::Spinner::new().size(18.0).color(theme::TEXT_3));
+                            ui.label(text("Getting a code", 16.0, theme::TEXT_2));
+                        });
+                    }
+                    _ => {
+                        ui.label(
+                            RichText::new("Passthrough videos")
+                                .font(theme::font(Weight::Bold, 24.0))
+                                .color(theme::TEXT),
+                        );
+                        ui.label(text(
+                            "Remove green and blue screen backgrounds, and play passthrough \
+                             videos with their own masks, so your room shows around the \
+                             people in them. Set it for every video, or each one.",
+                            16.0,
+                            theme::TEXT_2,
+                        ));
+                        if let Some(Status::Failed(msg)) = purchase
+                            && msg != "Cancelled"
+                        {
+                            ui.label(text(msg, 16.0, theme::ERROR));
+                        }
+                        ui.add_space(4.0);
+                        let label = format!("Unlock for {}", crate::unlock::PRICE);
+                        if widgets::button(ui, Some(icons::SPARKLE), &label, Kind::Primary).clicked()
+                        {
+                            actions.push(Action::StartUnlock);
+                        }
+                        ui.label(text(
+                            "One-time purchase at yellkell.com/unlock, paid on your phone or computer.",
+                            14.0,
+                            theme::TEXT_3,
+                        ));
+                    }
+                }
+            });
+    });
 }
 
 /// "Remove the background" and its colour and fine-tune controls, for one

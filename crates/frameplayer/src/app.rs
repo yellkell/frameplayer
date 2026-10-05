@@ -125,6 +125,11 @@ pub struct App {
     /// Drives FramePlayer has tried to mount since they were inserted.
     mount_tried: Vec<String>,
     quit: bool,
+    /// Passthrough videos are unlocked (a valid licence in the settings).
+    pub unlocked: bool,
+    /// An unlock purchase in progress, and its status as last shown.
+    purchase: Option<crate::unlock::Purchase>,
+    purchase_seen: Option<crate::unlock::Status>,
 }
 
 fn panel(px: [u32; 2], width_m: f32, ppp: f32) -> Panel {
@@ -134,6 +139,10 @@ fn panel(px: [u32; 2], width_m: f32, ppp: f32) -> Panel {
 
 impl App {
     pub fn new(settings: Settings, library: Library) -> App {
+        let unlocked = settings
+            .unlock
+            .as_deref()
+            .is_some_and(crate::unlock::licence_valid);
         let services = Services::new(&settings, library);
         let thumbs = ui::thumbs::Thumbs::new(services.opener.clone());
         let mut panels = [
@@ -182,6 +191,9 @@ impl App {
                 .unwrap_or_else(Instant::now),
             mount_tried: Vec::new(),
             quit: false,
+            unlocked,
+            purchase: None,
+            purchase_seen: None,
         };
         app.rescan(false);
         for cfg in app.settings.haptic_devices.clone() {
@@ -237,6 +249,27 @@ impl App {
     }
 
     /// Repaints every panel next frame (the preview changed the UI state).
+    /// Follows an unlock purchase; once paid, keeps the licence.
+    fn poll_purchase(&mut self) {
+        let Some(p) = &self.purchase else {
+            return;
+        };
+        let s = p.status();
+        if self.purchase_seen.as_ref() == Some(&s) {
+            return;
+        }
+        self.repaint_all();
+        if let crate::unlock::Status::Unlocked(licence) = s {
+            self.settings.unlock = Some(licence);
+            self.unlocked = true;
+            self.purchase = None;
+            self.purchase_seen = None;
+            self.ui.toast("Passthrough videos unlocked. Thank you!");
+        } else {
+            self.purchase_seen = Some(s);
+        }
+    }
+
     pub fn repaint_all(&mut self) {
         for p in self.panels.iter_mut() {
             p.request_repaint();
@@ -895,6 +928,15 @@ impl App {
             Action::InstallUpdate => self.install_update(),
             Action::Recenter => self.reanchor = true,
             Action::TogglePassthrough => self.settings.passthrough = !self.settings.passthrough,
+            Action::StartUnlock => {
+                self.purchase = Some(crate::unlock::Purchase::start());
+                self.purchase_seen = None;
+            }
+            Action::CancelUnlock => {
+                self.purchase = None;
+                self.purchase_seen = None;
+                self.repaint_all();
+            }
             Action::ShowBrowser(show) => {
                 self.show_browser = show;
                 if show {
@@ -1296,6 +1338,7 @@ impl App {
         self.poll_jobs();
         self.check_mounts();
         self.remote_events();
+        self.poll_purchase();
         if let Some(p) = &mut self.playback {
             p.save_progress(&self.services.library, false);
         }
@@ -1394,6 +1437,8 @@ impl App {
                 services,
                 thumbs,
                 playback,
+                unlocked,
+                purchase_seen,
                 ..
             } = self;
             let mut view = View {
@@ -1405,6 +1450,8 @@ impl App {
                 actions: &mut actions,
                 passthrough_available,
                 devices: &devices,
+                unlocked: *unlocked,
+                purchase: purchase_seen.as_ref(),
             };
             let r = panels[idx].paint(renderer, input.time, |ctx| match idx {
                 MAIN => ui::library::browser(ctx, &mut view),
@@ -1454,10 +1501,11 @@ impl App {
         // A chroma-keyed or alpha-packed video shows the room where its
         // background was, whatever its projection and whether or not
         // passthrough is on.
-        let keyed = self.playback.as_ref().is_some_and(|p| {
-            p.shown_settings(&self.settings.default_view).chroma_key
-                || p.format.alpha_pack_scale().is_some()
-        });
+        let keyed = self.unlocked
+            && self.playback.as_ref().is_some_and(|p| {
+                p.shown_settings(&self.settings.default_view).chroma_key
+                    || p.format.alpha_pack_scale().is_some()
+            });
         let passthrough =
             passthrough_available && ((self.settings.passthrough && flat_or_none) || keyed);
         if passthrough {
@@ -1471,6 +1519,11 @@ impl App {
             frame = p.player.current_frame();
             let mut s = p.shown_settings(&self.settings.default_view);
             video.format = p.format;
+            // Passthrough videos are a purchase (crate::unlock).
+            if !self.unlocked {
+                s.chroma_key = false;
+                video.format.alpha_packed = false;
+            }
             video.screen_pose = place(anchor, 0.0, s.screen_distance, 0.0, 0.0);
             s.yaw += anchor_yaw.to_degrees();
             video.settings = s;
