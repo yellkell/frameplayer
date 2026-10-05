@@ -173,17 +173,6 @@ pub enum Axis {
 }
 
 impl Axis {
-    pub const ALL: [Axis; 4] = [Axis::StickX, Axis::StickY, Axis::GripX, Axis::GripY];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Axis::StickX => "Thumbstick left / right",
-            Axis::StickY => "Thumbstick up / down",
-            Axis::GripX => "Grip + thumbstick left / right",
-            Axis::GripY => "Grip + thumbstick up / down",
-        }
-    }
-
     pub fn index(self) -> usize {
         self as usize
     }
