@@ -16,7 +16,8 @@ harness; it has not yet run on Steam Frame hardware.
   stereo, with per-video format overrides and adjustments
 - Library with thumbnails, search, filters, favorites, ratings, resume and
   history; ~/Videos, ~/Downloads, microSD cards and USB drives are indexed
-  automatically
+  automatically (exFAT cards from Windows/macOS included: FramePlayer
+  mounts what SteamOS won't)
 - Network sources: DeoVR/HereSphere feeds (XBVR, Stash), SMB, WebDAV, DLNA,
   HTTP folders
 - Haptics: funscripts with Intiface, TCode devices and The Handy

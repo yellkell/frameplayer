@@ -81,6 +81,7 @@ enum Job {
         Result<Box<dyn fp_haptics::Device>, String>,
     ),
     Update(UpdateStatus, Option<Box<fp_updater::Update>>),
+    Mounted(String, Result<std::path::PathBuf, String>),
 }
 
 const MAIN: usize = 0;
@@ -121,6 +122,8 @@ pub struct App {
     /// Removable drives seen at the last check, and when that was.
     mounts: Vec<std::path::PathBuf>,
     mounts_checked: Instant,
+    /// Drives FramePlayer has tried to mount since they were inserted.
+    mount_tried: Vec<String>,
     quit: bool,
 }
 
@@ -174,6 +177,7 @@ impl App {
             update: None,
             mounts: crate::services::removable_mounts(),
             mounts_checked: Instant::now(),
+            mount_tried: Vec::new(),
             quit: false,
         };
         app.rescan(false);
@@ -554,6 +558,14 @@ impl App {
                         self.services.haptic_devices.push((cfg, None, Some(e)));
                     }
                 },
+                Job::Mounted(device, r) => match r {
+                    // check_mounts announces the new drive.
+                    Ok(p) => log::info!("mounted /dev/{device} at {}", p.display()),
+                    Err(e) => {
+                        log::warn!("mounting /dev/{device}: {e}");
+                        self.ui.toast(format!("Couldn't open the drive: {e}"));
+                    }
+                },
                 Job::Update(status, update) => {
                     if let Some(u) = update {
                         self.update = Some(*u);
@@ -587,12 +599,34 @@ impl App {
         }
     }
 
+    /// Mounts cards and drives SteamOS leaves unmounted (exFAT/FAT/NTFS
+    /// microSD cards, any USB drive), once per insertion.
+    fn mount_drives(&mut self) {
+        let drives = crate::services::unmounted_drives();
+        // Forget drives that were removed (or mounted), so they are tried
+        // again when inserted again.
+        self.mount_tried
+            .retain(|d| drives.iter().any(|u| &u.device == d));
+        for d in drives {
+            if self.mount_tried.contains(&d.device) {
+                continue;
+            }
+            log::info!("mounting /dev/{} ({})", d.device, d.fs_type);
+            self.mount_tried.push(d.device.clone());
+            self.jobs.spawn("mount", move || {
+                let r = crate::services::mount_drive(&d);
+                Job::Mounted(d.device, r)
+            });
+        }
+    }
+
     /// Notices microSD cards and USB drives being inserted or removed.
     fn check_mounts(&mut self) {
         if self.mounts_checked.elapsed() < Duration::from_secs(3) {
             return;
         }
         self.mounts_checked = Instant::now();
+        self.mount_drives();
         let now = crate::services::removable_mounts();
         if now == self.mounts {
             return;

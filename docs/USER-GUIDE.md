@@ -46,7 +46,7 @@ FramePlayer then updates itself from the Settings › Updates page.
 | Where | How |
 |---|---|
 | `~/Videos`, `~/Downloads` | Added to the library automatically |
-| microSD card / USB drive | Added automatically when inserted (Settings › Library) |
+| microSD card / USB drive (exFAT from a PC, or ext4) | Added automatically when inserted (Settings › Library) |
 | Other folders on the headset | Settings › Library › Add folder |
 | XBVR, Stash and other DeoVR / HereSphere servers | Sources › Add source › DeoVR feed or HereSphere API |
 | NAS / Windows share | Sources › Add source › SMB share (`smb://nas/videos`) |
@@ -56,15 +56,26 @@ FramePlayer then updates itself from the Settings › Updates page.
 
 ### microSD cards and USB drives (VR180 and everything else)
 
-SteamOS mounts cards and drives under `/run/media/deck/<name>`. FramePlayer
-notices when one is inserted (a "Found drive" message appears), adds its
-videos to the library and makes thumbnails. You can also browse a card
-directly under **Sources › microSD and USB drives**.
+FramePlayer notices when a card or drive is inserted (a "Found drive"
+message appears), adds its videos to the library and makes thumbnails. You
+can also browse it directly under **Sources › microSD and USB drives**.
 
-- Steam game folders (`steamapps`) on a shared card are skipped.
+**Copying videos from a Windows PC or Mac:** format the card as **exFAT**
+on the computer (Windows: right-click the card › Format › exFAT), copy the
+videos onto it and put it in the Frame. exFAT has no 4 GB file limit, so
+8K files are fine; FAT32 cannot hold files over 4 GB.
+
+- The Frame's SteamOS only mounts ext4 cards itself (the kind Steam
+  formats for games) and no USB drives. FramePlayer mounts exFAT, FAT32
+  and NTFS cards, and USB drives, itself while it is running, under
+  `/run/media/steamos/<name>`.
+- Steam may say the card needs formatting. **Don't format it from Steam**:
+  that erases the card and makes it ext4, which Windows and macOS can't
+  read. FramePlayer still finds the videos.
+- An ext4 card formatted by Steam works too (shared with games: Steam game
+  folders, `steamapps`, are skipped), but only the Frame can read it.
 - When the card is removed its videos stay in the library with your
   ratings, resume points and adjustments; they play again once it is back.
-- Use ext4 or exFAT. exFAT is readable from Windows and macOS too.
 - VR180 videos are recognised from their metadata (VR180 cameras, YouTube
   VR180 downloads) or from names like `Trip_VR180.mp4`,
   `Beach_180_LR.mp4` or `clip_180x180_3dh.mp4`. If one shows up wrong, set
