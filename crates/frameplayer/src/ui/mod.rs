@@ -2,6 +2,7 @@
 //! state; anything that changes more than view-local state is returned as
 //! an [`Action`] for the app to apply.
 
+pub mod controller_map;
 pub mod icons;
 pub mod keyboard;
 pub mod library;

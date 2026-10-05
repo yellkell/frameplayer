@@ -4,7 +4,7 @@
 
 use super::theme::{self, Weight};
 use super::widgets::{self, Kind, Tip};
-use super::{Action, RemapSlot, SettingsTab, View, icons};
+use super::{Action, SettingsTab, View, icons};
 use crate::settings::HapticDeviceConfig;
 use egui::{Align2, Color32, RichText, Sense, Vec2};
 
@@ -120,61 +120,8 @@ fn note(ui: &mut egui::Ui, text: &str) {
 }
 
 fn controller(ui: &mut egui::Ui, v: &mut View) {
-    use crate::bindings::{Axis, AxisAction, Bindings, Button, ButtonAction, LEFT, RIGHT};
-    note(
-        ui,
-        "What each button and thumbstick does. Point at one and pull the trigger to \
-         change it.",
-    );
-    for (hand, title) in [(RIGHT, "Right controller"), (LEFT, "Left controller")] {
-        heading(ui, title);
-        widgets::rows(ui, |r| {
-            for b in Button::ALL {
-                let slot = RemapSlot::Button(hand, b);
-                let current = v.settings.controls.hand(hand).button(b);
-                let open = v.state.remap_open == Some(slot);
-                if r.row(b.label(hand), None, |ui| choice(ui, current.label(), open))
-                    .clicked()
-                {
-                    v.state.remap_open = (!open).then_some(slot);
-                }
-                if open {
-                    r.content(|ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            for a in ButtonAction::ALL {
-                                if widgets::chip(ui, a.label(), a == current).clicked() {
-                                    *v.settings.controls.hand_mut(hand).button_mut(b) = a;
-                                    v.state.remap_open = None;
-                                }
-                            }
-                        });
-                    });
-                }
-            }
-            for a in Axis::ALL {
-                let slot = RemapSlot::Axis(hand, a);
-                let current = v.settings.controls.hand(hand).axis(a);
-                let open = v.state.remap_open == Some(slot);
-                if r.row(a.label(), None, |ui| choice(ui, current.label(), open))
-                    .clicked()
-                {
-                    v.state.remap_open = (!open).then_some(slot);
-                }
-                if open {
-                    r.content(|ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            for x in AxisAction::ALL {
-                                if widgets::chip(ui, x.label(), x == current).clicked() {
-                                    *v.settings.controls.hand_mut(hand).axis_mut(a) = x;
-                                    v.state.remap_open = None;
-                                }
-                            }
-                        });
-                    });
-                }
-            }
-        });
-    }
+    use crate::bindings::Bindings;
+    super::controller_map::controller_map(ui, v);
     heading(ui, "Always");
     widgets::rows(ui, |r| {
         for (k, d) in [
@@ -209,11 +156,6 @@ fn controller(ui: &mut egui::Ui, v: &mut View) {
             v.state.remap_open = None;
         }
     });
-}
-
-/// The current choice on a remap row; open while its choices show.
-fn choice(ui: &mut egui::Ui, label: &str, open: bool) -> egui::Response {
-    widgets::chip_icon(ui, Some(icons::CARET_DOWN), label, open)
 }
 
 fn playback(ui: &mut egui::Ui, v: &mut View) {
