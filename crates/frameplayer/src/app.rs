@@ -176,7 +176,10 @@ impl App {
             last_status: None,
             update: None,
             mounts: crate::services::removable_mounts(),
-            mounts_checked: Instant::now(),
+            // In the past, so the first check (and mount) runs at once.
+            mounts_checked: Instant::now()
+                .checked_sub(Duration::from_secs(60))
+                .unwrap_or_else(Instant::now),
             mount_tried: Vec::new(),
             quit: false,
         };

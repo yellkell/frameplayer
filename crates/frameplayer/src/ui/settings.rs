@@ -265,7 +265,9 @@ fn playback(ui: &mut egui::Ui, v: &mut View) {
         if passthrough_available {
             r.switch(
                 "Passthrough",
-                Some("Show your room around flat videos and the menus."),
+                Some(
+                    "Show your room around flat videos and the menus. Passthrough videos                      (green screens, _alpha masks) are set up while one plays: sliders                      button, then the Passthrough tab.",
+                ),
                 &mut s.passthrough,
             );
         } else {
