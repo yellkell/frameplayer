@@ -35,6 +35,8 @@ screen settings controller
 panel main settings-controller
 screen settings controller-open
 panel main settings-controller-open
+screen settings controller-stick
+panel main settings-controller-stick
 screen settings library
 panel main settings-library
 screen settings haptics
