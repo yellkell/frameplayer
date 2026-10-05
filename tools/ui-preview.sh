@@ -31,6 +31,8 @@ screen sources
 panel main sources
 screen settings playback
 panel main settings-playback
+screen settings passthrough
+panel main settings-passthrough
 screen settings controller
 panel main settings-controller
 screen settings controller-open

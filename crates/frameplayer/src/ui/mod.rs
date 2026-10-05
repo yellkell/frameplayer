@@ -115,6 +115,7 @@ pub enum Screen {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingsTab {
     Playback,
+    Passthrough,
     Controller,
     Library,
     Haptics,

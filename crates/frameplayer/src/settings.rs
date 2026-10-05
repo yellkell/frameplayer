@@ -100,6 +100,15 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// Adjustments for a video that has none saved: the defaults, following
+    /// the global chroma key.
+    pub fn new_video_view(&self) -> ViewSettings {
+        ViewSettings {
+            key_own: Some(false),
+            ..self.default_view
+        }
+    }
+
     pub fn path() -> PathBuf {
         fp_core::dirs::config_dir().join("settings.json")
     }
@@ -113,7 +122,15 @@ impl Settings {
     pub fn load(path: &Path) -> Settings {
         match std::fs::read_to_string(path) {
             Ok(text) => match serde_json::from_str::<Settings>(&text) {
-                Ok(s) => s,
+                Ok(mut s) => {
+                    // Saved before the global chroma key existed: its key
+                    // was never chosen, so take the current default.
+                    if s.default_view.key_own.is_none() {
+                        s.default_view.set_key(&ViewSettings::default());
+                        s.default_view.key_own = Some(false);
+                    }
+                    s
+                }
                 Err(e) => {
                     log::warn!("settings {}: {e}; using defaults", path.display());
                     Settings::default()
@@ -156,6 +173,16 @@ mod tests {
         let p = Settings::load(&path);
         assert_eq!(p.volume, 0.25);
         assert_eq!(p.seek_step, 10.0);
+        // Saved before the global chroma key: the old green default goes.
+        std::fs::write(
+            &path,
+            r#"{"default_view": {"zoom": 1.5, "key_color": [0.0, 1.0, 0.0]}}"#,
+        )
+        .unwrap();
+        let p = Settings::load(&path);
+        assert_eq!(p.default_view.zoom, 1.5);
+        assert_eq!(p.default_view.key_color, ViewSettings::default().key_color);
+        assert_eq!(p.default_view.key_own, Some(false));
         std::fs::write(&path, "garbage").unwrap();
         assert_eq!(Settings::load(&path).volume, 1.0);
         std::fs::remove_dir_all(&dir).unwrap();

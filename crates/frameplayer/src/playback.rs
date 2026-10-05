@@ -165,7 +165,7 @@ pub fn open(
     let settings_v = record
         .as_ref()
         .and_then(|r| r.view_settings)
-        .unwrap_or(settings.default_view);
+        .unwrap_or_else(|| settings.new_video_view());
     let keyframes = record
         .as_ref()
         .map(|r| r.keyframes.clone())
@@ -302,6 +302,12 @@ impl Playback {
     /// View settings at the current position (keyframes applied).
     pub fn current_settings(&self) -> ViewSettings {
         self.keyframes.at(self.player.position(), &self.settings)
+    }
+
+    /// What is shown now: [`Self::current_settings`] with the global chroma
+    /// key unless this video has its own.
+    pub fn shown_settings(&self, global: &ViewSettings) -> ViewSettings {
+        self.current_settings().with_global_key(global)
     }
 
     /// Saves progress every few seconds and at the end.

@@ -48,6 +48,11 @@ pub struct ViewSettings {
     pub key_smoothness: f32,
     /// How much key-coloured fringe to take out of what stays.
     pub key_spill: f32,
+    /// Whether this video keeps its own chroma key rather than following the
+    /// global one (Settings > Passthrough). `None` for settings saved before
+    /// the choice existed: those keep their own if they had the key on.
+    #[serde(default)]
+    pub key_own: Option<bool>,
 }
 
 impl Default for ViewSettings {
@@ -73,10 +78,11 @@ impl Default for ViewSettings {
             screen_curvature: 0.0,
             subtitle_distance: 2.5,
             chroma_key: false,
-            key_color: [0.0, 1.0, 0.0],
+            key_color: [0.08, 0.04, 1.0],
             key_similarity: 0.4,
             key_smoothness: 0.08,
             key_spill: 0.1,
+            key_own: Some(false),
         }
     }
 }
@@ -123,7 +129,43 @@ impl ViewSettings {
             key_similarity: l(self.key_similarity, other.key_similarity),
             key_smoothness: l(self.key_smoothness, other.key_smoothness),
             key_spill: l(self.key_spill, other.key_spill),
+            key_own: if t < 0.5 { self.key_own } else { other.key_own },
         }
+    }
+
+    /// Whether the chroma key is this video's own (see [`Self::key_own`]).
+    pub fn own_key(&self) -> bool {
+        self.key_own.unwrap_or(self.chroma_key)
+    }
+
+    /// The chroma key settings: on, colour, similarity, smoothness, spill.
+    pub fn key(&self) -> (bool, [f32; 3], f32, f32, f32) {
+        (
+            self.chroma_key,
+            self.key_color,
+            self.key_similarity,
+            self.key_smoothness,
+            self.key_spill,
+        )
+    }
+
+    /// Copies the chroma key settings of `from`.
+    pub fn set_key(&mut self, from: &ViewSettings) {
+        (
+            self.chroma_key,
+            self.key_color,
+            self.key_similarity,
+            self.key_smoothness,
+            self.key_spill,
+        ) = from.key();
+    }
+
+    /// These settings with `global`'s chroma key, unless the video has its own.
+    pub fn with_global_key(mut self, global: &ViewSettings) -> ViewSettings {
+        if !self.own_key() {
+            self.set_key(global);
+        }
+        self
     }
 }
 
@@ -194,5 +236,32 @@ mod tests {
         let v: ViewSettings = serde_json::from_str(r#"{"zoom":1.2}"#).unwrap();
         assert_eq!(v.zoom, 1.2);
         assert_eq!(v.contrast, 1.0);
+    }
+
+    #[test]
+    fn videos_follow_the_global_key_unless_they_have_their_own() {
+        let global = ViewSettings {
+            chroma_key: true,
+            key_color: [0.0, 0.0, 1.0],
+            ..Default::default()
+        };
+        let video = ViewSettings::default();
+        let shown = video.with_global_key(&global);
+        assert!(shown.chroma_key);
+        assert_eq!(shown.key_color, [0.0, 0.0, 1.0]);
+
+        let own = ViewSettings {
+            key_own: Some(true),
+            ..video
+        };
+        assert!(!own.with_global_key(&global).chroma_key);
+
+        // Saved before the choice existed: a keyed video keeps its key, an
+        // unkeyed one follows the global setting.
+        let old: ViewSettings =
+            serde_json::from_str(r#"{"chroma_key":true,"key_color":[1,0,1]}"#).unwrap();
+        assert_eq!(old.with_global_key(&global).key_color, [1.0, 0.0, 1.0]);
+        let old: ViewSettings = serde_json::from_str(r#"{"zoom":1.2}"#).unwrap();
+        assert!(old.with_global_key(&global).chroma_key);
     }
 }

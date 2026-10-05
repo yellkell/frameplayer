@@ -101,6 +101,7 @@ fn chroma_key_makes_the_green_screen_see_through() {
     });
     let keyed = ViewSettings {
         chroma_key: true,
+        key_color: [0.0, 1.0, 0.0],
         ..ViewSettings::default()
     };
     let mut p = params(Projection::EQUIRECT_180, StereoLayout::Mono, keyed);

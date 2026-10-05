@@ -153,13 +153,17 @@ can carry a mask.
 ### Green and blue screens (chroma key)
 
 Videos filmed against a green or blue screen can show your room instead of
-the screen: open the adjust panel's **Passthrough** tab, turn on **Remove the
-background** and pick the colour (green screen, blue screen, or any colour
-with the red/green/blue sliders). **Similarity** sets how close a colour must
-be to disappear, **Edge softness** feathers the cut, and **Spill removal**
-takes the screen's tint off hair and edges. Save it for that video like any
-other adjustment. A keyed video turns passthrough on by itself, whatever its
-format.
+the screen. Turn on **Remove the background** and pick the colour (green
+screen, blue screen, or any colour with the red/green/blue sliders).
+**Similarity** sets how close a colour must be to disappear, **Edge softness**
+feathers the cut, and **Spill removal** takes the screen's tint off hair and
+edges. A keyed video turns passthrough on by itself, whatever its format.
+
+**Settings > Passthrough** sets this for every video. To change one video,
+open the adjust panel's **Passthrough** tab while it plays: changing anything
+there gives that video its own settings (save them like any other
+adjustment), and turning **Own settings for this video** off makes it follow
+Settings again.
 
 ## Web XR games and experiences
 

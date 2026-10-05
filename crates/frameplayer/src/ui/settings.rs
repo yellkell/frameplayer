@@ -8,8 +8,9 @@ use super::{Action, SettingsTab, View, icons};
 use crate::settings::HapticDeviceConfig;
 use egui::{Align2, Color32, RichText, Sense, Vec2};
 
-const TABS: [(SettingsTab, &str, &str); 7] = [
+const TABS: [(SettingsTab, &str, &str); 8] = [
     (SettingsTab::Playback, icons::PLAY_CIRCLE, "Playback"),
+    (SettingsTab::Passthrough, icons::EYEGLASSES, "Passthrough"),
     (
         SettingsTab::Controller,
         icons::GAME_CONTROLLER,
@@ -51,6 +52,7 @@ pub fn settings(ui: &mut egui::Ui, v: &mut View) {
                 );
                 match v.state.settings_tab {
                     SettingsTab::Playback => playback(ui, v),
+                    SettingsTab::Passthrough => passthrough(ui, v),
                     SettingsTab::Controller => controller(ui, v),
                     SettingsTab::Library => library(ui, v),
                     SettingsTab::Haptics => haptics(ui, v),
@@ -159,7 +161,6 @@ fn controller(ui: &mut egui::Ui, v: &mut View) {
 }
 
 fn playback(ui: &mut egui::Ui, v: &mut View) {
-    let passthrough_available = v.passthrough_available;
     let s = &mut *v.settings;
     heading(ui, "Playing");
     widgets::rows(ui, |r| {
@@ -262,12 +263,18 @@ fn playback(ui: &mut egui::Ui, v: &mut View) {
             "×",
             2,
         );
-        if passthrough_available {
+    });
+}
+
+fn passthrough(ui: &mut egui::Ui, v: &mut View) {
+    let available = v.passthrough_available;
+    let s = &mut *v.settings;
+    heading(ui, "Your room");
+    widgets::rows(ui, |r| {
+        if available {
             r.switch(
                 "Passthrough",
-                Some(
-                    "Show your room around flat videos and the menus. Passthrough videos                      (green screens, _alpha masks) are set up while one plays: sliders                      button, then the Passthrough tab.",
-                ),
+                Some("Show your room around flat videos and the menus."),
                 &mut s.passthrough,
             );
         } else {
@@ -278,6 +285,16 @@ fn playback(ui: &mut egui::Ui, v: &mut View) {
             );
         }
     });
+    heading(ui, "Passthrough videos");
+    ui.label(
+        RichText::new(
+            "Every video uses these. To change one video, open the sliders button \
+             while it plays, then the Passthrough tab.",
+        )
+        .font(theme::font(Weight::Regular, 16.0))
+        .color(theme::TEXT_2),
+    );
+    super::player::chroma_controls(ui, &mut s.default_view, available);
 }
 
 fn library(ui: &mut egui::Ui, v: &mut View) {

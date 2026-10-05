@@ -215,6 +215,7 @@ impl Sim {
                 if let Some(tab) = parts.get(2) {
                     ui.settings_tab = match *tab {
                         "playback" => SettingsTab::Playback,
+                        "passthrough" => SettingsTab::Passthrough,
                         "controller" => SettingsTab::Controller,
                         // The Controller tab with the right A button's choices open.
                         "controller-open" => {
@@ -264,6 +265,7 @@ impl Sim {
             Some("chroma") => {
                 if let Some(p) = &mut self.app.playback {
                     p.settings.chroma_key = true;
+                    p.settings.key_own = Some(true);
                 }
                 self.app.repaint_all();
                 self.run_frames(3)?;

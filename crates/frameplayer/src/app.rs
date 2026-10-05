@@ -735,7 +735,7 @@ impl App {
             }
             Action::ResetView => {
                 if let Some(p) = &mut self.playback {
-                    p.settings = self.settings.default_view;
+                    p.settings = self.settings.new_video_view();
                     p.keyframes = Default::default();
                     p.settings_dirty = true;
                 }
@@ -1351,7 +1351,7 @@ impl App {
         // yaw/pitch sliders don't move away from the pointer.)
         let bar_anchor = match &self.playback {
             Some(p) if p.format.projection != Projection::Flat => {
-                let s = p.current_settings();
+                let s = p.shown_settings(&self.settings.default_view);
                 turned_with_picture(anchor, s.yaw, s.pitch)
             }
             _ => anchor,
@@ -1455,7 +1455,8 @@ impl App {
         // background was, whatever its projection and whether or not
         // passthrough is on.
         let keyed = self.playback.as_ref().is_some_and(|p| {
-            p.current_settings().chroma_key || p.format.alpha_pack_scale().is_some()
+            p.shown_settings(&self.settings.default_view).chroma_key
+                || p.format.alpha_pack_scale().is_some()
         });
         let passthrough =
             passthrough_available && ((self.settings.passthrough && flat_or_none) || keyed);
@@ -1468,7 +1469,7 @@ impl App {
             .to_euler(glam::EulerRot::YXZ);
         if let Some(p) = &self.playback {
             frame = p.player.current_frame();
-            let mut s = p.current_settings();
+            let mut s = p.shown_settings(&self.settings.default_view);
             video.format = p.format;
             video.screen_pose = place(anchor, 0.0, s.screen_distance, 0.0, 0.0);
             s.yaw += anchor_yaw.to_degrees();

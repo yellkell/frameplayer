@@ -636,7 +636,14 @@ pub fn adjust_panel(ctx: &egui::Context, v: &mut View) {
                             r.slider("Sharpen", None, &mut s.sharpen, 0.0..=1.0, 0.0, "", 2);
                         });
                     }
-                    4 => chroma_tab(ui, s, pb.format, v.passthrough_available, v.actions),
+                    4 => chroma_tab(
+                        ui,
+                        s,
+                        pb.format,
+                        &v.settings.default_view,
+                        v.passthrough_available,
+                        v.actions,
+                    ),
                     5 => audio_and_text(ui, pb, v.actions),
                     _ => haptics_tab(ui, pb.script_count, v.settings, v.devices),
                 }
@@ -702,22 +709,23 @@ const KEY_COLORS: [(&str, [f32; 3]); 3] = [
 ];
 
 /// Passthrough tab: the video's own packed mask (`_alpha` videos) or a
-/// chroma key, so the room shows where the video's background was (saved per
-/// video).
+/// chroma key, so the room shows where the video's background was. The key
+/// follows Settings > Passthrough until it is changed here for this video.
 fn chroma_tab(
     ui: &mut egui::Ui,
     s: &mut ViewSettings,
     format: VideoFormat,
+    global: &ViewSettings,
     passthrough_available: bool,
     actions: &mut Vec<Action>,
 ) {
-    let d = ViewSettings::default();
     widgets::rows(ui, |r| {
         let mut packed = format.alpha_packed;
         let desc = if packed && format.alpha_pack_scale().is_none() {
             "Only side-by-side videos can carry a mask: set the format to a side-by-side one."
         } else {
-            "For passthrough videos that carry a see-through mask, like SLR's. On by itself              when the file name has _alpha in it."
+            "For passthrough videos that carry a see-through mask, like SLR's. On by itself \
+             when the file name has _alpha in it."
         };
         if r.switch("Use the video's mask", Some(desc), &mut packed) {
             actions.push(Action::SetFormat(Some(VideoFormat {
@@ -725,6 +733,39 @@ fn chroma_tab(
                 ..format
             })));
         }
+        let mut own = s.own_key();
+        if r.switch(
+            "Own settings for this video",
+            Some(if own {
+                "Changes here are for this video only. Turn off to follow Settings > Passthrough."
+            } else {
+                "Following Settings > Passthrough. Change anything below to give this video its own."
+            }),
+            &mut own,
+        ) {
+            if own {
+                s.set_key(global);
+            }
+            s.key_own = Some(own);
+        }
+    });
+    let mut shown = s.with_global_key(global);
+    if chroma_controls(ui, &mut shown, passthrough_available) {
+        s.set_key(&shown);
+        s.key_own = Some(true);
+    }
+}
+
+/// "Remove the background" and its colour and fine-tune controls, for one
+/// video or the global default. True when anything changed.
+pub(super) fn chroma_controls(
+    ui: &mut egui::Ui,
+    s: &mut ViewSettings,
+    passthrough_available: bool,
+) -> bool {
+    let before = s.key();
+    let d = ViewSettings::default();
+    widgets::rows(ui, |r| {
         r.switch(
             "Remove the background",
             Some(if passthrough_available {
@@ -736,87 +777,87 @@ fn chroma_tab(
             &mut s.chroma_key,
         );
     });
-    if !s.chroma_key {
-        return;
-    }
-    widgets::section_label(ui, "Background colour");
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
-        for (label, c) in KEY_COLORS {
-            let on = s.key_color.iter().zip(c).all(|(a, b)| (a - b).abs() < 0.02);
-            if widgets::chip(ui, label, on).clicked() {
-                s.key_color = c;
+    if s.chroma_key {
+        widgets::section_label(ui, "Background colour");
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
+            for (label, c) in KEY_COLORS {
+                let on = s.key_color.iter().zip(c).all(|(a, b)| (a - b).abs() < 0.02);
+                if widgets::chip(ui, label, on).clicked() {
+                    s.key_color = c;
+                }
             }
-        }
-    });
-    widgets::rows(ui, |r| {
-        r.row("Colour", None, |ui| {
-            let [cr, cg, cb] = s.key_color.map(|c| (c.clamp(0.0, 1.0) * 255.0) as u8);
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(64.0, 32.0), egui::Sense::hover());
-            ui.painter().rect_filled(
-                rect,
-                egui::CornerRadius::same(8),
-                egui::Color32::from_rgb(cr, cg, cb),
+        });
+        widgets::rows(ui, |r| {
+            r.row("Colour", None, |ui| {
+                let [cr, cg, cb] = s.key_color.map(|c| (c.clamp(0.0, 1.0) * 255.0) as u8);
+                let (rect, _) = ui.allocate_exact_size(Vec2::new(64.0, 32.0), egui::Sense::hover());
+                ui.painter().rect_filled(
+                    rect,
+                    egui::CornerRadius::same(8),
+                    egui::Color32::from_rgb(cr, cg, cb),
+                );
+            });
+            r.slider(
+                "Red",
+                None,
+                &mut s.key_color[0],
+                0.0..=1.0,
+                d.key_color[0],
+                "",
+                2,
+            );
+            r.slider(
+                "Green",
+                None,
+                &mut s.key_color[1],
+                0.0..=1.0,
+                d.key_color[1],
+                "",
+                2,
+            );
+            r.slider(
+                "Blue",
+                None,
+                &mut s.key_color[2],
+                0.0..=1.0,
+                d.key_color[2],
+                "",
+                2,
             );
         });
-        r.slider(
-            "Red",
-            None,
-            &mut s.key_color[0],
-            0.0..=1.0,
-            d.key_color[0],
-            "",
-            2,
-        );
-        r.slider(
-            "Green",
-            None,
-            &mut s.key_color[1],
-            0.0..=1.0,
-            d.key_color[1],
-            "",
-            2,
-        );
-        r.slider(
-            "Blue",
-            None,
-            &mut s.key_color[2],
-            0.0..=1.0,
-            d.key_color[2],
-            "",
-            2,
-        );
-    });
-    widgets::section_label(ui, "Fine-tune");
-    widgets::rows(ui, |r| {
-        r.slider(
-            "Similarity",
-            Some("How close to the colour a pixel can be and still disappear."),
-            &mut s.key_similarity,
-            0.0..=1.0,
-            d.key_similarity,
-            "",
-            2,
-        );
-        r.slider(
-            "Edge softness",
-            None,
-            &mut s.key_smoothness,
-            0.0..=0.5,
-            d.key_smoothness,
-            "",
-            2,
-        );
-        r.slider(
-            "Spill removal",
-            Some("Takes the background's tint off hair and edges."),
-            &mut s.key_spill,
-            0.0..=1.0,
-            d.key_spill,
-            "",
-            2,
-        );
-    });
+        widgets::section_label(ui, "Fine-tune");
+        widgets::rows(ui, |r| {
+            r.slider(
+                "Similarity",
+                Some("How close to the colour a pixel can be and still disappear."),
+                &mut s.key_similarity,
+                0.0..=1.0,
+                d.key_similarity,
+                "",
+                2,
+            );
+            r.slider(
+                "Edge softness",
+                None,
+                &mut s.key_smoothness,
+                0.0..=0.5,
+                d.key_smoothness,
+                "",
+                2,
+            );
+            r.slider(
+                "Spill removal",
+                Some("Takes the background's tint off hair and edges."),
+                &mut s.key_spill,
+                0.0..=1.0,
+                d.key_spill,
+                "",
+                2,
+            );
+        });
+    }
+    s.key() != before
 }
 
 fn audio_and_text(ui: &mut egui::Ui, pb: &crate::playback::Playback, actions: &mut Vec<Action>) {
