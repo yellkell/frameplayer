@@ -196,7 +196,7 @@ function fpu_stripe(string $method, string $path, array $form = [], ?string $key
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_USERPWD => $key . ':',
         CURLOPT_TIMEOUT => 20,
-        CURLOPT_HTTPHEADER => ['Stripe-Version: 2024-06-20'],
+        CURLOPT_HTTPHEADER => ['Stripe-Version: 2025-03-31.basil'],
     ]);
     if ($method === 'POST') {
         curl_setopt($ch, CURLOPT_POST, true);
@@ -227,6 +227,9 @@ function fpu_checkout(array $code): array
                 'unit_amount' => FPU_PRICE_CENTS,
                 'product_data' => [
                     'name' => FPU_PRODUCT,
+                    // Downloadable Software - personal use: Managed Payments
+                    // (on by default for this account) needs a tax code.
+                    'tax_code' => 'txcd_10202000',
                     'description' => 'Passthrough videos in FramePlayer for Steam Frame: '
                         . 'background removal and built-in masks. One-time unlock.',
                 ],
