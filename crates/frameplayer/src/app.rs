@@ -264,6 +264,7 @@ impl App {
             self.unlocked = true;
             self.purchase = None;
             self.purchase_seen = None;
+            self.ui.unlocked_at = Some(Instant::now());
             self.ui.toast("Passthrough videos unlocked. Thank you!");
         } else {
             self.purchase_seen = Some(s);

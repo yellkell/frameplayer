@@ -285,18 +285,16 @@ fn passthrough(ui: &mut egui::Ui, v: &mut View) {
             );
         }
     });
-    heading(ui, "Passthrough videos");
+    ui.add_space(14.0);
     if !v.unlocked {
-        super::player::unlock_card(ui, v.purchase, v.actions);
+        super::player::unlock_card(ui, v.purchase, v.actions, false);
         return;
     }
-    ui.label(
-        RichText::new(
-            "Every video uses these. To change one video, open the sliders button \
-             while it plays, then the Passthrough tab.",
-        )
-        .font(theme::font(Weight::Regular, 16.0))
-        .color(theme::TEXT_2),
+    super::player::unlocked_header(
+        ui,
+        "Every video uses these. To change one video, open the sliders button while it plays, then the Passthrough tab.",
+        false,
+        v.state,
     );
     super::player::chroma_controls(ui, &mut s.default_view, available);
 }

@@ -7,6 +7,7 @@ pub mod icons;
 pub mod keyboard;
 pub mod library;
 pub mod player;
+pub mod premium;
 pub mod settings;
 pub mod sources;
 pub mod theme;
@@ -204,6 +205,8 @@ pub enum RemapSlot {
 pub struct UiState {
     pub screen: Screen,
     pub settings_tab: SettingsTab,
+    /// When passthrough videos were unlocked this session (the header celebrates).
+    pub unlocked_at: Option<std::time::Instant>,
     /// The controller input whose choices are open in Settings > Controller.
     pub remap_open: Option<RemapSlot>,
     pub search: String,
@@ -252,6 +255,7 @@ impl Default for UiState {
         UiState {
             screen: Screen::Home,
             settings_tab: SettingsTab::Playback,
+            unlocked_at: None,
             remap_open: None,
             search: String::new(),
             sort: fp_library::Sort::Added,
