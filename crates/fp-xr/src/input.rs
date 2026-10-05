@@ -21,11 +21,18 @@ pub struct Hand {
     pub stick: Vec2,
     /// Thumbstick pressed in.
     pub stick_click: bool,
-    /// A / X.
-    pub primary: bool,
-    /// B / Y.
-    pub secondary: bool,
+    /// The four face buttons by position. On the Frame's right controller
+    /// south is A, north Y, west X and east B; on the left they are the
+    /// D-pad's down, up, left and right. Touch has two per hand: A or X is
+    /// south, B east (right) and Y north (left).
+    pub south: bool,
+    pub north: bool,
+    pub west: bool,
+    pub east: bool,
+    /// Menu (right) or View (left).
     pub menu: bool,
+    /// The bumper above the grip.
+    pub shoulder: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -41,9 +48,12 @@ pub(crate) struct Actions {
     squeeze: xr::Action<f32>,
     stick: xr::Action<xr::Vector2f>,
     stick_click: xr::Action<bool>,
-    primary: xr::Action<bool>,
-    secondary: xr::Action<bool>,
+    south: xr::Action<bool>,
+    north: xr::Action<bool>,
+    west: xr::Action<bool>,
+    east: xr::Action<bool>,
     menu: xr::Action<bool>,
+    shoulder: xr::Action<bool>,
     haptic: xr::Action<xr::Haptic>,
     pub hands: [xr::Path; 2],
     aim_spaces: Option<[xr::Space; 2]>,
@@ -61,9 +71,12 @@ enum Kind {
     Squeeze,
     Stick,
     StickClick,
-    Primary,
-    Secondary,
+    South,
+    North,
+    West,
+    East,
     Menu,
+    Shoulder,
     Haptic,
 }
 
@@ -84,21 +97,20 @@ const PROFILES: &[(&str, &[Candidate])] = &[
             ("input/squeeze/value", Kind::Squeeze, 3),
             ("input/thumbstick", Kind::Stick, 3),
             ("input/thumbstick/click", Kind::StickClick, 3),
-            ("input/a/click", Kind::Primary, 2),
-            ("input/b/click", Kind::Secondary, 2),
-            // The Frame's X/Y are on the right controller too: same roles as
-            // A/B (DeoVR-style A/X play/pause, B/Y back).
-            ("input/x/click", Kind::Primary, 2),
-            ("input/y/click", Kind::Secondary, 2),
+            // The right controller has A/B/X/Y (Y top, X left, B right,
+            // A bottom); the left has a D-pad in the same places. Each is its
+            // own button: what they do is up to the app.
+            ("input/a/click", Kind::South, 2),
+            ("input/y/click", Kind::North, 2),
+            ("input/x/click", Kind::West, 2),
+            ("input/b/click", Kind::East, 2),
             ("input/menu/click", Kind::Menu, 2),
-            // The left controller has a D-pad where the right has A/B/X/Y
-            // (Y top, X left, B right, A bottom): the same places, the same
-            // roles.
-            ("input/dpad_down/click", Kind::Primary, 1),
-            ("input/dpad_left/click", Kind::Primary, 1),
-            ("input/dpad_right/click", Kind::Secondary, 1),
-            ("input/dpad_up/click", Kind::Secondary, 1),
+            ("input/dpad_down/click", Kind::South, 1),
+            ("input/dpad_up/click", Kind::North, 1),
+            ("input/dpad_left/click", Kind::West, 1),
+            ("input/dpad_right/click", Kind::East, 1),
             ("input/view/click", Kind::Menu, 1),
+            ("input/shoulder/click", Kind::Shoulder, 3),
             ("output/haptic", Kind::Haptic, 3),
         ],
     ),
@@ -110,10 +122,10 @@ const PROFILES: &[(&str, &[Candidate])] = &[
             ("input/squeeze/value", Kind::Squeeze, 3),
             ("input/thumbstick", Kind::Stick, 3),
             ("input/thumbstick/click", Kind::StickClick, 3),
-            ("input/a/click", Kind::Primary, 2),
-            ("input/b/click", Kind::Secondary, 2),
-            ("input/x/click", Kind::Primary, 1),
-            ("input/y/click", Kind::Secondary, 1),
+            ("input/a/click", Kind::South, 2),
+            ("input/b/click", Kind::East, 2),
+            ("input/x/click", Kind::South, 1),
+            ("input/y/click", Kind::North, 1),
             ("input/menu/click", Kind::Menu, 1),
             ("output/haptic", Kind::Haptic, 3),
         ],
@@ -163,15 +175,14 @@ impl Actions {
         let stick_click = set
             .create_action::<bool>("stick_click", "Reset view", &hands)
             .ctx("action")?;
-        let primary = set
-            .create_action::<bool>("primary", "Play/pause", &hands)
-            .ctx("action")?;
-        let secondary = set
-            .create_action::<bool>("secondary", "Back", &hands)
-            .ctx("action")?;
-        let menu = set
-            .create_action::<bool>("menu", "Menu", &hands)
-            .ctx("action")?;
+        let button =
+            |name: &str, label: &str| set.create_action::<bool>(name, label, &hands).ctx("action");
+        let south = button("south", "A / D-pad down")?;
+        let north = button("north", "Y / D-pad up")?;
+        let west = button("west", "X / D-pad left")?;
+        let east = button("east", "B / D-pad right")?;
+        let menu = button("menu", "Menu / View")?;
+        let shoulder = button("shoulder", "Bumper")?;
         let haptic = set
             .create_action::<xr::Haptic>("haptic", "Vibration", &hands)
             .ctx("action")?;
@@ -182,9 +193,12 @@ impl Actions {
             squeeze,
             stick,
             stick_click,
-            primary,
-            secondary,
+            south,
+            north,
+            west,
+            east,
             menu,
+            shoulder,
             haptic,
             hands,
             aim_spaces: None,
@@ -251,9 +265,12 @@ impl Actions {
                 Kind::Squeeze => xr::Binding::new(&self.squeeze, *p),
                 Kind::Stick => xr::Binding::new(&self.stick, *p),
                 Kind::StickClick => xr::Binding::new(&self.stick_click, *p),
-                Kind::Primary => xr::Binding::new(&self.primary, *p),
-                Kind::Secondary => xr::Binding::new(&self.secondary, *p),
+                Kind::South => xr::Binding::new(&self.south, *p),
+                Kind::North => xr::Binding::new(&self.north, *p),
+                Kind::West => xr::Binding::new(&self.west, *p),
+                Kind::East => xr::Binding::new(&self.east, *p),
                 Kind::Menu => xr::Binding::new(&self.menu, *p),
+                Kind::Shoulder => xr::Binding::new(&self.shoulder, *p),
                 Kind::Haptic => xr::Binding::new(&self.haptic, *p),
             })
             .collect();
@@ -305,26 +322,14 @@ impl Actions {
             if let Ok(s) = self.stick.state(session, *h) {
                 hand.stick = Vec2::new(s.current_state.x, s.current_state.y);
             }
-            hand.stick_click = self
-                .stick_click
-                .state(session, *h)
-                .map(|s| s.current_state)
-                .unwrap_or(false);
-            hand.primary = self
-                .primary
-                .state(session, *h)
-                .map(|s| s.current_state)
-                .unwrap_or(false);
-            hand.secondary = self
-                .secondary
-                .state(session, *h)
-                .map(|s| s.current_state)
-                .unwrap_or(false);
-            hand.menu = self
-                .menu
-                .state(session, *h)
-                .map(|s| s.current_state)
-                .unwrap_or(false);
+            let down = |a: &xr::Action<bool>| a.state(session, *h).is_ok_and(|s| s.current_state);
+            hand.stick_click = down(&self.stick_click);
+            hand.south = down(&self.south);
+            hand.north = down(&self.north);
+            hand.west = down(&self.west);
+            hand.east = down(&self.east);
+            hand.menu = down(&self.menu);
+            hand.shoulder = down(&self.shoulder);
             if let Some(spaces) = &self.aim_spaces
                 && let Ok(loc) = spaces[i].locate(base, time)
             {
@@ -339,15 +344,18 @@ impl Actions {
             }
             if self.debug {
                 let line = format!(
-                    "trigger {:.1} squeeze {:.1} stick {:.1},{:.1} click {} primary {} secondary {} menu {} aim {}{}",
+                    "trigger {:.1} squeeze {:.1} stick {:.1},{:.1} click {} s/n/w/e {}{}{}{} menu {} shoulder {} aim {}{}",
                     hand.trigger,
                     hand.squeeze,
                     hand.stick.x,
                     hand.stick.y,
                     hand.stick_click,
-                    hand.primary,
-                    hand.secondary,
+                    hand.south as u8,
+                    hand.north as u8,
+                    hand.west as u8,
+                    hand.east as u8,
                     hand.menu,
+                    hand.shoulder,
                     hand.aim.is_some(),
                     trigger_note
                 );
