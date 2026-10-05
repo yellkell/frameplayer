@@ -6,7 +6,7 @@ use crate::playback::{self, OpenRequest, Opened, Playback};
 use crate::services::Services;
 use crate::settings::Settings;
 use crate::ui::{self, Action, Browse, UiState, UpdateStatus, View};
-use crate::world::{Panel, Pointer, anchor_from_head, place};
+use crate::world::{Panel, Pointer, anchor_from_head, place, turned_with_picture};
 use fp_core::PlaybackStatus;
 use fp_core::format::Projection;
 use fp_library::Library;
@@ -1250,9 +1250,19 @@ impl App {
             .find(|&i| self.panels[i].visible && self.panels[i].wants_keyboard());
         self.panels[KEYBOARD].visible = kb_target.is_some();
 
-        // Placement.
+        // Placement. During 180°/360° video the control bar turns with the
+        // picture's yaw and pitch, so it stays below what you are watching.
+        // (A flat screen doesn't turn, and the adjust panel stays put so its
+        // yaw/pitch sliders don't move away from the pointer.)
+        let bar_anchor = match &self.playback {
+            Some(p) if p.format.projection != Projection::Flat => {
+                let s = p.current_settings();
+                turned_with_picture(anchor, s.yaw, s.pitch)
+            }
+            _ => anchor,
+        };
         self.panels[MAIN].pose = place(anchor, 0.0, 1.5, -0.08, 0.0);
-        self.panels[BAR].pose = place(anchor, 0.0, 1.05, -0.42, 28.0);
+        self.panels[BAR].pose = place(bar_anchor, 0.0, 1.05, -0.42, 28.0);
         self.panels[ADJUST].pose = place(anchor, -38.0, 1.15, -0.12, 0.0);
         self.panels[KEYBOARD].pose = place(anchor, 0.0, 0.95, -0.55, 35.0);
 
