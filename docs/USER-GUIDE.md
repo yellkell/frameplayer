@@ -100,7 +100,7 @@ picture. Play/pause and seeking are under either thumb.
 | Thumbstick up / down | Volume (or scroll a menu you point at) | Tilt the picture (or scroll a menu you point at) |
 | Thumbstick press | Mute | Reset the picture |
 | A / D-pad down | Play / pause | Play / pause |
-| B / D-pad right | Back: closes the open panel, then shows the library over the video, then returns to the video | (spare) |
+| B / D-pad right | Back: closes the open panel, then shows the library over the video, then returns to the video | Passthrough on / off (in the library and with flat videos) |
 | X / D-pad left | Previous video in the list you opened it from | Adjust panel |
 | Y / D-pad up | Next video | Show or hide the controls |
 | Menu / View | Library | Recenter |
