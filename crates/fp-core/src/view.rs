@@ -37,6 +37,17 @@ pub struct ViewSettings {
     pub screen_curvature: f32,
     /// Subtitle depth in metres.
     pub subtitle_distance: f32,
+    /// Chroma key: makes one colour of the video see-through (a green or
+    /// blue screen), so passthrough or the background shows there.
+    pub chroma_key: bool,
+    /// The colour to remove, sRGB 0..1.
+    pub key_color: [f32; 3],
+    /// How far (in chroma) from the key colour a pixel still disappears.
+    pub key_similarity: f32,
+    /// Width of the soft edge beyond that.
+    pub key_smoothness: f32,
+    /// How much key-coloured fringe to take out of what stays.
+    pub key_spill: f32,
 }
 
 impl Default for ViewSettings {
@@ -61,6 +72,11 @@ impl Default for ViewSettings {
             screen_width: 6.0,
             screen_curvature: 0.0,
             subtitle_distance: 2.5,
+            chroma_key: false,
+            key_color: [0.0, 1.0, 0.0],
+            key_similarity: 0.4,
+            key_smoothness: 0.08,
+            key_spill: 0.1,
         }
     }
 }
@@ -94,6 +110,19 @@ impl ViewSettings {
             screen_width: l(self.screen_width, other.screen_width),
             screen_curvature: l(self.screen_curvature, other.screen_curvature),
             subtitle_distance: l(self.subtitle_distance, other.subtitle_distance),
+            chroma_key: if t < 0.5 {
+                self.chroma_key
+            } else {
+                other.chroma_key
+            },
+            key_color: [
+                l(self.key_color[0], other.key_color[0]),
+                l(self.key_color[1], other.key_color[1]),
+                l(self.key_color[2], other.key_color[2]),
+            ],
+            key_similarity: l(self.key_similarity, other.key_similarity),
+            key_smoothness: l(self.key_smoothness, other.key_smoothness),
+            key_spill: l(self.key_spill, other.key_spill),
         }
     }
 }

@@ -33,7 +33,12 @@ struct Params {
     extra: vec4<f32>,
     // x width, y height, z 1/width, w 1/height (luma texels)
     tex_size: vec4<f32>,
+    // Premultiplied; alpha 0 lets passthrough show through.
     bg_color: vec4<f32>,
+    // Chroma key: x, y the key colour's Cb, Cr; z similarity; w smoothness
+    key: vec4<f32>,
+    // x spill, y on
+    key2: vec4<f32>,
 };
 
 struct PushConstants {
@@ -294,6 +299,19 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let tuv = to_eye_rect(uv, eye);
     var rgb = sample_yuv(tuv);
 
+    // Chroma key (as OBS does it): pixels whose chroma is near the key
+    // colour's turn see-through, with a soft edge, and the key colour's
+    // fringe is desaturated out of what stays.
+    var alpha = 1.0;
+    if (params.key2.y > 0.5) {
+        let c = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+        let cbcr = vec2<f32>(dot(c, vec3<f32>(-0.1146, -0.3854, 0.5)), dot(c, vec3<f32>(0.5, -0.4542, -0.0458)));
+        let d = distance(cbcr, params.key.xy) - params.key.z;
+        alpha = pow(clamp(d / max(params.key.w, 1e-4), 0.0, 1.0), 1.5);
+        let spill = pow(clamp(d / max(params.key2.x, 1e-4), 0.0, 1.0), 1.5);
+        rgb = mix(vec3<f32>(dot(c, vec3<f32>(0.2126, 0.7152, 0.0722))), rgb, spill);
+    }
+
     // Sharpen: unsharp mask on luma.
     if (params.extra.x > 0.0) {
         let dx = vec2<f32>(params.tex_size.z, 0.0);
@@ -325,5 +343,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let luma = dot(g, vec3<f32>(0.2126, 0.7152, 0.0722));
     g = mix(vec3<f32>(luma), g, params.picture.z);
     g = pow(max(g, vec3<f32>(0.0)), vec3<f32>(1.0 / max(params.picture.w, 0.05)));
-    return vec4<f32>(srgb_to_linear(clamp(g, vec3<f32>(0.0), vec3<f32>(1.0))), 1.0);
+    let col = srgb_to_linear(clamp(g, vec3<f32>(0.0), vec3<f32>(1.0)));
+    // Over the (premultiplied) background: keyed-out pixels show it.
+    return vec4<f32>(col * alpha + params.bg_color.rgb * (1.0 - alpha), alpha + params.bg_color.a * (1.0 - alpha));
 }

@@ -428,11 +428,12 @@ fn seek_bar(
     }
 }
 
-const TABS: [(&str, &str); 6] = [
+const TABS: [(&str, &str); 7] = [
     (icons::FRAME_CORNERS, "Format"),
     (icons::ARROWS_OUT_CARDINAL, "Position"),
     (icons::CUBE, "Stereo"),
     (icons::SUN, "Picture"),
+    (icons::EYEGLASSES, "Passthrough"),
     (icons::SUBTITLES, "Audio & subs"),
     (icons::VIBRATE, "Haptics"),
 ];
@@ -459,7 +460,7 @@ pub fn adjust_panel(ctx: &egui::Context, v: &mut View) {
         }
         ui.add_space(10.0);
         // Save and reset stay at the bottom while the page scrolls.
-        let footer = v.state.adjust_tab <= 3;
+        let footer = v.state.adjust_tab <= 4;
         let footer_h = if footer { 64.0 } else { 0.0 };
         let page = ui.available_height() - footer_h;
         egui::ScrollArea::vertical()
@@ -629,7 +630,8 @@ pub fn adjust_panel(ctx: &egui::Context, v: &mut View) {
                             r.slider("Sharpen", None, &mut s.sharpen, 0.0..=1.0, 0.0, "", 2);
                         });
                     }
-                    4 => audio_and_text(ui, pb, v.actions),
+                    4 => chroma_tab(ui, s, v.passthrough_available),
+                    5 => audio_and_text(ui, pb, v.actions),
                     _ => haptics_tab(ui, pb.script_count, v.settings, v.devices),
                 }
                 if pb.settings != before {
@@ -683,6 +685,112 @@ pub fn adjust_panel(ctx: &egui::Context, v: &mut View) {
                 }
             });
         }
+    });
+}
+
+/// Chroma key colours offered as one tap.
+const KEY_COLORS: [(&str, [f32; 3]); 3] = [
+    ("Green screen", [0.0, 1.0, 0.0]),
+    ("Blue screen", [0.0, 0.0, 1.0]),
+    ("Magenta", [1.0, 0.0, 1.0]),
+];
+
+/// Passthrough tab: chroma key, so a video's green or blue background turns
+/// see-through and the room shows behind it (saved per video).
+fn chroma_tab(ui: &mut egui::Ui, s: &mut ViewSettings, passthrough_available: bool) {
+    let d = ViewSettings::default();
+    widgets::rows(ui, |r| {
+        r.switch(
+            "Remove the background",
+            Some(if passthrough_available {
+                "Makes one colour of the video see-through, so your room shows behind it."
+            } else {
+                "Makes one colour of the video see-through. This headset doesn't share \
+                 passthrough with apps, so it turns dark instead."
+            }),
+            &mut s.chroma_key,
+        );
+    });
+    if !s.chroma_key {
+        return;
+    }
+    widgets::section_label(ui, "Background colour");
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
+        for (label, c) in KEY_COLORS {
+            let on = s.key_color.iter().zip(c).all(|(a, b)| (a - b).abs() < 0.02);
+            if widgets::chip(ui, label, on).clicked() {
+                s.key_color = c;
+            }
+        }
+    });
+    widgets::rows(ui, |r| {
+        r.row("Colour", None, |ui| {
+            let [cr, cg, cb] = s.key_color.map(|c| (c.clamp(0.0, 1.0) * 255.0) as u8);
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(64.0, 32.0), egui::Sense::hover());
+            ui.painter().rect_filled(
+                rect,
+                egui::CornerRadius::same(8),
+                egui::Color32::from_rgb(cr, cg, cb),
+            );
+        });
+        r.slider(
+            "Red",
+            None,
+            &mut s.key_color[0],
+            0.0..=1.0,
+            d.key_color[0],
+            "",
+            2,
+        );
+        r.slider(
+            "Green",
+            None,
+            &mut s.key_color[1],
+            0.0..=1.0,
+            d.key_color[1],
+            "",
+            2,
+        );
+        r.slider(
+            "Blue",
+            None,
+            &mut s.key_color[2],
+            0.0..=1.0,
+            d.key_color[2],
+            "",
+            2,
+        );
+    });
+    widgets::section_label(ui, "Fine-tune");
+    widgets::rows(ui, |r| {
+        r.slider(
+            "Similarity",
+            Some("How close to the colour a pixel can be and still disappear."),
+            &mut s.key_similarity,
+            0.0..=1.0,
+            d.key_similarity,
+            "",
+            2,
+        );
+        r.slider(
+            "Edge softness",
+            None,
+            &mut s.key_smoothness,
+            0.0..=0.5,
+            d.key_smoothness,
+            "",
+            2,
+        );
+        r.slider(
+            "Spill removal",
+            Some("Takes the background's tint off hair and edges."),
+            &mut s.key_spill,
+            0.0..=1.0,
+            d.key_spill,
+            "",
+            2,
+        );
     });
 }
 

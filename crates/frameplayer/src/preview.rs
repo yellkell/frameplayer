@@ -21,7 +21,8 @@
 //! | `shot NAME` | save the left eye as OUT_DIR/NAME.png |
 //! | `sbs NAME` | save both eyes side by side |
 //! | `screen NAME [TAB]` | show a browser screen (`home`, `library`, `sources`, `settings` and its tab) |
-//! | `adjust` | open the adjustments panel |
+//! | `adjust [TAB]` | open the adjustments panel (at tab TAB) |
+//! | `chroma` | turn chroma key on for the open video |
 //! | `panel PANEL NAME` | save a panel's image flat, pixel for pixel, as OUT_DIR/NAME.png |
 
 use crate::app::{App, FrameInput};
@@ -252,6 +253,18 @@ impl Sim {
             }
             Some("adjust") => {
                 self.app.ui.adjust_open = true;
+                // `adjust N` opens tab N.
+                if let Some(tab) = parts.get(1).and_then(|t| t.parse().ok()) {
+                    self.app.ui.adjust_tab = tab;
+                }
+                self.app.repaint_all();
+                self.run_frames(3)?;
+            }
+            // Turns chroma key on for the open video (the Passthrough tab).
+            Some("chroma") => {
+                if let Some(p) = &mut self.app.playback {
+                    p.settings.chroma_key = true;
+                }
                 self.app.repaint_all();
                 self.run_frames(3)?;
             }

@@ -122,6 +122,17 @@ under ⚙, or press the left thumbstick to undo them.
 Text fields bring up a keyboard in front of you; you can also type on your
 phone through the web remote.
 
+## Passthrough videos (chroma key)
+
+Videos filmed against a green or blue screen can show your room instead of
+the screen: open the adjust panel's **Passthrough** tab, turn on **Remove the
+background** and pick the colour (green screen, blue screen, or any colour
+with the red/green/blue sliders). **Similarity** sets how close a colour must
+be to disappear, **Edge softness** feathers the cut, and **Spill removal**
+takes the screen's tint off hair and edges. Save it for that video like any
+other adjustment. A keyed video turns passthrough on by itself, whatever its
+format.
+
 ## Web XR games and experiences
 
 WebXR pages run in **Chromium XR for Steam Frame**, a separate app from this

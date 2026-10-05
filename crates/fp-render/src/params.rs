@@ -27,6 +27,8 @@ pub(crate) struct SceneParams {
     pub extra: Vec4,
     pub tex_size: Vec4,
     pub bg_color: Vec4,
+    pub key: Vec4,
+    pub key2: Vec4,
 }
 
 /// Everything about the video that the projection pass needs, other than
@@ -154,6 +156,7 @@ pub(crate) fn build(
     let arc = s.screen_curvature.clamp(0.0, 1.0) * std::f32::consts::TAU / 3.0;
     let correction =
         Mat4::from_euler(EulerRot::YXZ, deg(s.yaw), deg(s.pitch), deg(s.roll)).inverse();
+    let kc = chroma(s.key_color);
     let (transfer, wide) = match frame {
         Some(f) => (
             match f.color.transfer {
@@ -191,7 +194,19 @@ pub(crate) fn build(
             1.0 / tex.1 as f32,
         ),
         bg_color: Vec4::from(video.background),
+        key: Vec4::new(kc.x, kc.y, s.key_similarity, s.key_smoothness),
+        key2: Vec4::new(s.key_spill, s.chroma_key as u32 as f32, 0.0, 0.0),
     }
+}
+
+/// Chroma (BT.709 Cb, Cr) of an sRGB-encoded colour, as the shader computes it
+/// from the video's samples.
+pub(crate) fn chroma(rgb: [f32; 3]) -> glam::Vec2 {
+    let [r, g, b] = rgb;
+    glam::Vec2::new(
+        -0.1146 * r - 0.3854 * g + 0.5 * b,
+        0.5 * r - 0.4542 * g - 0.0458 * b,
+    )
 }
 
 #[cfg(test)]

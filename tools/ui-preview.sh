@@ -76,6 +76,11 @@ adjust
 frames 8
 panel adjust adjust
 panel bar player-bar-adjust
+# The Passthrough tab, with chroma key on.
+adjust 4
+chroma
+frames 8
+panel adjust adjust-passthrough
 EOF
 
 cargo build -p frameplayer

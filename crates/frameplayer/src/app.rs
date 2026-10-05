@@ -1414,7 +1414,14 @@ impl App {
             .playback
             .as_ref()
             .is_none_or(|p| p.format.projection == Projection::Flat);
-        let passthrough = self.settings.passthrough && passthrough_available && flat_or_none;
+        // A chroma-keyed video shows the room where its background was,
+        // whatever its projection and whether or not passthrough is on.
+        let keyed = self
+            .playback
+            .as_ref()
+            .is_some_and(|p| p.current_settings().chroma_key);
+        let passthrough =
+            passthrough_available && ((self.settings.passthrough && flat_or_none) || keyed);
         if passthrough {
             video.background = [0.0; 4];
         }

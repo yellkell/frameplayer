@@ -63,6 +63,10 @@ fn px(img: &[u8], x: u32, y: u32) -> [u8; 3] {
     [img[i], img[i + 1], img[i + 2]]
 }
 
+fn alpha(img: &[u8], x: u32, y: u32) -> u8 {
+    img[((y * SIZE + x) * 4 + 3) as usize]
+}
+
 fn centre(img: &[u8]) -> [u8; 3] {
     px(img, SIZE / 2, SIZE / 2)
 }
@@ -80,6 +84,49 @@ fn params(projection: Projection, stereo: StereoLayout, settings: ViewSettings) 
         settings,
         ..Default::default()
     }
+}
+
+#[test]
+fn chroma_key_makes_the_green_screen_see_through() {
+    let Some((mut r, mut e)) = setup() else {
+        return;
+    };
+    // Green screen on the left half of a 180° video, a red subject on the right.
+    let f = frame(256, 128, |u, _| {
+        if u < 0.5 {
+            [20, 220, 40]
+        } else {
+            [230, 20, 20]
+        }
+    });
+    let keyed = ViewSettings {
+        chroma_key: true,
+        ..ViewSettings::default()
+    };
+    let mut p = params(Projection::EQUIRECT_180, StereoLayout::Mono, keyed);
+    p.background = [0.0; 4];
+    let [l, _] = render(&mut r, &mut e, Some(&f), &p, &[]);
+    let (green, red) = ((SIZE / 4, SIZE / 2), (3 * SIZE / 4, SIZE / 2));
+    assert!(
+        alpha(&l, green.0, green.1) < 10,
+        "green screen gone: alpha {}",
+        alpha(&l, green.0, green.1)
+    );
+    assert!(
+        alpha(&l, red.0, red.1) > 245,
+        "subject stays: alpha {}",
+        alpha(&l, red.0, red.1)
+    );
+    assert!(
+        is_red(px(&l, red.0, red.1)),
+        "subject colour {:?}",
+        px(&l, red.0, red.1)
+    );
+
+    // Off, the same frame is opaque everywhere.
+    p.settings.chroma_key = false;
+    let [l, _] = render(&mut r, &mut e, Some(&f), &p, &[]);
+    assert!(alpha(&l, green.0, green.1) > 245);
 }
 
 #[test]
