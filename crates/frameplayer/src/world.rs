@@ -209,6 +209,20 @@ pub fn place(anchor: Mat4, yaw_deg: f32, distance: f32, offset_y: f32, tilt_deg:
         * Mat4::from_rotation_x(-tilt_deg.to_radians())
 }
 
+/// `anchor` turned about the viewer the way the renderer turns a 180°/360°
+/// picture for its yaw and pitch (degrees, left and up positive), so a panel
+/// placed from it moves with the picture. Roll is left out: it levels a
+/// crooked camera, and a panel rolled with it would no longer be level.
+pub fn turned_with_picture(anchor: Mat4, yaw_deg: f32, pitch_deg: f32) -> Mat4 {
+    anchor
+        * Mat4::from_euler(
+            glam::EulerRot::YXZ,
+            yaw_deg.to_radians(),
+            pitch_deg.to_radians(),
+            0.0,
+        )
+}
+
 /// Yaw-only anchor at the head position.
 pub fn anchor_from_head(position: Vec3, orientation: Quat) -> Mat4 {
     let (yaw, _, _) = orientation.to_euler(glam::EulerRot::YXZ);
@@ -574,6 +588,41 @@ mod tests {
         let r = ptr.route(&mut [&mut p], &hands, 0.016);
         assert!(r.click_outside && !r.over_ui);
         assert_eq!(ptr.active, 0);
+    }
+
+    #[test]
+    fn turned_panels_follow_the_picture() {
+        let head = Vec3::new(0.0, 1.6, 0.0);
+        let anchor = anchor_from_head(head, Quat::from_rotation_y(0.4));
+        let (anchor_yaw, _, _) = anchor
+            .to_scale_rotation_translation()
+            .1
+            .to_euler(glam::EulerRot::YXZ);
+        let (yaw, pitch) = (35.0_f32, -20.0_f32);
+        // Where the renderer shows the picture's centre: its correction is
+        // the inverse of this rotation (fp-render params.rs), with the
+        // anchor's yaw added to the picture's (app.rs).
+        let picture = Mat4::from_euler(
+            glam::EulerRot::YXZ,
+            anchor_yaw + yaw.to_radians(),
+            pitch.to_radians(),
+            0.0,
+        )
+        .transform_vector3(Vec3::NEG_Z);
+        let turned = turned_with_picture(anchor, yaw, pitch);
+        let ahead = (place(turned, 0.0, 1.0, 0.0, 0.0).transform_point3(Vec3::ZERO) - head)
+            .normalize();
+        assert!(ahead.distance(picture) < 1e-4, "{ahead} vs {picture}");
+        assert!(ahead.y < -0.3, "negative pitch moves it down");
+        // The bar's spot below the view stays below it, at the same distance.
+        let bar = place(turned, 0.0, 1.05, -0.42, 28.0).transform_point3(Vec3::ZERO);
+        let rest = place(anchor, 0.0, 1.05, -0.42, 28.0).transform_point3(Vec3::ZERO);
+        assert!(((bar - head).length() - (rest - head).length()).abs() < 1e-4);
+        assert!((bar - head).dot(picture) > 0.9 * (bar - head).length());
+        // No roll: the panel's right edge stays level.
+        let right = turned.transform_vector3(Vec3::X);
+        assert!(right.y.abs() < 1e-5, "{right}");
+        assert_eq!(turned_with_picture(anchor, 0.0, 0.0), anchor);
     }
 
     #[test]
