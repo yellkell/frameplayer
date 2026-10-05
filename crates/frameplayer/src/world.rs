@@ -610,8 +610,8 @@ mod tests {
         )
         .transform_vector3(Vec3::NEG_Z);
         let turned = turned_with_picture(anchor, yaw, pitch);
-        let ahead = (place(turned, 0.0, 1.0, 0.0, 0.0).transform_point3(Vec3::ZERO) - head)
-            .normalize();
+        let ahead =
+            (place(turned, 0.0, 1.0, 0.0, 0.0).transform_point3(Vec3::ZERO) - head).normalize();
         assert!(ahead.distance(picture) < 1e-4, "{ahead} vs {picture}");
         assert!(ahead.y < -0.3, "negative pitch moves it down");
         // The bar's spot below the view stays below it, at the same distance.
