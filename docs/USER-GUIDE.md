@@ -142,7 +142,7 @@ on and off.
 
 ### Videos with their own mask (`_alpha`)
 
-Passthrough videos from SLR and others carry a see-through mask inside the
+Many passthrough videos carry a see-through mask inside the
 picture, and their names end in `_alpha` (for example
 `Scene_4096p_FISHEYE190_alpha.mp4`). FramePlayer reads the mask by itself:
 only the people stay and the room shows around them, with nothing to set.

@@ -1,5 +1,5 @@
 //! Library managers that publish VR scenes as JSON: the DeoVR feed
-//! (`/deovr` in XBVR, Stash plugins, SLR-style sites) and the HereSphere
+//! (`/deovr` in XBVR, Stash plugins, VR video sites) and the HereSphere
 //! JSON API (`/heresphere` in XBVR and Stash).
 //!
 //! Both map to the same shape: the root lists scene groups as folders, a

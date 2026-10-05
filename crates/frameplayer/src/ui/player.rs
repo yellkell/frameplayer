@@ -724,8 +724,8 @@ fn chroma_tab(
         let desc = if packed && format.alpha_pack_scale().is_none() {
             "Only side-by-side videos can carry a mask: set the format to a side-by-side one."
         } else {
-            "For passthrough videos that carry a see-through mask, like SLR's. On by itself \
-             when the file name has _alpha in it."
+            "For passthrough videos that carry a see-through mask. On by itself when the \
+             file name has _alpha in it."
         };
         if r.switch("Use the video's mask", Some(desc), &mut packed) {
             actions.push(Action::SetFormat(Some(VideoFormat {

@@ -88,9 +88,9 @@ pub struct VideoFormat {
     /// The file packs the right eye first (`_RL`, `_BT`).
     #[serde(default)]
     pub eyes_swapped: bool,
-    /// A passthrough video carrying its own see-through mask (`_ALPHA`, as
-    /// SLR's): each eye's mask, scaled to [`ALPHA_PACK_SCALE`], sits in the
-    /// red channel outside the fisheye circles of a side-by-side frame.
+    /// A passthrough video carrying its own see-through mask (`_ALPHA`):
+    /// each eye's mask, scaled to [`ALPHA_PACK_SCALE`], sits in the red
+    /// channel outside the fisheye circles of a side-by-side frame.
     #[serde(default)]
     pub alpha_packed: bool,
 }
@@ -450,10 +450,7 @@ mod tests {
 
     #[test]
     fn alpha_packed_passthrough() {
-        let f = detect_from_name(
-            "SLR_VRSpy_Pass-Through_ Gal Ritchie On Demand_4096p_79889_FISHEYE190_alpha.mp4",
-        )
-        .unwrap();
+        let f = detect_from_name("Concert Pass-Through_4096p_FISHEYE190_alpha.mp4").unwrap();
         assert_eq!(f.projection, P::fisheye(190.0));
         assert_eq!(f.stereo, S::SideBySide);
         assert!(f.alpha_packed);

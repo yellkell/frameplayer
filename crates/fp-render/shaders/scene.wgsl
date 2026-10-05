@@ -312,7 +312,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         rgb = mix(vec3<f32>(dot(c, vec3<f32>(0.2126, 0.7152, 0.0722))), rgb, spill);
     }
 
-    // Alpha-packed passthrough video (SLR's `_alpha`): each eye's mask, scaled
+    // Alpha-packed passthrough video (`_alpha` names): each eye's mask, scaled
     // down, sits in the red channel outside the fisheye circles, centred on
     // the frame's top middle for the left half and on its corner for the
     // right half, wrapping round the frame's edges.

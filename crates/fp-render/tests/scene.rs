@@ -135,7 +135,7 @@ fn alpha_packed_mask_cuts_out_each_eye() {
     let Some((mut r, mut e)) = setup() else {
         return;
     };
-    // SLR-style side-by-side fisheye: a blue picture in each eye, and in the
+    // Alpha-packed side-by-side fisheye: a blue picture in each eye, and in the
     // red channel outside the circles each eye's mask scaled to 0.4, the left
     // half's centred on the top middle, the right half's on the corner. The
     // masks keep the right half of each eye (eye u > 0.5): frame x in
