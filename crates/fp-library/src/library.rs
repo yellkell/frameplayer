@@ -1353,6 +1353,53 @@ mod tests {
     }
 
     #[test]
+    fn formats_saved_before_masks_take_the_mask_from_the_name() {
+        let lib = lib();
+        let a = add(&lib, "/card/Scene_4000p_FISHEYE190_alpha.mp4");
+        let b = add(&lib, "/card/Scene_4000p_FISHEYE190.mp4");
+        let old = r#"{"projection":{"kind":"fisheye","fov":190.0},"stereo":"side_by_side","eyes_swapped":false}"#;
+        let set = |id: MediaId, json: &str| {
+            lib.with(|c| {
+                Ok(c.execute(
+                    "UPDATE media SET user_format = ?2 WHERE id = ?1",
+                    rusqlite::params![id.0, json],
+                )?)
+            })
+            .unwrap();
+        };
+        set(a, old);
+        set(b, old);
+        assert!(
+            lib.get(a)
+                .unwrap()
+                .unwrap()
+                .user_format
+                .unwrap()
+                .alpha_packed
+        );
+        assert!(
+            !lib.get(b)
+                .unwrap()
+                .unwrap()
+                .user_format
+                .unwrap()
+                .alpha_packed
+        );
+        // Turned off since: stays off.
+        let mut off = lib.get(a).unwrap().unwrap().user_format.unwrap();
+        off.alpha_packed = false;
+        lib.set_user_format(a, Some(off)).unwrap();
+        assert!(
+            !lib.get(a)
+                .unwrap()
+                .unwrap()
+                .user_format
+                .unwrap()
+                .alpha_packed
+        );
+    }
+
+    #[test]
     fn markers_crud() {
         let lib = lib();
         let a = add(&lib, "/a.mp4");

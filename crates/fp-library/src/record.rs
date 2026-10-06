@@ -317,6 +317,26 @@ fn json_opt<T: DeserializeOwned>(row: &Row<'_>, idx: usize) -> rusqlite::Result<
     }
 }
 
+/// The format the viewer chose. One saved before masks existed (no
+/// `alpha_packed`) takes the mask from the file name, as detection does, so
+/// an `_alpha` video uses its mask; one saved since keeps its own choice.
+fn user_format_col(
+    row: &Row<'_>,
+    idx: usize,
+    location: &str,
+) -> rusqlite::Result<Option<VideoFormat>> {
+    let Some(text) = row.get::<_, Option<String>>(idx)? else {
+        return Ok(None);
+    };
+    let mut f: VideoFormat = serde_json::from_str(&text)
+        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(idx, Type::Text, Box::new(e)))?;
+    if !text.contains("alpha_packed") {
+        f.alpha_packed = fp_core::format::detect_from_name(file_name_of(location))
+            .is_some_and(|d| d.alpha_packed);
+    }
+    Ok(Some(f))
+}
+
 fn u32_opt(row: &Row<'_>, idx: usize) -> rusqlite::Result<Option<u32>> {
     Ok(row
         .get::<_, Option<i64>>(idx)?
@@ -326,9 +346,11 @@ fn u32_opt(row: &Row<'_>, idx: usize) -> rusqlite::Result<Option<u32>> {
 /// Builds a record from a row selected with [`MEDIA_COLUMNS`].
 pub(crate) fn media_from_row(row: &Row<'_>) -> rusqlite::Result<MediaRecord> {
     let evidence: String = row.get(11)?;
+    let location: String = row.get(1)?;
     Ok(MediaRecord {
         id: MediaId(row.get(0)?),
-        location: row.get(1)?,
+        user_format: user_format_col(row, 12, &location)?,
+        location,
         source_id: row.get(2)?,
         title: row.get(3)?,
         size: row.get::<_, Option<i64>>(4)?.map(|v| v.max(0) as u64),
@@ -341,7 +363,6 @@ pub(crate) fn media_from_row(row: &Row<'_>) -> rusqlite::Result<MediaRecord> {
             format: json_col(row, 10)?,
             evidence: parse_evidence(&evidence),
         },
-        user_format: json_opt(row, 12)?,
         view_settings: json_opt(row, 13)?,
         keyframes: json_col(row, 14)?,
         rating: row.get::<_, i64>(15)?.clamp(0, 5) as u8,

@@ -88,6 +88,7 @@ panel bar player-bar-adjust
 # The Passthrough tab, with chroma key on (unlocked above).
 adjust 4
 chroma
+mask
 frames 8
 panel adjust adjust-passthrough
 EOF

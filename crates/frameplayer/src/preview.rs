@@ -267,6 +267,14 @@ impl Sim {
                 self.app.repaint_all();
                 self.run_frames(3)?;
             }
+            // The open video uses its own mask, as an `_alpha` video does.
+            Some("mask") => {
+                if let Some(p) = &mut self.app.playback {
+                    p.format.alpha_packed = true;
+                }
+                self.app.repaint_all();
+                self.run_frames(3)?;
+            }
             // Turns the global chroma key on (Settings > Passthrough).
             Some("chroma-global") => {
                 self.app.settings.default_view.chroma_key = true;
