@@ -395,8 +395,8 @@ impl Pointer {
         }
         // Squeezing a grip while pointing at a panel grabs it; the trigger
         // doesn't click while that grip is held.
-        for i in 0..2 {
-            let grip = hands[i].squeeze > crate::controls::GRIP;
+        for (i, h) in hands.iter().enumerate() {
+            let grip = h.squeeze > crate::controls::GRIP;
             if grip
                 && !self.grips[i]
                 && let Some((pi, _, _)) = self.aims[i].and_then(|a| a.hit)

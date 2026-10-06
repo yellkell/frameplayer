@@ -114,9 +114,8 @@ pub struct App {
     trigger_prev: [f32; 2],
     /// Yaw/pitch when a dome drag began.
     drag_start: Option<(f32, f32)>,
-    /// A panel being moved: which, by which hand, the hand's angles and the
-    /// panel's offset when it was grabbed.
-    panel_drag: Option<(usize, usize, (f32, f32), [f32; 2])>,
+    /// A panel being moved.
+    panel_drag: Option<PanelDrag>,
     /// Where the library and adjust panels sit now (saved when let go).
     offsets: crate::settings::PanelOffsets,
     /// The list the open video came from, for next/previous.
@@ -135,6 +134,16 @@ pub struct App {
     /// An unlock purchase in progress, and its status as last shown.
     purchase: Option<crate::unlock::Purchase>,
     purchase_seen: Option<crate::unlock::Status>,
+}
+
+/// A panel held by a grip: which panel and hand, and the hand's aim angles
+/// and the panel's offset when it was grabbed.
+#[derive(Clone, Copy)]
+struct PanelDrag {
+    panel: usize,
+    hand: usize,
+    start: (f32, f32),
+    from: [f32; 2],
 }
 
 fn panel(px: [u32; 2], width_m: f32, ppp: f32) -> Panel {
@@ -276,10 +285,21 @@ impl App {
             } else {
                 self.offsets.adjust
             };
-            self.panel_drag = Some((panel, hand, angles(rot, anchor_rot), start));
+            self.panel_drag = Some(PanelDrag {
+                panel,
+                hand,
+                start: angles(rot, anchor_rot),
+                from: start,
+            });
             buzz.push((hand, 0.3, 14));
         }
-        let Some((panel, hand, (y0, p0), [oy, op])) = self.panel_drag else {
+        let Some(PanelDrag {
+            panel,
+            hand,
+            start: (y0, p0),
+            from: [oy, op],
+        }) = self.panel_drag
+        else {
             return;
         };
         let h = &hands[hand];
