@@ -77,7 +77,7 @@ const PITCH_SPEED: f32 = 30.0;
 const YAW_SPEED: f32 = 45.0;
 /// Volume change a second at full stick.
 const VOLUME_SPEED: f32 = 0.6;
-const GRIP: f32 = 0.7;
+pub(crate) const GRIP: f32 = 0.7;
 const TRIGGER: f32 = 0.7;
 const STICK: f32 = 0.75;
 const STICK_RELEASE: f32 = 0.35;
@@ -102,7 +102,7 @@ pub struct Controls {
 
 /// Yaw and pitch, degrees, of a controller's pointing direction in the
 /// anchor's frame (-Z forward).
-fn angles(aim: Quat, anchor: Quat) -> (f32, f32) {
+pub(crate) fn angles(aim: Quat, anchor: Quat) -> (f32, f32) {
     let d = (anchor.inverse() * aim * Vec3::NEG_Z).normalize_or_zero();
     (
         (-d.x).atan2(-d.z).to_degrees(),
@@ -110,7 +110,7 @@ fn angles(aim: Quat, anchor: Quat) -> (f32, f32) {
     )
 }
 
-fn wrap(deg: f32) -> f32 {
+pub(crate) fn wrap(deg: f32) -> f32 {
     (deg + 180.0).rem_euclid(360.0) - 180.0
 }
 

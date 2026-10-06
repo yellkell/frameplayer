@@ -66,6 +66,16 @@ pub struct Settings {
     pub controls: crate::bindings::Bindings,
     /// The passthrough videos licence from yellkell.com/unlock.
     pub unlock: Option<String>,
+    /// Where the library and adjust panels were moved to: yaw and pitch in
+    /// degrees from their usual places (left and up positive).
+    pub panel_offsets: PanelOffsets,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PanelOffsets {
+    pub main: [f32; 2],
+    pub adjust: [f32; 2],
 }
 
 impl Default for Settings {
@@ -98,6 +108,7 @@ impl Default for Settings {
             ui_scale: 1.0,
             controls: crate::bindings::Bindings::default(),
             unlock: None,
+            panel_offsets: PanelOffsets::default(),
         }
     }
 }

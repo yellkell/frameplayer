@@ -6,7 +6,7 @@ use crate::playback::{self, OpenRequest, Opened, Playback};
 use crate::services::Services;
 use crate::settings::Settings;
 use crate::ui::{self, Action, Browse, UiState, UpdateStatus, View};
-use crate::world::{Panel, Pointer, anchor_from_head, place, turned_with_picture};
+use crate::world::{Panel, Pointer, anchor_from_head, place, place_around, turned_with_picture};
 use fp_core::PlaybackStatus;
 use fp_core::format::Projection;
 use fp_library::Library;
@@ -114,6 +114,11 @@ pub struct App {
     trigger_prev: [f32; 2],
     /// Yaw/pitch when a dome drag began.
     drag_start: Option<(f32, f32)>,
+    /// A panel being moved: which, by which hand, the hand's angles and the
+    /// panel's offset when it was grabbed.
+    panel_drag: Option<(usize, usize, (f32, f32), [f32; 2])>,
+    /// Where the library and adjust panels sit now (saved when let go).
+    offsets: crate::settings::PanelOffsets,
     /// The list the open video came from, for next/previous.
     queue: Vec<OpenRequest>,
     queue_pos: usize,
@@ -180,6 +185,8 @@ impl App {
             controls: Default::default(),
             trigger_prev: [0.0; 2],
             drag_start: None,
+            panel_drag: None,
+            offsets: Default::default(),
             queue: Vec::new(),
             queue_pos: 0,
             last_status: None,
@@ -195,6 +202,7 @@ impl App {
             purchase: None,
             purchase_seen: None,
         };
+        app.offsets = app.settings.panel_offsets;
         app.rescan(false);
         for cfg in app.settings.haptic_devices.clone() {
             app.connect_device(cfg);
@@ -249,6 +257,49 @@ impl App {
     }
 
     /// Repaints every panel next frame (the preview changed the UI state).
+    /// Squeezing a grip on the library or adjust panel moves it round the
+    /// viewer with that hand; where it is let go is saved.
+    fn move_panels(
+        &mut self,
+        grab: Option<(usize, usize)>,
+        hands: &[Hand; 2],
+        anchor: Mat4,
+        buzz: &mut Vec<(usize, f32, i64)>,
+    ) {
+        use crate::controls::{GRIP, angles, wrap};
+        let anchor_rot = anchor.to_scale_rotation_translation().1;
+        if let Some((panel, hand)) = grab.filter(|g| [MAIN, ADJUST].contains(&g.0))
+            && let Some((_, rot)) = hands[hand].aim
+        {
+            let start = if panel == MAIN {
+                self.offsets.main
+            } else {
+                self.offsets.adjust
+            };
+            self.panel_drag = Some((panel, hand, angles(rot, anchor_rot), start));
+            buzz.push((hand, 0.3, 14));
+        }
+        let Some((panel, hand, (y0, p0), [oy, op])) = self.panel_drag else {
+            return;
+        };
+        let h = &hands[hand];
+        if h.squeeze > GRIP * 0.6 {
+            if let Some((_, rot)) = h.aim {
+                let (y, p) = angles(rot, anchor_rot);
+                let to = [wrap(oy + wrap(y - y0)), (op + p - p0).clamp(-45.0, 45.0)];
+                if panel == MAIN {
+                    self.offsets.main = to;
+                } else {
+                    self.offsets.adjust = to;
+                }
+                self.last_activity = Instant::now();
+            }
+        } else {
+            self.panel_drag = None;
+            self.settings.panel_offsets = self.offsets;
+        }
+    }
+
     /// Follows an unlock purchase; once paid, keeps the licence.
     fn poll_purchase(&mut self) {
         let Some(p) = &self.purchase else {
@@ -1400,9 +1451,12 @@ impl App {
             }
             _ => anchor,
         };
-        self.panels[MAIN].pose = place(anchor, 0.0, 1.5, -0.08, 0.0);
+        let [my, mp] = self.offsets.main;
+        let [ay, ap] = self.offsets.adjust;
+        self.panels[MAIN].pose = place_around(anchor, my, mp, 1.5, -0.08);
         self.panels[BAR].pose = place(bar_anchor, 0.0, 1.05, -0.42, 28.0);
-        self.panels[ADJUST].pose = place(anchor, -38.0, 1.15, -0.12, 0.0);
+        // To the right, clear of the control bar's end.
+        self.panels[ADJUST].pose = place_around(anchor, -48.0 + ay, ap, 1.15, -0.08);
         self.panels[KEYBOARD].pose = place(anchor, 0.0, 0.95, -0.55, 35.0);
 
         // Pointer → panel events.
@@ -1412,6 +1466,7 @@ impl App {
                 .route(&mut [a, b, c, d], &input.hands, input.dt)
         };
         let mut buzz = Vec::new();
+        self.move_panels(routed.grab, &input.hands, anchor, &mut buzz);
         self.controller(
             &input,
             routed.over_ui,

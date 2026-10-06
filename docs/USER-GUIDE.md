@@ -120,7 +120,9 @@ picture. Play/pause and seeking are under either thumb.
 | Hold grip + trigger, move | Drag the picture (the dome follows your hand) | The same |
 | Trigger | Click; on empty space, show or hide the controls | The same |
 
-Both grips together also recenter.
+Both grips together also recenter. Point at the library or adjust panel and
+hold grip to move it; it stays where you leave it. The format on the control
+bar (for example 180° SBS) opens the adjust panel's Format tab.
 
 Every button and thumbstick direction above can be changed in Settings ›
 Controller (tap a row, pick an action; Reset to defaults puts this layout

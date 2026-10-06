@@ -209,6 +209,21 @@ pub fn place(anchor: Mat4, yaw_deg: f32, distance: f32, offset_y: f32, tilt_deg:
         * Mat4::from_rotation_x(-tilt_deg.to_radians())
 }
 
+/// A panel `distance` metres away, turned `yaw_deg` (left positive) and
+/// `pitch_deg` (up positive) about the viewer, facing them.
+pub fn place_around(
+    anchor: Mat4,
+    yaw_deg: f32,
+    pitch_deg: f32,
+    distance: f32,
+    offset_y: f32,
+) -> Mat4 {
+    anchor
+        * Mat4::from_rotation_y(yaw_deg.to_radians())
+        * Mat4::from_rotation_x(pitch_deg.to_radians())
+        * Mat4::from_translation(Vec3::new(0.0, offset_y, -distance))
+}
+
 /// `anchor` turned about the viewer the way the renderer turns a 180°/360°
 /// picture for its yaw and pitch (degrees, left and up positive), so a panel
 /// placed from it moves with the picture. Roll is left out: it levels a
@@ -270,6 +285,8 @@ const CLICK_SLOP: f32 = 60.0;
 #[derive(Default)]
 pub struct Pointer {
     triggers: [Trigger; 2],
+    /// Each hand's grip was held last frame.
+    grips: [bool; 2],
     /// The hand driving the UI.
     pub active: usize,
     /// Panel that received the last press, so the release goes there too.
@@ -289,6 +306,9 @@ pub struct Routed {
     pub over_ui: bool,
     /// A trigger was pressed while not pointing at any panel.
     pub click_outside: bool,
+    /// A grip was squeezed while that hand pointed at a panel: (panel, hand),
+    /// to move the panel.
+    pub grab: Option<(usize, usize)>,
 }
 
 impl Pointer {
@@ -373,7 +393,21 @@ impl Pointer {
                 });
             }
         }
+        // Squeezing a grip while pointing at a panel grabs it; the trigger
+        // doesn't click while that grip is held.
+        for i in 0..2 {
+            let grip = hands[i].squeeze > crate::controls::GRIP;
+            if grip
+                && !self.grips[i]
+                && let Some((pi, _, _)) = self.aims[i].and_then(|a| a.hit)
+            {
+                routed.grab = Some((pi, i));
+            }
+            self.grips[i] = grip;
+        }
+        let gripping = self.grips[self.active];
         match transitions[self.active] {
+            Some(true) if gripping && hit.is_some() => {}
             Some(true) => {
                 if let Some((pi, _, pos)) = hit {
                     panels[pi].push(Event::PointerButton {

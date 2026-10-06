@@ -70,7 +70,16 @@ pub fn control_bar(ctx: &egui::Context, v: &mut View) {
         ui.horizontal(|ui| {
             ui.set_height(30.0);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                format_pill(ui, &widgets::format_short(&pb.format));
+                // The format opens the adjust panel's Format tab (again
+                // closes it).
+                if format_pill(ui, &widgets::format_short(&pb.format))
+                    .tip("Change the format")
+                    .clicked()
+                {
+                    let showing = v.state.adjust_open && v.state.adjust_tab == 0;
+                    v.state.adjust_open = !showing;
+                    v.state.adjust_tab = 0;
+                }
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     ui.add(
                         egui::Label::new(
@@ -257,17 +266,26 @@ fn fmt_speed(speed: f64) -> String {
 }
 
 /// A quiet pill naming the video's format.
-fn format_pill(ui: &mut egui::Ui, text: &str) {
+fn format_pill(ui: &mut egui::Ui, text: &str) -> egui::Response {
     let g = ui.painter().layout_no_wrap(
         text.to_string(),
         theme::font(Weight::SemiBold, 14.0),
         theme::TEXT_2,
     );
-    let (rect, _) = ui.allocate_exact_size(g.size() + Vec2::new(20.0, 10.0), Sense::hover());
+    let (rect, resp) = ui.allocate_exact_size(g.size() + Vec2::new(20.0, 10.0), Sense::click());
+    let t = ui
+        .ctx()
+        .animate_bool_with_time(resp.id, resp.hovered(), 0.12);
+    let bg = if t > 0.5 {
+        theme::SURFACE_3
+    } else {
+        theme::SURFACE_2
+    };
+    let fg = if t > 0.5 { theme::TEXT } else { theme::TEXT_2 };
     ui.painter()
-        .rect_filled(rect, egui::CornerRadius::same(8), theme::SURFACE_2);
-    ui.painter()
-        .galley(rect.center() - g.size() / 2.0, g, theme::TEXT_2);
+        .rect_filled(rect, egui::CornerRadius::same(8), bg);
+    ui.painter().galley(rect.center() - g.size() / 2.0, g, fg);
+    resp
 }
 
 /// The big round play / pause button.
