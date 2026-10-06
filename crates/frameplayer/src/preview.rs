@@ -267,6 +267,12 @@ impl Sim {
                 self.app.repaint_all();
                 self.run_frames(3)?;
             }
+            // Turns the global chroma key on (Settings > Passthrough).
+            Some("chroma-global") => {
+                self.app.settings.default_view.chroma_key = true;
+                self.app.repaint_all();
+                self.run_frames(3)?;
+            }
             // Turns chroma key on for the open video (the Passthrough tab).
             Some("chroma") => {
                 if let Some(p) = &mut self.app.playback {

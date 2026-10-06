@@ -36,6 +36,10 @@ panel main settings-passthrough-locked
 unlocked
 screen settings passthrough
 panel main settings-passthrough
+chroma-global
+screen settings passthrough
+frames 8
+panel main settings-passthrough-on
 screen settings controller
 panel main settings-controller
 screen settings controller-open
