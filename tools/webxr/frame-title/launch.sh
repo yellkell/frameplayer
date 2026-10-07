@@ -136,8 +136,18 @@ if [[ -f $flags_file ]]; then
   done <"$flags_file"
 fi
 
+# Thumbstick scrolling: while a controller's laser points at the browser, its
+# stick scrolls what is under the pointer (stick-scroll.py; Steam itself only
+# turns it into a few weak wheel steps). CHROMIUM_XR_STICK_SCROLL=0 leaves it out.
+scroll_pid=
+if [[ ${CHROMIUM_XR_STICK_SCROLL:-1} != 0 && -f $here/stick-scroll.py ]] && command -v python3 >/dev/null; then
+  python3 "$here/stick-scroll.py" &
+  scroll_pid=$!
+fi
+
 echo "flags: ${flags[*]} $*"
 status=0
 "$here/chrome" "${flags[@]}" "$@" || status=$?
+[[ -z $scroll_pid ]] || kill "$scroll_pid" 2>/dev/null || true
 echo "$(date -Is) exit $status"
 exit "$status"

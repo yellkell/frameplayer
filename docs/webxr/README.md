@@ -312,6 +312,21 @@ The launcher reads extra Chromium flags from `~/.config/chromium-xr-frame/flags`
 (one per line) for experiments, e.g. `--use-angle=gl` and
 `--enable-features=OpenXR` to go back to zink.
 
+### Thumbstick scrolling (2026-10-07)
+
+Steam shows the browser as a desktop window: the laser reaches Chromium as a
+pen (with mouse events), but the thumbsticks don't scroll. Steam turns the
+pointing hand's stick into a few weak wheel steps (6-26 px), and passes the
+sticks to Chromium only now and then, as a virtual Xbox pad that pages can't
+see until a button is pressed. `frame-title/stick-scroll.py`, started by the
+launcher next to Chromium, reads the sticks from SteamVR as a background
+OpenVR app and, while the laser is on the browser (the X pointer moved in the
+last 0.35 s; it doesn't during WebXR sessions), sends wheel steps with XTEST:
+up to 16 a second (1600 px) at full deflection, from the controller whose
+trigger was pulled last (where SteamVR puts the laser; the right one before
+that). About 1% of a core while idle; `CHROMIUM_XR_STICK_SCROLL=0` turns it
+off. Tests: `python3 -m unittest test_stick_scroll` in `frame-title/`.
+
 ### Major WebXR sites, and VR video (2026-10-07): patch 0014
 
 three.js (VR, AR), A-Frame, Babylon.js, PlayCanvas, Moon Rider, the

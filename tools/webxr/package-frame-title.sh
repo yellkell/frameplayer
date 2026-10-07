@@ -25,7 +25,7 @@ stage=$W/title
 rm -rf "$stage" "$OUT"
 mkdir -p "$stage/chromium" "$OUT"
 install -m 755 "$FP"/tools/webxr/frame-title/chromium-xr.sh "$FP"/tools/webxr/frame-title/chromium-xr-sandboxed.sh "$stage/"
-install -m 755 "$FP"/tools/webxr/frame-title/launch.sh "$stage/chromium/"
+install -m 755 "$FP"/tools/webxr/frame-title/launch.sh "$FP"/tools/webxr/frame-title/stick-scroll.py "$stage/chromium/"
 # Steam Frame controller models for pages that ask for Quest Touch ones: the
 # extension made by tools/webxr/frame-models (bake_touch_glb.py, then
 # make_extension.py) from an extraction on a Frame. The launcher loads it.
