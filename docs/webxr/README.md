@@ -312,6 +312,39 @@ The launcher reads extra Chromium flags from `~/.config/chromium-xr-frame/flags`
 (one per line) for experiments, e.g. `--use-angle=gl` and
 `--enable-features=OpenXR` to go back to zink.
 
+### Major WebXR sites, and VR video (2026-10-07): patch 0014
+
+three.js (VR, AR, hands), A-Frame, Babylon.js, PlayCanvas, Moon Rider, the
+Immersive Web samples, Wonderland Engine (The Escape Artist, Dead Secret,
+Study Room) and Unity's WebXR export all enter VR and render; most hold
+108 Hz. The slow ones are fill-rate bound content (three.js sandbox 41 fps at
+21 ms GPU, PlayCanvas's VR demo 70 fps at 8.9 ms). AR sessions show the
+passthrough camera (headset screenshots don't capture it).
+
+VR video had no hardware decode and no HEVC at all ("no supported streams"),
+and AV1 8K60 in software pulled WebXR down to 82 fps. The build now has
+`use_v4l2_codec = true` and patch 0014, and the launcher enables
+`AcceleratedVideoDecoder,PreferV4L2VideoAcceleration`, so Chromium's V4L2
+stateful decoder drives the iris decoder (H.264, HEVC, VP9; no AV1):
+
+| In a WebXR session, 108 Hz | Software | V4L2 (0014) |
+|---|---|---|
+| HEVC 8192x4096 60 fps | doesn't play | 60 fps, XR 107.5 |
+| HEVC 5760x2880 60 fps | doesn't play | 60 fps, XR 108 |
+| H.264 5760x2880 60 fps | 60 fps | 60 fps, XR 108 |
+| AV1 8192x4096 60 fps | 33 fps, XR 82 | (software) |
+
+0014 declares the stream's size on the bitstream queue (iris refused 0x0
+with EINVAL), passes HEVC access units to the stateful decoder (it was
+`NOTIMPLEMENTED()`), and on Linux sends multi-planar (NV12) frames to WebGL
+through an intermediate RGBA shared image: ANGLE on Vulkan can't import the
+decoder's DMA-BUF ("invalid mailbox name"), and video textures were black
+while `<video>` played. Limit: iris admits an 8K session only when no other
+decoder session is open, so 8K fails to start while the previous page's
+decoder is still closing or Steam holds one (FramePlayer's primer frame works
+around this; not ported). MSE, WebCodecs (8K H.264/HEVC/VP9) and
+`requestVideoFrameCallback` work; Widevine and WebXR media layers don't.
+
 ## 9. What this does not solve
 
 - Anything SteamVR needs beyond these two items will only show up once the

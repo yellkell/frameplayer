@@ -78,7 +78,10 @@ flags=(
   # zink: only that gives the XR device a GPU fence, so the page's next frame
   # overlaps the GPU's work (patch 0011). Fire Fight 2 with antialiasing:
   # 38 fps on zink, a steady 54 (half of 108 Hz) on Vulkan.
-  --enable-features=OpenXR,Vulkan,DefaultANGLEVulkan,VulkanFromANGLE
+  # AcceleratedVideoDecoder,PreferV4L2VideoAcceleration: video decodes on the
+  # Frame's hardware decoder (patch 0014), which is what makes HEVC play at
+  # all and 8K60 play at 60 fps in VR; builds without 0014 ignore them.
+  --enable-features=OpenXR,Vulkan,DefaultANGLEVulkan,VulkanFromANGLE,AcceleratedVideoDecoder,PreferV4L2VideoAcceleration
   --use-angle=vulkan
   # With these, Blink antialiases WebXR in the tile (implicit resolve), and
   # that output never reached the headset: every antialiased page was black.
@@ -122,7 +125,8 @@ fi
 # Extra flags for experiments, one per line (# starts a comment), from
 # ~/.config/chromium-xr-frame/flags; later flags win over the ones above, and
 # a later --enable-features or --disable-features replaces the earlier one, so
-# repeat its features (OpenXR,Vulkan,DefaultANGLEVulkan,VulkanFromANGLE;
+# repeat its features (OpenXR,Vulkan,DefaultANGLEVulkan,VulkanFromANGLE,
+# AcceleratedVideoDecoder,PreferV4L2VideoAcceleration;
 # DisableLoadExtensionCommandLineSwitch). --use-angle=gl and
 # --enable-features=OpenXR go back to OpenGL on zink.
 flags_file=$HOME/.config/chromium-xr-frame/flags

@@ -159,7 +159,11 @@ enable_nacl = false
 use_remoteexec = false
 use_siso = true
 treat_warnings_as_errors = false
+use_v4l2_codec = true
 A
+# use_v4l2_codec: Chromium's V4L2 decoder for the Frame's iris hardware decoder
+# (patch 0014), next to VA-API; the launcher picks it with
+# --enable-features=...,AcceleratedVideoDecoder,PreferV4L2VideoAcceleration.
 stage "gn gen"
 gn gen out/XR
 gn args out/XR --list=enable_openxr --short | tee -a "$W/stage"
