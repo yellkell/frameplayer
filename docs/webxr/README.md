@@ -325,9 +325,10 @@ other processes (`GetOverlayTransformAbsolute`: PermissionDenied), so an
 input overlay can't be laid over it.
 
 The other controller's stick reaches Chromium as Steam's virtual Xbox pad.
-`frame-title/frame-browsing` (an extension the launcher loads) scrolls what
-the laser points at with it: either stick of the pad, while the pointer
-moves (the laser), not during WebXR sessions. Tapping grip hands the pointing
+`frame-title/frame-browsing` (an extension the launcher loads) scrolls with
+it, either stick of the pad: what the laser points at, else what it was on
+last, else the page. Not during WebXR sessions, and not on pages that read
+gamepads themselves (games played with the controller). Tapping grip hands the pointing
 controller to the pad for a moment, then Steam takes it back for the laser.
 Scrolling with the pointing controller needs a fix in Steam:
 [valve-report-laser-stick-scroll.md](valve-report-laser-stick-scroll.md).
