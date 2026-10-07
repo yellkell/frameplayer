@@ -1,7 +1,7 @@
 # Steam Frame: thumbstick of the laser-pointing controller doesn't scroll desktop game windows
 
-*Bug report for Valve (SteamVR for Linux / Steam Frame). Suggested tracker:
-https://github.com/ValveSoftware/SteamVR-for-Linux/issues*
+*Bug report for Valve, filed 2026-10-07 as
+[ValveSoftware/SteamVR-for-Linux#1000](https://github.com/ValveSoftware/SteamVR-for-Linux/issues/1000).*
 
 ## Summary
 
