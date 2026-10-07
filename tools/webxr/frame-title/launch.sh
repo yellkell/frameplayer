@@ -110,13 +110,17 @@ flags=(
 size=$(xdpyinfo 2>/dev/null | awk '/dimensions:/ {print $2; exit}')
 [[ $size =~ ^[0-9]+x[0-9]+$ ]] || size=1280x720
 flags+=(--window-position=0,0 --window-size="${size/x/,}")
-# Steam Frame controller models where pages ask for Quest Touch ones: the
-# extension made by tools/webxr/frame-models, shipped in the title. Chromium
+# Extensions shipped in the title: frame-models, Steam Frame controller models
+# where pages ask for Quest Touch ones (made by tools/webxr/frame-models), and
+# frame-browsing, thumbstick scrolling of what the laser points at. Chromium
 # only loads extensions from the command line with this feature off.
-models="$here/../frame-models"
-if [[ -f $models/manifest.json ]]; then
-  flags+=(--load-extension="$(cd "$models" && pwd)"
-    --disable-features=DisableLoadExtensionCommandLineSwitch)
+extensions=()
+for ext in "$here/../frame-models" "$here/../frame-browsing"; do
+  [[ -f $ext/manifest.json ]] && extensions+=("$(cd "$ext" && pwd)")
+done
+if (( ${#extensions[@]} )); then
+  list=$(IFS=,; echo "${extensions[*]}")
+  flags+=(--load-extension="$list" --disable-features=DisableLoadExtensionCommandLineSwitch)
 fi
 # DevTools on loopback only while ~/.config/chromium-xr-frame-devtools exists,
 # for remote debugging over SSH (ssh -L 9223:127.0.0.1:9223). It has no
@@ -136,18 +140,8 @@ if [[ -f $flags_file ]]; then
   done <"$flags_file"
 fi
 
-# Thumbstick scrolling: while a controller's laser points at the browser, its
-# stick scrolls what is under the pointer (stick-scroll.py; Steam itself only
-# turns it into a few weak wheel steps). CHROMIUM_XR_STICK_SCROLL=0 leaves it out.
-scroll_pid=
-if [[ ${CHROMIUM_XR_STICK_SCROLL:-1} != 0 && -f $here/stick-scroll.py ]] && command -v python3 >/dev/null; then
-  python3 "$here/stick-scroll.py" &
-  scroll_pid=$!
-fi
-
 echo "flags: ${flags[*]} $*"
 status=0
 "$here/chrome" "${flags[@]}" "$@" || status=$?
-[[ -z $scroll_pid ]] || kill "$scroll_pid" 2>/dev/null || true
 echo "$(date -Is) exit $status"
 exit "$status"

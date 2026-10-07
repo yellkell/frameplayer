@@ -25,13 +25,15 @@ stage=$W/title
 rm -rf "$stage" "$OUT"
 mkdir -p "$stage/chromium" "$OUT"
 install -m 755 "$FP"/tools/webxr/frame-title/chromium-xr.sh "$FP"/tools/webxr/frame-title/chromium-xr-sandboxed.sh "$stage/"
-install -m 755 "$FP"/tools/webxr/frame-title/launch.sh "$FP"/tools/webxr/frame-title/stick-scroll.py "$stage/chromium/"
+install -m 755 "$FP"/tools/webxr/frame-title/launch.sh "$stage/chromium/"
 # Steam Frame controller models for pages that ask for Quest Touch ones: the
 # extension made by tools/webxr/frame-models (bake_touch_glb.py, then
 # make_extension.py) from an extraction on a Frame. The launcher loads it.
 FRAME_MODELS_EXT=${FRAME_MODELS_EXT:?set FRAME_MODELS_EXT to the controller models extension}
 [[ -f $FRAME_MODELS_EXT/manifest.json ]] || { echo "no manifest.json in $FRAME_MODELS_EXT" >&2; exit 1; }
 cp -r "$FRAME_MODELS_EXT" "$stage/frame-models"
+# Thumbstick scrolling of what the laser points at; the launcher loads it too.
+cp -r "$FP"/tools/webxr/frame-title/frame-browsing "$stage/frame-browsing"
 # Steam library artwork (tools/webxr/make-chromium-xr-artwork.py), where
 # frame-apps-install.py and Frame Control look for it.
 mkdir -p "$stage/assets/steam"
