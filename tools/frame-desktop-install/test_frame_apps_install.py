@@ -101,6 +101,58 @@ class Shortcut(unittest.TestCase):
                 self.assertEqual(len(fai.get(fai.vdf_parse(f.read()), 'shortcuts')), 2)
 
 
+class OldVersions(unittest.TestCase):
+    app = fai.APPS['chromium-xr']
+
+    def copy(self, path, launcher='chromium-xr.sh'):
+        os.makedirs(path, exist_ok=True)
+        with open(os.path.join(path, launcher), 'w') as f:
+            f.write('#!/bin/sh\n')
+        return os.path.realpath(path)
+
+    def test_finds_every_other_copy(self):
+        with tempfile.TemporaryDirectory() as home:
+            dest = self.copy(os.path.join(home, 'chromium-xr-frame'))
+            build3 = self.copy(dest + '.release-build3')
+            old = self.copy(dest + '.old')
+            keep = self.copy(dest + '.keep')
+            devkit = self.copy(os.path.join(home, 'devkit-game', 'ChromiumXR'), 'chromium-xr-sandboxed.sh')
+            test = self.copy(os.path.join(home, 'Apps', 'chromium-xr-frame'))
+            notes = os.path.join(home, 'chromium-xr-frame.notes')  # not a leftover name
+            self.copy(notes)
+            entries = [
+                (1, 'Chromium XR', os.path.join(dest, 'chromium-xr.sh')),  # this one: kept
+                (2, 'Chromium XR Sandboxed', os.path.join(dest, 'chromium-xr-sandboxed.sh')),
+                (3, 'ChromiumXR', os.path.join(devkit, 'chromium-xr-sandboxed.sh')),  # by launcher
+                (4, 'Chromium XR (test)', os.path.join(test, 'chromium-xr.sh')),
+                (5, 'FramePlayer', os.path.join(home, 'frameplayer', 'frameplayer.sh')),
+                (6, 'Chromium XR', '/usr/bin/elsewhere.sh'),  # by name, folder not ours
+                (7, 'Chromium XR', ''),  # launcher unknown (Steam's live list): this one
+                (8, 'Chromium XR Sandboxed', ''),  # launcher unknown, another name
+            ]
+            entries_old, folders = fai.old_versions(self.app, dest, entries, home)
+            self.assertEqual(sorted(a for a, _, _ in entries_old), [2, 3, 4, 6, 8])
+            self.assertEqual(folders, sorted([build3, old, devkit, test]))
+            self.assertNotIn(keep, folders)
+            self.assertNotIn(dest, folders)
+
+    def test_ignores_folders_without_the_app_or_outside_home(self):
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as other:
+            dest = os.path.join(home, 'chromium-xr-frame')
+            os.makedirs(dest + '.old')  # empty: not a copy
+            outside = self.copy(os.path.join(other, 'cx'))
+            _, folders = fai.old_versions(self.app, dest, [(9, 'Chromium XR', os.path.join(outside, 'chromium-xr.sh'))], home)
+            self.assertEqual(folders, [])
+
+    def test_remove_appids(self):
+        doc = [['shortcuts', [['0', other('a', fai.signed(0x8f000001))], ['1', other('b', 7)],
+                              ['2', other('c', 8)]]]]
+        self.assertTrue(fai.remove_appids(doc, {0x8f000001, 8}))
+        sc = fai.get(doc, 'shortcuts')
+        self.assertEqual([(k, fai.get(v, 'AppName')) for k, v in sc], [('0', 'b')])
+        self.assertFalse(fai.remove_appids(doc, {99}))
+
+
 class Unzip(unittest.TestCase):
     def make_zip(self, path, entries):
         with zipfile.ZipFile(path, 'w') as z:

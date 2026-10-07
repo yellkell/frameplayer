@@ -12,9 +12,14 @@ Runs on the headset as the normal user, with the Python 3 that SteamOS ships
   python3 frame-apps-install.py --remove --app chromium-xr
 
 Steps, per app: find the newest GitHub release, download its zip and check the
-SHA-256 GitHub recorded for it, unpack it next to the install directory and
-swap it in (the previous version is kept as <dir>.old), then add or update the
-Steam library entry with its artwork.
+SHA-256 GitHub recorded for it, uninstall every other copy of the app (library
+entries made by other installers, e.g. Frame Control titles, "Chromium XR
+Sandboxed" or "(test)" copies, the folders they start from, and leftovers
+such as <dir>.old or <dir>.release-build3; folders ending in .keep are left
+alone, and settings, profiles and videos live elsewhere), unpack the new one
+next to the install directory and swap it in, then add or update the Steam
+library entry with its artwork. With --name-suffix (a test copy) other copies
+are left alone.
 
 The library entry is added one of two ways (--steam):
   live  through the Steam client's local DevTools port (127.0.0.1:8080), the
@@ -61,6 +66,9 @@ APPS = {
         'asset': re.compile(r'^frameplayer-.*-aarch64\.zip$'),
         'dir': 'frameplayer',
         'exe': 'frameplayer.sh',
+        # Library names and launchers of any copy, from any installer.
+        'family': re.compile(r'^FramePlayer\b'),
+        'exes': ('frameplayer.sh',),
         'icons': ['assets/steam/icon.png'],
         'art': 'assets/steam',
         'process': 'frameplayer/frameplayer',
@@ -71,7 +79,9 @@ APPS = {
         'asset': re.compile(r'^ChromiumXR-Frame-arm64\.zip$'),
         'dir': 'chromium-xr-frame',
         'exe': 'chromium-xr.sh',
-        'icons': ['assets/steam/icon.png', 'chromium/product_logo_256.png'],
+        'family': re.compile(r'^Chromium XR\b'),
+        'exes': ('chromium-xr.sh', 'chromium-xr-sandboxed.sh'),
+        'icons':['assets/steam/icon.png', 'chromium/product_logo_256.png'],
         'art': 'assets/steam',
         # Builds before test build 5 ship no Steam artwork: fetch it.
         'art_url': 'https://yellkell.com/frameapps/art/chromium-xr/',
@@ -372,6 +382,17 @@ def remove_entries(doc, name, exe):
     return True
 
 
+def remove_appids(doc, ids):
+    """Removes the entries whose (unsigned) app id is in ids."""
+    shortcuts = get(doc, 'shortcuts') or []
+    keep = [[k, v] for k, v in shortcuts if not (isinstance(v, list) and
+                                                 (get(v, 'appid') or 0) & 0xffffffff in ids)]
+    if len(keep) == len(shortcuts):
+        return False
+    shortcuts[:] = [[str(i), v] for i, (_, v) in enumerate(keep)]
+    return True
+
+
 def steam_accounts():
     """config/ folders of the Steam accounts signed in on this headset."""
     seen, out = set(), []
@@ -560,6 +581,124 @@ def live_remove(name, exe):
     }})()''')
 
 
+# ---------------------------------------------------------- old versions
+
+# Siblings of the install directory that hold earlier copies: <dir>.old (kept
+# by this installer and FramePlayer's updater), .prev, .new, .rollback,
+# .bak*, .release-build3 ... Never .keep.
+LEFTOVER = re.compile(r'^\.(old|prev|new|rollback|bak.*|release.*)$')
+
+
+def clean_exe(exe):
+    return (exe or '').strip().strip('"')
+
+
+def holds_copy(app, folder):
+    return any(os.path.isfile(os.path.join(folder, e)) for e in app['exes'])
+
+
+def file_entries():
+    out = []
+    for cfg in steam_accounts():
+        try:
+            with open(os.path.join(cfg, 'shortcuts.vdf'), 'rb') as f:
+                doc = vdf_parse(f.read())
+        except FileNotFoundError:
+            continue
+        for _, v in get(doc, 'shortcuts') or []:
+            if isinstance(v, list):
+                out.append(((get(v, 'appid') or 0) & 0xffffffff, get(v, 'AppName') or '',
+                            clean_exe(get(v, 'Exe'))))
+    return out
+
+
+def library_entries():
+    """(unsigned app id, name, exe) of every non-Steam library entry, and how
+    they were read: from Steam itself when its DevTools port answers
+    ('live'), else from the accounts' shortcuts.vdf ('file'). Steam's live
+    list has no launcher paths, so those come from shortcuts.vdf (empty for
+    an entry not written there yet)."""
+    saved = file_entries()
+    try:
+        rows = steam_js('''(() => appStore.allApps.filter(a => a.app_type === 1073741824)
+          .map(a => [a.appid, a.display_name]))()''')
+    except (OSError, EOFError, ValueError):
+        return saved, 'file'
+    exes = {aid: exe for aid, _, exe in saved}
+    return [(int(i) & 0xffffffff, n or '', exes.get(int(i) & 0xffffffff, ''))
+            for i, n in rows], 'live'
+
+
+def old_versions(app, dest, entries, home=HOME):
+    """The library entries and folders of every other copy of app.
+
+    Entries: named like the app or starting one of its launchers, except the
+    one for dest, which is updated in place (so it keeps its app id and the
+    SteamVR settings stored under it); an entry with the app's own name and
+    no known launcher counts as that one. Folders: the ones those entries
+    start from, and dest's leftover siblings; only folders in home that hold
+    one of the app's launchers, never dest itself or a folder ending in .keep."""
+    keep_exe = os.path.join(dest, app['exe'])
+
+    def current(name, exe):
+        return exe == keep_exe or (not exe and name == app['name'])
+
+    old = [(aid, name, exe) for aid, name, exe in entries if not current(name, exe) and
+           (app['family'].match(name) or os.path.basename(exe) in app['exes'])]
+    home, real_dest = os.path.realpath(home), os.path.realpath(dest)
+    folders = set()
+
+    def consider(folder):
+        f = os.path.realpath(folder)
+        if (f != real_dest and f.startswith(home + os.sep) and not f.endswith('.keep')
+                and holds_copy(app, f)):
+            folders.add(f)
+
+    for _, _, exe in old:
+        if exe:
+            consider(os.path.dirname(exe))
+    parent, base = os.path.split(dest)
+    if os.path.isdir(parent):
+        for n in os.listdir(parent):
+            if n.startswith(base + '.') and LEFTOVER.match(n[len(base):]):
+                consider(os.path.join(parent, n))
+    return old, sorted(folders)
+
+
+def remove_old_versions(app, dest, method):
+    """Uninstalls every other copy of app before the new one goes in. Returns
+    how the library was edited ('live', 'file') or None."""
+    entries, how = library_entries() if method != 'none' else ([], None)
+    old, folders = old_versions(app, dest, entries)
+    for f in folders:
+        if running(app, f):
+            raise Fail(f'An older copy in {f} is running. Close it, then run this again.')
+    edited = None
+    if old:
+        ids = {aid for aid, _, _ in old}
+        if how == 'live' and method in ('auto', 'live'):
+            try:
+                steam_js(f'''(() => {{ {json.dumps(sorted(ids))}.forEach(id =>
+                  SteamClient.Apps.RemoveShortcut(id)); return 1; }})()''')
+                edited = 'live'
+            except (OSError, EOFError, ValueError):
+                if method == 'live':
+                    raise Fail("Couldn't reach Steam's DevTools port to remove the old versions.")
+        if not edited:
+            if not close_steam():
+                raise Fail('Steam was left open, so the old versions could not be removed; '
+                           'nothing was changed.')
+            for cfg in steam_accounts():
+                write_shortcut_file(cfg, lambda doc: remove_appids(doc, ids))
+            edited = 'file'
+        for _, name, exe in old:
+            say(f'  Removed the old library entry "{name}" ({exe or "no launcher"}).')
+    for f in folders:
+        shutil.rmtree(f, ignore_errors=True)
+        say(f'  Deleted the old copy in {f}')
+    return edited
+
+
 # ---------------------------------------------------------------- main
 
 def add_to_steam(method, name, exe, start_dir, icon, art_dir):
@@ -664,8 +803,15 @@ def main():
 
         if running(app, dest):
             raise Fail(f"{name} is running. Close it, then run this again.")
+        if args.name_suffix:
+            say('  A named copy: other copies of the app are left alone.')
+        else:
+            methods.add(remove_old_versions(app, dest, args.steam))
         os.makedirs(parent, exist_ok=True)
         install_files(app, zip_path, dest)
+        if not args.name_suffix:
+            # The swap keeps the replaced version until the new one is in place.
+            shutil.rmtree(dest + '.old', ignore_errors=True)
         say(f'  Installed in {dest}')
         fetch_art(app, dest)
 
@@ -673,6 +819,7 @@ def main():
             icon = next((p for p in (os.path.join(dest, i) for i in app['icons']) if os.path.isfile(p)), '')
             methods.add(add_to_steam(args.steam, name, exe, dest, icon, os.path.join(dest, app['art'])))
 
+    methods.discard(None)
     say('\nDone.')
     if 'file' in methods and os.environ.get('XDG_CURRENT_DESKTOP') and shutil.which('steamos-session-select'):
         if ask('Return to Gaming Mode now? Steam starts again there with the new library entries.'):
