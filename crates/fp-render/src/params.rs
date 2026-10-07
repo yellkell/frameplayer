@@ -44,6 +44,9 @@ pub struct VideoParams {
     /// Background around/behind the video, linear premultiplied RGBA.
     /// Alpha 0 lets passthrough show through.
     pub background: [f32; 4],
+    /// Which way, degrees about world up, the viewer's "forward" (height and
+    /// forward settings) points: the yaw the video was centred on.
+    pub forward_yaw: f32,
 }
 
 impl Default for VideoParams {
@@ -53,6 +56,7 @@ impl Default for VideoParams {
             settings: ViewSettings::default(),
             screen_pose: Mat4::from_translation(glam::vec3(0.0, 0.0, -4.0)),
             background: [0.008, 0.008, 0.012, 1.0],
+            forward_yaw: 0.0,
         }
     }
 }
@@ -206,7 +210,9 @@ pub(crate) fn build(
             video.format.alpha_pack_scale().unwrap_or(0.0),
             0.0,
         ),
-        viewer: Vec4::new(0.0, s.height, -s.forward, SPHERE_RADIUS),
+        viewer: (glam::Quat::from_rotation_y(deg(video.forward_yaw))
+            * glam::vec3(0.0, s.height, -s.forward))
+        .extend(SPHERE_RADIUS),
     }
 }
 

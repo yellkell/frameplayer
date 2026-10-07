@@ -460,3 +460,52 @@ fn height_moves_the_viewer_against_the_horizon() {
     );
     e.destroy(&r);
 }
+
+#[test]
+fn forward_follows_the_way_the_video_was_centred() {
+    let Some((mut r, mut e)) = setup() else {
+        return;
+    };
+    // Red left of the video's front, blue right of it.
+    let f = frame(256, 128, |u, _| {
+        if u < 0.5 {
+            [230, 20, 20]
+        } else {
+            [20, 20, 230]
+        }
+    });
+    // Recentred while facing 90° to the left, as the app does: the anchor's
+    // yaw turns the picture and the viewer's forward.
+    let yaw = 90.0f32;
+    let p = VideoParams {
+        forward_yaw: yaw,
+        ..params(
+            Projection::EQUIRECT_360,
+            StereoLayout::Mono,
+            ViewSettings {
+                yaw,
+                forward: 0.8,
+                ..Default::default()
+            },
+        )
+    };
+    let facing = Quat::from_rotation_y(yaw.to_radians());
+    let ev = |x: f32| EyeView {
+        view: view(facing * Vec3::new(x, 0.0, 0.0) + Vec3::Y * 1.6, facing),
+        proj: projection(Fov::symmetric(90.0), 0.05, 100.0),
+    };
+    r.begin_frame().unwrap();
+    r.set_video(Some(&f)).unwrap();
+    r.draw(&e.targets(), &[ev(-0.032), ev(0.032)], &p, &[])
+        .unwrap();
+    r.end_frame().unwrap();
+    let l = e.read(&r, 0).unwrap();
+    // Moving straight at the front keeps it in the middle (sideways, it
+    // slid about 15°).
+    let (left, right) = (
+        px(&l, SIZE / 2 - 4, SIZE / 2),
+        px(&l, SIZE / 2 + 4, SIZE / 2),
+    );
+    assert!(is_red(left) && is_blue(right), "{left:?} {right:?}");
+    e.destroy(&r);
+}

@@ -1611,6 +1611,7 @@ impl App {
             }
             video.screen_pose = place(anchor, 0.0, s.screen_distance, 0.0, 0.0);
             s.yaw += anchor_yaw.to_degrees();
+            video.forward_yaw = anchor_yaw.to_degrees();
             video.settings = s;
             if let Some((_, rot)) = input.head {
                 let rel = anchor.to_scale_rotation_translation().1.inverse() * rot;
