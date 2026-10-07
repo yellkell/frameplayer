@@ -327,8 +327,10 @@ input overlay can't be laid over it.
 The other controller's stick reaches Chromium as Steam's virtual Xbox pad.
 `frame-title/frame-browsing` (an extension the launcher loads) scrolls what
 the laser points at with it: either stick of the pad, while the pointer
-moves (the laser), not during WebXR sessions. The real fix, scrolling with
-the pointing controller, needs the browser in its own SteamVR overlay.
+moves (the laser), not during WebXR sessions. Tapping grip hands the pointing
+controller to the pad for a moment, then Steam takes it back for the laser.
+Scrolling with the pointing controller needs a fix in Steam:
+[valve-report-laser-stick-scroll.md](valve-report-laser-stick-scroll.md).
 
 ### Major WebXR sites, and VR video (2026-10-07): patch 0014
 
