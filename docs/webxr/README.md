@@ -314,12 +314,16 @@ The launcher reads extra Chromium flags from `~/.config/chromium-xr-frame/flags`
 
 ### Major WebXR sites, and VR video (2026-10-07): patch 0014
 
-three.js (VR, AR, hands), A-Frame, Babylon.js, PlayCanvas, Moon Rider, the
+three.js (VR, AR), A-Frame, Babylon.js, PlayCanvas, Moon Rider, the
 Immersive Web samples, Wonderland Engine (The Escape Artist, Dead Secret,
 Study Room) and Unity's WebXR export all enter VR and render; most hold
 108 Hz. The slow ones are fill-rate bound content (three.js sandbox 41 fps at
 21 ms GPU, PlayCanvas's VR demo 70 fps at 8.9 ms). AR sessions show the
-passthrough camera (headset screenshots don't capture it).
+passthrough camera (headset screenshots don't capture it). `hand-tracking`
+is granted, but the Frame does no camera hand tracking through SteamVR's
+OpenXR: the joints come from the controllers' finger sensors (a hand held
+still is a fixed open pose; checked with the controllers put down: no hands).
+Pages that need bare hands don't work.
 
 VR video had no hardware decode and no HEVC at all ("no supported streams"),
 and AV1 8K60 in software pulled WebXR down to 82 fps. The build now has
