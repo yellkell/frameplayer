@@ -29,6 +29,7 @@ pub(crate) struct SceneParams {
     pub bg_color: Vec4,
     pub key: Vec4,
     pub key2: Vec4,
+    pub viewer: Vec4,
 }
 
 /// Everything about the video that the projection pass needs, other than
@@ -109,6 +110,10 @@ pub(crate) fn yuv_matrix(color: &ColorInfo, layout: PixelLayout) -> ([Vec4; 3], 
     let rows = m.map(|r| Vec4::new(r[0] * y_mul, r[1] * c_mul, r[2] * c_mul, 0.0));
     (rows, Vec4::new(y_off, c_off, c_off, scale))
 }
+
+/// Radius, metres, of the sphere a 180°/360° video is drawn on when the viewer
+/// moves off its centre (height, forward). Rays from the centre ignore it.
+const SPHERE_RADIUS: f32 = 3.0;
 
 pub(crate) fn build(
     video: &VideoParams,
@@ -201,6 +206,7 @@ pub(crate) fn build(
             video.format.alpha_pack_scale().unwrap_or(0.0),
             0.0,
         ),
+        viewer: Vec4::new(0.0, s.height, -s.forward, SPHERE_RADIUS),
     }
 }
 

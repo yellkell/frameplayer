@@ -13,6 +13,12 @@ pub struct ViewSettings {
     pub roll: f32,
     /// Magnification; 1.0 is natural size.
     pub zoom: f32,
+    /// Moves the viewer inside a 180°/360° video, metres: up, and towards
+    /// the front of the picture.
+    /// Unlike pitch this shifts near things against far ones, as DeoVR's
+    /// height does.
+    pub height: f32,
+    pub forward: f32,
     /// Software IPD: extra horizontal convergence between eyes, degrees.
     /// Positive pushes the image further away.
     pub ipd_offset: f32,
@@ -62,6 +68,8 @@ impl Default for ViewSettings {
             pitch: 0.0,
             roll: 0.0,
             zoom: 1.0,
+            height: 0.0,
+            forward: 0.0,
             ipd_offset: 0.0,
             vertical_align: 0.0,
             rotation_align: 0.0,
@@ -97,6 +105,8 @@ impl ViewSettings {
             pitch: l(self.pitch, other.pitch),
             roll: l(self.roll, other.roll),
             zoom: l(self.zoom, other.zoom),
+            height: l(self.height, other.height),
+            forward: l(self.forward, other.forward),
             ipd_offset: l(self.ipd_offset, other.ipd_offset),
             vertical_align: l(self.vertical_align, other.vertical_align),
             rotation_align: l(self.rotation_align, other.rotation_align),

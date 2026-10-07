@@ -416,3 +416,47 @@ fn egui_panel_and_pointer_render_in_the_scene() {
     r.destroy_panel(panel);
     e.destroy(&r);
 }
+
+#[test]
+fn height_moves_the_viewer_against_the_horizon() {
+    let Some((mut r, mut e)) = setup() else {
+        return;
+    };
+    // Sky red, ground blue, the horizon through the middle of the view.
+    let f = frame(256, 128, |_, v| {
+        if v < 0.5 {
+            [230, 20, 20]
+        } else {
+            [20, 20, 230]
+        }
+    });
+    let at = |height: f32| {
+        params(
+            Projection::EQUIRECT_360,
+            StereoLayout::Mono,
+            ViewSettings {
+                height,
+                ..Default::default()
+            },
+        )
+    };
+    // About 3.6° above and below the middle.
+    let (up, down) = ((SIZE / 2, SIZE / 2 - 4), (SIZE / 2, SIZE / 2 + 4));
+    let [l, _] = render(&mut r, &mut e, Some(&f), &at(0.0), &[]);
+    assert!(is_red(px(&l, up.0, up.1)) && is_blue(px(&l, down.0, down.1)));
+    // Lower yourself and the ground rises past eye level; raise yourself and
+    // the sky sinks below it.
+    let [l, _] = render(&mut r, &mut e, Some(&f), &at(-0.5), &[]);
+    assert!(
+        is_blue(px(&l, up.0, up.1)),
+        "lowered {:?}",
+        px(&l, up.0, up.1)
+    );
+    let [l, _] = render(&mut r, &mut e, Some(&f), &at(0.5), &[]);
+    assert!(
+        is_red(px(&l, down.0, down.1)),
+        "raised {:?}",
+        px(&l, down.0, down.1)
+    );
+    e.destroy(&r);
+}

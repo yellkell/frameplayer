@@ -583,11 +583,30 @@ pub fn adjust_panel(ctx: &egui::Context, v: &mut View) {
                             r.slider("Pitch", None, &mut s.pitch, -90.0..=90.0, 0.0, "°", 0);
                             r.slider("Roll", None, &mut s.roll, -45.0..=45.0, 0.0, "°", 0);
                             r.slider("Zoom", None, &mut s.zoom, 0.5..=2.5, 1.0, "×", 2);
+                            r.slider(
+                                "Height",
+                                Some("Raise or lower yourself in the scene."),
+                                &mut s.height,
+                                -1.0..=1.0,
+                                d.height,
+                                " m",
+                                2,
+                            );
+                            r.slider(
+                                "Forward",
+                                Some("Move closer to or back from the scene."),
+                                &mut s.forward,
+                                -1.0..=1.0,
+                                d.forward,
+                                " m",
+                                2,
+                            );
                         });
                         ui.label(
                             RichText::new(
                                 "Or hold a grip and the trigger and drag the picture; \
-                                 press the thumbstick to undo.",
+                                 press the thumbstick to undo. Right grip and thumbstick \
+                                 up / down changes your height.",
                             )
                             .color(theme::TEXT_3),
                         );

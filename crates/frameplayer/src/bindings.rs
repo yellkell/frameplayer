@@ -89,7 +89,7 @@ impl ButtonAction {
 }
 
 /// What a thumbstick axis does. Right and up are the positive directions:
-/// forward, louder, tilt up, turn right, zoom out.
+/// forward, louder, tilt up, turn right, zoom out, higher.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AxisAction {
@@ -100,15 +100,17 @@ pub enum AxisAction {
     Tilt,
     Turn,
     Zoom,
+    Height,
 }
 
 impl AxisAction {
-    pub const ALL: [AxisAction; 6] = [
+    pub const ALL: [AxisAction; 7] = [
         AxisAction::Seek,
         AxisAction::Volume,
         AxisAction::Tilt,
         AxisAction::Turn,
         AxisAction::Zoom,
+        AxisAction::Height,
         AxisAction::Nothing,
     ];
 
@@ -120,6 +122,7 @@ impl AxisAction {
             AxisAction::Tilt => "Tilt the picture",
             AxisAction::Turn => "Turn the picture",
             AxisAction::Zoom => "Zoom",
+            AxisAction::Height => "Raise or lower yourself",
         }
     }
 
@@ -128,6 +131,7 @@ impl AxisAction {
         match self {
             AxisAction::Tilt => "Tilt",
             AxisAction::Turn => "Turn",
+            AxisAction::Height => "Height",
             other => other.label(),
         }
     }
@@ -302,7 +306,7 @@ impl Default for Bindings {
                 stick_x: X::Seek,
                 stick_y: X::Volume,
                 grip_x: X::Nothing,
-                grip_y: X::Nothing,
+                grip_y: X::Height,
             },
         }
     }

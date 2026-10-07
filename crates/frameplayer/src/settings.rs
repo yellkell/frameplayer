@@ -143,6 +143,16 @@ impl Settings {
                         s.default_view.set_key(&ViewSettings::default());
                         s.default_view.key_own = Some(false);
                     }
+                    // Saved before height existed: the right grip's up / down
+                    // was free then, so it gets the new default.
+                    let before_height = serde_json::from_str::<serde_json::Value>(&text)
+                        .ok()
+                        .is_some_and(|v| v["default_view"].get("height").is_none());
+                    if before_height
+                        && s.controls.right.grip_y == crate::bindings::AxisAction::Nothing
+                    {
+                        s.controls.right.grip_y = crate::bindings::AxisAction::Height;
+                    }
                     s
                 }
                 Err(e) => {
@@ -197,6 +207,17 @@ mod tests {
         assert_eq!(p.default_view.zoom, 1.5);
         assert_eq!(p.default_view.key_color, ViewSettings::default().key_color);
         assert_eq!(p.default_view.key_own, Some(false));
+        // Saved before height: the right grip's free up / down gets it; one
+        // set to nothing since stays so.
+        let old =
+            r#"{"default_view": {"zoom": 1.0}, "controls": {"right": {"grip_y": "nothing"}}}"#;
+        std::fs::write(&path, old).unwrap();
+        let height = crate::bindings::AxisAction::Height;
+        assert_eq!(Settings::load(&path).controls.right.grip_y, height);
+        let mut s = Settings::default();
+        s.controls.right.grip_y = crate::bindings::AxisAction::Nothing;
+        s.save(&path).unwrap();
+        assert_eq!(Settings::load(&path), s);
         std::fs::write(&path, "garbage").unwrap();
         assert_eq!(Settings::load(&path).volume, 1.0);
         std::fs::remove_dir_all(&dir).unwrap();

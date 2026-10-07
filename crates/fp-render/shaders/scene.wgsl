@@ -39,6 +39,9 @@ struct Params {
     key: vec4<f32>,
     // x spill, y on, z alpha-packed mask scale (0 off)
     key2: vec4<f32>,
+    // xyz: the viewer's offset (height, forward) in world space, metres, for
+    // spherical video; w: radius of the sphere it is drawn on when offset
+    viewer: vec4<f32>,
 };
 
 struct PushConstants {
@@ -92,6 +95,18 @@ fn zoom_dir(d: vec3<f32>, zoom: f32) -> vec3<f32> {
     let t2 = min(theta / zoom, PI);
     let phi = d.xy / r;
     return vec3<f32>(phi * sin(t2), -cos(t2));
+}
+
+// The direction from the sphere's centre to where a ray from `p` (inside a
+// sphere of radius `r`) along `d` meets it: seen from off the centre, near
+// parts of the picture grow and slide against far ones. Both eyes use the
+// same `p`, so the video's own stereo depth is kept.
+fn off_centre(d: vec3<f32>, p: vec3<f32>, r: f32) -> vec3<f32> {
+    if (dot(p, p) < 1e-8) { return d; }
+    let q = p * min(1.0, 0.9 * r / length(p));
+    let b = dot(q, d);
+    let t = -b + sqrt(b * b - dot(q, q) + r * r);
+    return normalize(q + t * d);
 }
 
 // Ray (forward = -Z, right = +X, up = +Y) to normalised video coordinates
@@ -284,6 +299,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         d = rot_x(params.lens.z * s) * d;
         d = rot_z(params.lens.w * s) * d;
         d = normalize((params.correction * vec4<f32>(d, 0.0)).xyz);
+        d = off_centre(d, (params.correction * vec4<f32>(params.viewer.xyz, 0.0)).xyz,
+                       params.viewer.w);
         d = zoom_dir(d, params.proj.z);
         if (kind == 1u) {
             uv = equirect_uv(d, params.proj.x, params.proj.y);

@@ -13,7 +13,7 @@
 //! | Y / D-pad up | Next video | Show or hide the controls |
 //! | Menu / View | Library | Recenter |
 //! | Bumper | Forward 1 minute | Back 1 minute |
-//! | Grip + thumbstick | (nothing) | Left / right turns the picture, up / down zooms |
+//! | Grip + thumbstick | Up / down raises or lowers you | Left / right turns the picture, up / down zooms |
 //!
 //! Fixed: the trigger clicks (on empty space it shows or hides the
 //! controls), grip + trigger drags the picture, both grips recenter, and a
@@ -39,6 +39,8 @@ pub enum Cmd {
     Yaw(f32),
     /// Zoom change (factor delta this frame).
     Zoom(f32),
+    /// Viewer height change (metres this frame; up positive).
+    Height(f32),
     /// Volume change (this frame; 1.0 is full).
     Volume(f32),
     ToggleMute,
@@ -75,6 +77,8 @@ pub struct Context {
 /// How fast a thumbstick tilts or turns the picture, in degrees a second.
 const PITCH_SPEED: f32 = 30.0;
 const YAW_SPEED: f32 = 45.0;
+/// How fast a thumbstick raises or lowers the viewer, metres a second.
+const HEIGHT_SPEED: f32 = 0.4;
 /// Volume change a second at full stick.
 const VOLUME_SPEED: f32 = 0.6;
 pub(crate) const GRIP: f32 = 0.7;
@@ -209,6 +213,7 @@ impl Controls {
                             AxisAction::Volume => Cmd::Volume(d * VOLUME_SPEED),
                             AxisAction::Tilt => Cmd::Pitch(d * PITCH_SPEED),
                             AxisAction::Turn => Cmd::Yaw(-d * YAW_SPEED),
+                            AxisAction::Height => Cmd::Height(d * HEIGHT_SPEED),
                             // Down zooms in, as in DeoVR.
                             _ => Cmd::Zoom(-d * 0.8),
                         });
@@ -425,11 +430,15 @@ mod tests {
             matches!(z[..], [Cmd::Zoom(d)] if d > 0.0),
             "down zooms in: {z:?}"
         );
-        // The right grip + stick does nothing (and does not seek).
+        // The right grip + stick: left / right does nothing (and does not
+        // seek), up raises you.
         let mut h = hands();
         h[RIGHT].squeeze = 1.0;
         h[RIGHT].stick = Vec2::new(0.9, 0.0);
         assert_eq!(run(&mut Controls::default(), &h, ctx(true)), vec![]);
+        h[RIGHT].stick = Vec2::new(0.0, 0.9);
+        let up = run(&mut Controls::default(), &h, ctx(true));
+        assert!(matches!(up[..], [Cmd::Height(d)] if d > 0.0), "{up:?}");
     }
 
     #[test]

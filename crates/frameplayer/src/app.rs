@@ -1256,6 +1256,13 @@ impl App {
                         p.settings_dirty = true;
                     }
                 }
+                Cmd::Height(d) => {
+                    if let Some(p) = &mut self.playback {
+                        p.settings.height = (p.settings.height + d).clamp(-1.0, 1.0);
+                        p.settings_dirty = true;
+                        self.ui.toast(format!("Height {:+.2} m", p.settings.height));
+                    }
+                }
                 Cmd::Next => self.step_queue(1),
                 Cmd::Previous => self.step_queue(-1),
                 Cmd::ResetImage => {
@@ -1266,7 +1273,9 @@ impl App {
                             p.settings.pitch,
                             p.settings.roll,
                             p.settings.zoom,
-                        ) = (d.yaw, d.pitch, d.roll, d.zoom);
+                            p.settings.height,
+                            p.settings.forward,
+                        ) = (d.yaw, d.pitch, d.roll, d.zoom, d.height, d.forward);
                         p.settings_dirty = true;
                         self.ui.toast("View reset");
                     }

@@ -212,6 +212,18 @@ fn playback(ui: &mut egui::Ui, v: &mut View) {
             },
         );
     });
+    heading(ui, "180° and 360° videos");
+    widgets::rows(ui, |r| {
+        r.slider(
+            "Height",
+            Some("Raise or lower yourself in videos without their own."),
+            &mut s.default_view.height,
+            -1.0..=1.0,
+            0.0,
+            " m",
+            2,
+        );
+    });
     heading(ui, "Flat videos and subtitles");
     let d = &mut s.default_view;
     widgets::rows(ui, |r| {
