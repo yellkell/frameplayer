@@ -5,6 +5,7 @@ description = "Shared FramePlayer types: projections, stereo layouts, format det
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

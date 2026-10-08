@@ -45,7 +45,7 @@ llvm-strip --strip-all "$stage/frameplayer" 2>/dev/null || true
 for l in avformat.so.61 avcodec.so.61 avutil.so.59 swresample.so.5 swscale.so.8; do
   cp -L "$ffmpeg/lib$l" "$stage/lib/lib$l"
 done
-cp packaging/frameplayer.sh packaging/README.txt "$stage/"
+cp packaging/frameplayer.sh packaging/README.txt LICENSE-MIT LICENSE-APACHE "$stage/"
 cp packaging/licenses/* "$stage/licenses/"
 cp assets/steam/*.png "$stage/assets/steam/"
 echo "$version" > "$stage/VERSION"

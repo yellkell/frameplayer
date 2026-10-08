@@ -5,6 +5,7 @@ description = "FramePlayer media pipeline: demux, decode, audio output, A/V cloc
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 fp-core = { path = "../fp-core" }

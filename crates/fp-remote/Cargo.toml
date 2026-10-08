@@ -5,6 +5,7 @@ description = "FramePlayer remote control: DeoVR-compatible TCP API and LAN web 
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 fp-core = { path = "../fp-core" }

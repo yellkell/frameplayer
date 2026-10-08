@@ -5,6 +5,7 @@ description = "Raw FFI bindings to FramePlayer's bundled FFmpeg 7.1 build"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 links = "avcodec"
 build = "build.rs"
 

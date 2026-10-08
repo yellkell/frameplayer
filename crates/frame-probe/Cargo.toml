@@ -5,6 +5,7 @@ description = "Reports what a Steam Frame offers a native Linux ARM64 VR video p
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [dependencies]
 # Vulkan through the system loader (Turnip on the Frame), loaded at run time.

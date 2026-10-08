@@ -5,6 +5,7 @@ description = "FramePlayer media sources: local folders, HTTP(S), WebDAV, DLNA/U
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+license.workspace = true
 
 [features]
 default = ["smb"]

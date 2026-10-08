@@ -6,7 +6,7 @@ members = ["crates/*"]
 edition = "2024"
 rust-version = "1.89"
 publish = false
-# Licence not chosen yet: see docs/OUTLINE.md section 8, question 1.
+license = "MIT OR Apache-2.0"
 
 [profile.release]
 lto = "thin"

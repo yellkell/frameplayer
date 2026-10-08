@@ -30,3 +30,13 @@ Guides: [user guide](docs/USER-GUIDE.md), [development](docs/DEVELOPMENT.md).
 `frame-probe` (Milestone 0) answers the remaining platform questions in one
 run on a headset (`tools/frame-probe.sh --build`); results go in
 [docs/platform-notes.md](docs/platform-notes.md).
+
+## License
+
+FramePlayer is licensed under either of [Apache License, Version 2.0](LICENSE-APACHE)
+or [MIT license](LICENSE-MIT), at your option. Bundled third-party libraries
+and fonts keep their own licences; see [packaging/licenses](packaging/licenses/THIRD-PARTY.txt).
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in FramePlayer by you, as defined in the Apache-2.0 license, shall
+be dual licensed as above, without any additional terms or conditions.
