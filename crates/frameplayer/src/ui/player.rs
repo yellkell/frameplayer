@@ -1089,11 +1089,12 @@ fn audio_and_text(ui: &mut egui::Ui, pb: &crate::playback::Playback, actions: &m
     let st = pb.player.stats();
     ui.label(
         RichText::new(format!(
-            "Video: {}{} · dropped {} of {} · Audio: {} via {}",
+            "Video: {}{} · dropped {} of {} · stalled {} · Audio: {} via {}",
             st.video_decoder,
             if st.hardware { " (hardware)" } else { "" },
             st.frames_dropped,
             st.frames_shown + st.frames_dropped,
+            st.stalls,
             st.audio_decoder,
             st.audio_sink
         ))

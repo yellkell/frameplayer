@@ -1422,6 +1422,7 @@ impl App {
         self.poll_purchase();
         if let Some(p) = &mut self.playback {
             p.save_progress(&self.services.library, false);
+            p.watch_decoding();
         }
         self.publish_status();
 

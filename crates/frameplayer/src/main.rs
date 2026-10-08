@@ -454,6 +454,18 @@ fn run_xr(args: &Args) -> Result<(), Error> {
                 at(1.0),
                 frame_ms.len()
             );
+            if let Some(pb) = &app.playback {
+                let st = pb.player.stats();
+                log::info!(
+                    "video {} ({}): {} shown, {} dropped, {} stalls, {} queued",
+                    st.video_decoder,
+                    if st.hardware { "hardware" } else { "software" },
+                    st.frames_shown,
+                    st.frames_dropped,
+                    st.stalls,
+                    st.video_queue
+                );
+            }
             frame_ms.clear();
             timing_since = Instant::now();
         }

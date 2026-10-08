@@ -91,6 +91,10 @@ chroma
 mask
 frames 8
 panel adjust adjust-passthrough
+# Software decoding falling behind.
+slow-decode
+frames 8
+panel bar player-bar-slow-decode
 EOF
 
 cargo build -p frameplayer

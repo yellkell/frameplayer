@@ -9,7 +9,7 @@ use fp_core::view::{Keyframes, ViewSettings};
 use fp_core::{PlaybackStatus, playback::now_ms};
 use fp_haptics::{Axis, Heatmap, Script};
 use fp_library::{Library, MediaId, SessionId};
-use fp_media::{Player, PlayerConfig, PlayerState};
+use fp_media::{Player, PlayerConfig, PlayerState, StreamInfo};
 use std::time::Instant;
 
 /// What to open.
@@ -44,6 +44,8 @@ pub struct Playback {
     pub script_count: usize,
     last_save: Instant,
     pub notice: Option<String>,
+    /// Last decoding check: when, and the player's stall and frame counts.
+    decode_check: (Instant, u64, u64, u64),
 }
 
 /// The result of opening on a background thread.
@@ -280,6 +282,7 @@ pub fn open(
             script_count,
             last_save: Instant::now(),
             notice: None,
+            decode_check: (Instant::now(), 0, 0, 0),
         },
         scripts,
     })
@@ -322,6 +325,44 @@ impl Playback {
         {
             log::warn!("saving progress: {e}");
         }
+    }
+
+    /// Every few seconds: when software decoding falls behind, says why in
+    /// the control bar (the picture stutters with no other explanation).
+    pub fn watch_decoding(&mut self) {
+        if self.decode_check.0.elapsed().as_secs_f64() < DECODE_CHECK_SECS {
+            return;
+        }
+        let st = self.player.stats();
+        let (_, stalls, dropped, shown) = self.decode_check;
+        self.decode_check = (
+            Instant::now(),
+            st.stalls,
+            st.frames_dropped,
+            st.frames_shown,
+        );
+        if st.hardware || self.notice.is_some() || self.player.is_paused() {
+            return;
+        }
+        if !falling_behind(
+            st.stalls - stalls,
+            st.frames_dropped - dropped,
+            st.frames_shown - shown,
+        ) {
+            return;
+        }
+        let Some(v) = self.player.info().video_stream() else {
+            return;
+        };
+        let notice = slow_decode_notice(v);
+        log::info!(
+            "software decoding ({}) behind: {} stalls, {} of {} frames dropped",
+            st.video_decoder,
+            st.stalls - stalls,
+            st.frames_dropped - dropped,
+            st.frames_shown - shown + st.frames_dropped - dropped
+        );
+        self.notice = Some(notice);
     }
 
     pub fn set_format(&mut self, library: &Library, format: Option<VideoFormat>) {
@@ -369,6 +410,40 @@ impl Playback {
     }
 }
 
+const DECODE_CHECK_SECS: f64 = 10.0;
+
+/// Over one check period: playback stalled more than once waiting for the
+/// decoder, or dropped more than 5% of frames.
+fn falling_behind(stalls: u64, dropped: u64, shown: u64) -> bool {
+    stalls >= 2 || dropped * 20 > dropped + shown
+}
+
+/// Why a software-decoded video stutters, and what plays smoothly instead.
+pub(crate) fn slow_decode_notice(v: &StreamInfo) -> String {
+    let codec = match v.codec.as_str() {
+        "hevc" => "HEVC".to_string(),
+        "h264" => "H.264".to_string(),
+        "av1" => "AV1".to_string(),
+        "vp9" => "VP9".to_string(),
+        c => c.to_uppercase(),
+    };
+    let desc = if v.bit_depth > 8 {
+        format!("{}-bit {codec}", v.bit_depth)
+    } else {
+        codec
+    };
+    let hardware_codec = matches!(v.codec.as_str(), "hevc" | "h264" | "vp9");
+    if hardware_codec && v.bit_depth <= 8 {
+        format!(
+            "Decoding this {desc} video in software (the hardware decoder was busy)              and it can't keep up"
+        )
+    } else {
+        format!(
+            "The Frame can't decode {desc} in hardware and it is too heavy for software;              an 8-bit H.265 version plays smoothly"
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,5 +457,40 @@ mod tests {
         assert_eq!(file_name("/media/x/My.Video_2024.mkv"), "My.Video_2024.mkv");
         assert_eq!(title_from_name("My.Video_2024.mkv"), "My Video 2024");
         assert_eq!(percent_decode("a%2Fb%zz"), "a/b%zz");
+    }
+
+    #[test]
+    fn slow_decoding_is_noticed_and_explained() {
+        assert!(!falling_behind(0, 0, 600));
+        assert!(!falling_behind(1, 10, 590), "one stall, few drops");
+        assert!(falling_behind(2, 0, 400));
+        assert!(falling_behind(0, 40, 560));
+        assert!(!falling_behind(0, 0, 0));
+        let stream = |codec: &str, bit_depth| StreamInfo {
+            index: 0,
+            kind: fp_media::StreamKind::Video,
+            codec: codec.into(),
+            language: None,
+            title: None,
+            default: true,
+            width: 8192,
+            height: 4096,
+            fps: 59.94,
+            bit_depth,
+            transfer: Default::default(),
+            rotation: 0.0,
+            sample_rate: 0,
+            channels: 0,
+            ambisonic: false,
+        };
+        let n = slow_decode_notice(&stream("hevc", 10));
+        assert!(
+            n.contains("10-bit HEVC") && n.contains("8-bit H.265"),
+            "{n}"
+        );
+        let n = slow_decode_notice(&stream("av1", 8));
+        assert!(n.contains("decode AV1 in hardware"), "{n}");
+        let n = slow_decode_notice(&stream("hevc", 8));
+        assert!(n.contains("busy"), "{n}");
     }
 }

@@ -77,6 +77,8 @@ pub struct Stats {
     pub audio_sink: String,
     pub frames_shown: u64,
     pub frames_dropped: u64,
+    /// Times the clock was held because decoding fell behind.
+    pub stalls: u64,
     pub video_queue: usize,
     pub packets_queued: usize,
     pub bytes_queued: usize,
@@ -592,6 +594,7 @@ impl Player {
                 if behind > 2.0 / s.video_fps.max(1.0) + 0.25 {
                     s.buffering.store(true, Ordering::Release);
                     s.clock.pause();
+                    s.stats().stalls += 1;
                 }
             }
         }

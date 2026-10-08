@@ -275,6 +275,20 @@ impl Sim {
                 self.app.repaint_all();
                 self.run_frames(3)?;
             }
+            // The notice for software decoding falling behind, as a 10-bit
+            // HEVC video gets it.
+            Some("slow-decode") => {
+                if let Some(p) = &mut self.app.playback {
+                    let v = p.player.info().video_stream().cloned();
+                    if let Some(mut v) = v {
+                        v.codec = "hevc".into();
+                        v.bit_depth = 10;
+                        p.notice = Some(crate::playback::slow_decode_notice(&v));
+                    }
+                }
+                self.app.repaint_all();
+                self.run_frames(3)?;
+            }
             // Turns the global chroma key on (Settings > Passthrough).
             Some("chroma-global") => {
                 self.app.settings.default_view.chroma_key = true;
