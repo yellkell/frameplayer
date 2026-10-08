@@ -1142,7 +1142,16 @@ mod linux {
         /// NV12, or P010 for a 10-bit stream (NV12 would hold only the low
         /// 8 bits of each sample).
         fn capture_format(&self) -> u32 {
-            if self.ten_bit { P010 } else { NV12 }
+            // Experiment: FRAMEPLAYER_V4L2_FMT=XXXX asks 10-bit streams for
+            // that fourcc instead.
+            let forced = std::env::var("FRAMEPLAYER_V4L2_FMT")
+                .ok()
+                .and_then(|f| <[u8; 4]>::try_from(f.as_bytes()).ok());
+            match forced {
+                Some(f) if self.ten_bit => fourcc(&f),
+                _ if self.ten_bit => P010,
+                _ => NV12,
+            }
         }
 
         fn g_fmt_capture(&self) -> Result<Format> {
@@ -1180,21 +1189,24 @@ mod linux {
                 Ok(()) if s.width > 0 && s.height > 0 => (s.width, s.height),
                 _ => (f.width(), f.height()),
             };
-            Nv12Layout::new(
-                f.bytesperline(0) as usize,
-                f.height(),
-                visible,
-                f.sizeimage(0) as usize,
+            // Experiment: other formats get a layout that lets export dump
+            // the raw buffer (and then fail).
+            let sizeimage = if f.pixelformat() == NV12 || f.pixelformat() == P010 {
+                f.sizeimage(0) as usize
+            } else {
+                f.sizeimage(0) as usize * 2
+            };
+            Nv12Layout::new(f.bytesperline(0) as usize, f.height(), visible, sizeimage).ok_or_else(
+                || {
+                    Error::Unsupported(format!(
+                        "V4L2 capture layout {}x{} stride {} size {}",
+                        visible.0,
+                        visible.1,
+                        f.bytesperline(0),
+                        f.sizeimage(0)
+                    ))
+                },
             )
-            .ok_or_else(|| {
-                Error::Unsupported(format!(
-                    "V4L2 capture layout {}x{} stride {} size {}",
-                    visible.0,
-                    visible.1,
-                    f.bytesperline(0),
-                    f.sizeimage(0)
-                ))
-            })
         }
 
         /// First source change: choose NV12, allocate, map and queue CAPTURE.
@@ -1400,6 +1412,20 @@ mod linux {
             };
             let l = cap.layout;
             let src = &cap.bufs[index as usize];
+            // Experiment: FRAMEPLAYER_V4L2_RAWDUMP=file writes the first
+            // decoded buffer as the driver filled it.
+            if self.frames == 0
+                && let Ok(path) = std::env::var("FRAMEPLAYER_V4L2_RAWDUMP")
+            {
+                // SAFETY: the mapping holds src.len bytes.
+                let raw = unsafe { std::slice::from_raw_parts(src.ptr, src.len) };
+                let _ = std::fs::write(&path, raw);
+                log::info!(
+                    "V4L2 raw dump: {} bytes, stride {}, to {path}",
+                    src.len,
+                    l.stride
+                );
+            }
             let size = l.copy_size();
             if l.end() > src.len {
                 return Err(Error::Unsupported(
