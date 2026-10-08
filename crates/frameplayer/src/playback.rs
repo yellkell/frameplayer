@@ -434,13 +434,9 @@ pub(crate) fn slow_decode_notice(v: &StreamInfo) -> String {
     };
     let hardware_codec = matches!(v.codec.as_str(), "hevc" | "h264" | "vp9");
     if hardware_codec && v.bit_depth <= 8 {
-        format!(
-            "Decoding this {desc} video in software (the hardware decoder was busy)              and it can't keep up"
-        )
+        format!("Hardware decoder busy: {desc} in software stutters")
     } else {
-        format!(
-            "The Frame can't decode {desc} in hardware and it is too heavy for software;              an 8-bit H.265 version plays smoothly"
-        )
+        format!("No hardware decoding for {desc}, so it stutters. 8-bit H.265 plays smoothly")
     }
 }
 
@@ -489,7 +485,7 @@ mod tests {
             "{n}"
         );
         let n = slow_decode_notice(&stream("av1", 8));
-        assert!(n.contains("decode AV1 in hardware"), "{n}");
+        assert!(n.contains("for AV1,"), "{n}");
         let n = slow_decode_notice(&stream("hevc", 8));
         assert!(n.contains("busy"), "{n}");
     }

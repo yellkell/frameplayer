@@ -81,21 +81,40 @@ pub fn control_bar(ctx: &egui::Context, v: &mut View) {
                     v.state.adjust_tab = 0;
                 }
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(widgets::display_title(&pb.title))
-                                .font(theme::font(Weight::SemiBold, 21.0))
-                                .color(theme::TEXT),
-                        )
-                        .truncate(),
-                    );
+                    let message = match pb.player.error() {
+                        Some(e) => Some((e, theme::ERROR)),
+                        None => pb.notice.clone().map(|n| (n, theme::WARN)),
+                    };
+                    // With a message, the title leaves it most of the row;
+                    // both truncate rather than run under the format pill.
+                    let title_width = if message.is_some() {
+                        ui.available_width() * 0.35
+                    } else {
+                        ui.available_width()
+                    };
+                    ui.scope(|ui| {
+                        ui.set_max_width(title_width);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(widgets::display_title(&pb.title))
+                                    .font(theme::font(Weight::SemiBold, 21.0))
+                                    .color(theme::TEXT),
+                            )
+                            .truncate(),
+                        );
+                    });
                     if state == PlayerState::Buffering {
                         ui.spinner();
                     }
-                    if let Some(e) = pb.player.error() {
-                        ui.label(RichText::new(e).color(theme::ERROR));
-                    } else if let Some(n) = &pb.notice {
-                        ui.label(RichText::new(n).color(theme::WARN));
+                    if let Some((text, color)) = message {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(text)
+                                    .font(theme::font(Weight::Regular, 15.0))
+                                    .color(color),
+                            )
+                            .truncate(),
+                        );
                     }
                 });
             });
