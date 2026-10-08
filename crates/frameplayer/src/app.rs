@@ -832,6 +832,11 @@ impl App {
                 }
                 self.ui.invalidate();
             }
+            Action::SaveKey => {
+                if let Some(p) = &mut self.playback {
+                    p.key_changed();
+                }
+            }
             Action::SaveView => {
                 if let Some(p) = &mut self.playback {
                     p.save_settings(&lib);
@@ -1422,6 +1427,7 @@ impl App {
         self.poll_purchase();
         if let Some(p) = &mut self.playback {
             p.save_progress(&self.services.library, false);
+            p.save_key(&self.services.library, false);
             p.watch_decoding();
         }
         self.publish_status();

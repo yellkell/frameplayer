@@ -37,6 +37,13 @@ pub struct Playback {
     pub keyframes: Keyframes,
     /// Adjustments differ from what is saved for this video.
     pub settings_dirty: bool,
+    /// What is saved for this video (the Passthrough tab saves its part
+    /// at once, the rest only with Save).
+    saved_settings: ViewSettings,
+    /// The chroma key changed and is not saved yet (see [`Self::save_key`]),
+    /// and when it was last saved: slider drags save twice a second.
+    key_pending: bool,
+    key_saved_at: Instant,
     pub heatmap: Option<Heatmap>,
     pub markers: Vec<(f64, String)>,
     pub subtitle_files: Vec<(String, String)>,
@@ -273,6 +280,9 @@ pub fn open(
             evidence: resolved.evidence,
             detected,
             settings: settings_v,
+            saved_settings: settings_v,
+            key_pending: false,
+            key_saved_at: Instant::now(),
             keyframes,
             settings_dirty: false,
             heatmap,
@@ -385,7 +395,10 @@ impl Playback {
                 .set_view_settings(id, Some(&self.settings))
                 .and_then(|_| library.set_keyframes(id, &self.keyframes));
             match r {
-                Ok(()) => self.settings_dirty = false,
+                Ok(()) => {
+                    self.settings_dirty = false;
+                    self.saved_settings = self.settings;
+                }
                 Err(e) => log::warn!("saving adjustments: {e}"),
             }
         } else {
@@ -393,6 +406,35 @@ impl Playback {
                 "Adjustments apply until you close this video (it is not in the library).".into(),
             );
         }
+    }
+
+    /// Saves this video's chroma key (the Passthrough tab) without the
+    /// other, unsaved adjustments: the tab promises it is kept with the
+    /// video, and toggling it every time was the result of waiting for Save.
+    pub fn save_key(&mut self, library: &Library, force: bool) {
+        if !self.key_pending || (!force && self.key_saved_at.elapsed().as_secs_f64() < 0.5) {
+            return;
+        }
+        self.key_pending = false;
+        self.key_saved_at = Instant::now();
+        let Some(id) = self.record_id else {
+            return;
+        };
+        let mut saved = self.saved_settings;
+        saved.set_key(&self.settings);
+        saved.key_own = self.settings.key_own;
+        match library.set_view_settings(id, Some(&saved)) {
+            Ok(()) => {
+                self.saved_settings = saved;
+                self.settings_dirty = self.settings != saved;
+            }
+            Err(e) => log::warn!("saving the background removal: {e}"),
+        }
+    }
+
+    /// The Passthrough tab changed the chroma key; [`Self::save_key`] saves it.
+    pub fn key_changed(&mut self) {
+        self.key_pending = true;
     }
 
     pub fn add_bookmark(&mut self, library: &Library) {
@@ -407,6 +449,7 @@ impl Playback {
 
     pub fn close(mut self, library: &Library) {
         self.save_progress(library, true);
+        self.save_key(library, true);
     }
 }
 

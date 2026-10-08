@@ -59,6 +59,8 @@ pub enum Action {
     /// Override the format of the playing video (`None` = detected).
     SetFormat(Option<VideoFormat>),
     SaveView,
+    /// The Passthrough tab changed this video's chroma key: saved at once.
+    SaveKey,
     ResetView,
     AddKeyframe,
     ClearKeyframes,

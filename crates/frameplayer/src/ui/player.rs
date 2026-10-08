@@ -811,12 +811,14 @@ fn chroma_tab(
                 s.set_key(global);
             }
             s.key_own = Some(own);
+            actions.push(Action::SaveKey);
         }
     });
     let mut shown = s.with_global_key(global);
     if chroma_controls(ui, &mut shown, passthrough_available) {
         s.set_key(&shown);
         s.key_own = Some(true);
+        actions.push(Action::SaveKey);
     }
 }
 
