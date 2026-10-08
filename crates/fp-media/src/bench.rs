@@ -201,6 +201,15 @@ pub fn decode_bench(
         dims.get_or_insert((f.width, f.height, f.layout));
         if opts.checksum.contains(&i) {
             sums.push((i, f.pts, yuv_checksum(f)));
+            // Experiment: FRAMEPLAYER_BENCH_DUMP=dir writes the frame's
+            // packed planes there, to look at.
+            if let Ok(dir) = std::env::var("FRAMEPLAYER_BENCH_DUMP") {
+                let name = format!("frame{i}_{}x{}_{:?}.yuv", f.width, f.height, f.layout);
+                let _ = std::fs::write(
+                    std::path::Path::new(&dir).join(name),
+                    f.packed_planes().concat(),
+                );
+            }
         }
     })?;
     if let Some(t) = opts.seek {

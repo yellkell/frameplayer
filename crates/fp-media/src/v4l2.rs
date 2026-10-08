@@ -1303,7 +1303,14 @@ mod linux {
         /// they fit (no admission check), else reallocate.
         fn change_resolution(&mut self) -> Result<()> {
             self.drc_pending = false;
-            let f = self.g_fmt_capture()?;
+            let mut f = self.g_fmt_capture()?;
+            // A 10-bit stream comes back as Q10C; iris also hands it out as
+            // NV12 (8-bit), which then fits the primed buffers.
+            if f.pixelformat() != NV12 {
+                f.set_pixelformat(NV12);
+                ioctl(&self.fd, VIDIOC_S_FMT, &mut f).map_err(|e| err("S_FMT capture", e))?;
+                f = self.g_fmt_capture()?;
+            }
             let min = self.min_capture_buffers();
             let (allocated_for, count, smallest) = self
                 .cap
