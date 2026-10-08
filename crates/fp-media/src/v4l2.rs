@@ -800,7 +800,11 @@ mod linux {
                 ff::AV_PIX_FMT_YUV420P,
                 ff::AV_PIX_FMT_YUVJ420P,
             ];
-            if !eight_bit_420.contains(&p.format) {
+            // Experiment: FRAMEPLAYER_V4L2_10BIT=1 lets 10-bit 4:2:0 through,
+            // to see what the driver offers for it.
+            let ten_bit = std::env::var("FRAMEPLAYER_V4L2_10BIT").as_deref() == Ok("1")
+                && p.format == ff::AV_PIX_FMT_YUV420P10LE;
+            if !eight_bit_420.contains(&p.format) && !ten_bit {
                 return Err(Error::Unsupported(format!(
                     "V4L2 path takes 8-bit 4:2:0 only (pixel format {})",
                     p.format
@@ -1180,10 +1184,27 @@ mod linux {
         /// First source change: choose NV12, allocate, map and queue CAPTURE.
         fn setup_capture(&mut self) -> Result<()> {
             let mut f = self.g_fmt_capture()?;
+            log::info!(
+                "V4L2 source change: capture {} {}x{} ({} planes); offered {:?}",
+                fourcc_str(f.pixelformat()),
+                f.width(),
+                f.height(),
+                f.num_planes(),
+                formats(&self.fd, BUF_TYPE_CAPTURE_MPLANE)
+                    .into_iter()
+                    .map(fourcc_str)
+                    .collect::<Vec<_>>()
+            );
             if f.pixelformat() != NV12 {
                 f.set_pixelformat(NV12);
                 ioctl(&self.fd, VIDIOC_S_FMT, &mut f).map_err(|e| err("S_FMT capture", e))?;
                 f = self.g_fmt_capture()?;
+                log::info!(
+                    "V4L2 capture after asking for NV12: {} stride {} size {}",
+                    fourcc_str(f.pixelformat()),
+                    f.bytesperline(0),
+                    f.sizeimage(0)
+                );
             }
             let layout = self.layout(&f)?;
             let min = self.min_capture_buffers();
