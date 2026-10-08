@@ -80,9 +80,15 @@ impl Codec {
     /// Frame needs. Generated with
     /// `ffmpeg -f lavfi -i color=c=black:s=8192x4080:r=1 -frames:v 1
     /// -pix_fmt yuv420p -c:v libx265 -profile:v main -x265-params info=0 -f hevc`.
-    pub(crate) fn primer(self) -> Option<(&'static [u8], (u32, u32))> {
+    /// The 10-bit one (`yuv420p10le`, `main10`) sets the decoder up for a
+    /// 10-bit stream, whose buffers differ from 8-bit ones.
+    pub(crate) fn primer(self, ten_bit: bool) -> Option<(&'static [u8], (u32, u32))> {
         match self {
             Codec::H264 => None,
+            Codec::Hevc if ten_bit => Some((
+                include_bytes!("../assets/primer_8192x4080_10bit.hevc"),
+                (8192, 4080),
+            )),
             Codec::Hevc => Some((
                 include_bytes!("../assets/primer_8192x4080.hevc"),
                 (8192, 4080),
@@ -650,6 +656,8 @@ mod linux {
         stream_size: (u32, u32),
         /// The primer trick is active (declared OUTPUT size was lowered).
         primed: bool,
+        /// 10-bit stream (decoded to NV12 by the driver).
+        ten_bit: bool,
         bsf: *mut ff::AVBSFContext,
         out_free: Vec<u32>,
         /// Filtered packets waiting for a free OUTPUT buffer, with their ids.
@@ -823,6 +831,7 @@ mod linux {
                 codec,
                 stream_size,
                 primed: false,
+                ten_bit,
                 bsf: std::ptr::null_mut(),
                 out_free: Vec::new(),
                 pending: VecDeque::new(),
@@ -852,7 +861,7 @@ mod linux {
             let mut t = BUF_TYPE_OUTPUT_MPLANE as i32;
             ioctl(&dec.fd, VIDIOC_STREAMON, &mut t).map_err(|e| err("STREAMON output", e))?;
             if dec.primed
-                && let Some((primer, _)) = codec.primer()
+                && let Some((primer, _)) = codec.primer(ten_bit)
             {
                 dec.queue_bitstream(primer, 0)?;
             }
@@ -931,7 +940,7 @@ mod linux {
                     // and open CAPTURE through the primer, if one fits.
                     let Some((_, primer)) = self
                         .codec
-                        .primer()
+                        .primer(self.ten_bit)
                         .filter(|(_, size)| primer_matches((w, h), *size))
                     else {
                         return Err(err("REQBUFS output", e));
@@ -1627,7 +1636,7 @@ mod tests {
 
     #[test]
     fn primer_only_for_streams_with_its_buffers() {
-        let primer = Codec::Hevc.primer().unwrap().1;
+        let primer = Codec::Hevc.primer(false).unwrap().1;
         assert_eq!(primer, (8192, 4080));
         assert!(primer_matches((8192, 4096), primer));
         assert!(primer_matches((8192, 4088), primer));
@@ -1638,7 +1647,7 @@ mod tests {
         assert!(!primer_matches((8192, 4320), primer));
         assert!(!primer_matches((7680, 4096), primer));
         assert!(!primer_matches((8192, 8192), primer));
-        assert!(Codec::H264.primer().is_none());
+        assert!(Codec::H264.primer(false).is_none());
     }
 
     #[test]
@@ -1684,16 +1693,20 @@ mod tests {
 
     #[test]
     fn primers_match_their_codecs() {
-        let (h, _) = Codec::Hevc.primer().unwrap();
-        assert!(h.starts_with(&[0, 0, 0, 1, 0x40, 0x01]), "HEVC VPS first");
-        // VPS, SPS, PPS, one IDR slice; no SEI.
-        let nal_types: Vec<u8> = h
-            .windows(4)
-            .filter(|w| w[..3] == [0, 0, 1])
-            .map(|w| (w[3] >> 1) & 0x3f)
-            .collect();
-        assert_eq!(nal_types, [32, 33, 34, 20]);
-        assert!(h.len() < 16 * 1024);
+        for ten_bit in [false, true] {
+            let (h, size) = Codec::Hevc.primer(ten_bit).unwrap();
+            assert_eq!(size, (8192, 4080));
+            assert!(h.starts_with(&[0, 0, 0, 1, 0x40, 0x01]), "HEVC VPS first");
+            // VPS, SPS, PPS, one IDR slice; no SEI.
+            let nal_types: Vec<u8> = h
+                .windows(4)
+                .filter(|w| w[..3] == [0, 0, 1])
+                .map(|w| (w[3] >> 1) & 0x3f)
+                .collect();
+            assert_eq!(nal_types, [32, 33, 34, 20]);
+            assert!(h.len() < 16 * 1024);
+        }
+        assert_ne!(Codec::Hevc.primer(false), Codec::Hevc.primer(true));
         assert_eq!(Codec::Hevc.fourcc(), fourcc(b"HEVC"));
         assert_eq!(macroblocks(8192, 4096), 131_072);
         assert_eq!(macroblocks(1920, 1080), 120 * 68);
