@@ -1,0 +1,454 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Mon, 5 Oct 2026 15:00:00 +0000
+Subject: [PATCH 11/13] xr: Linux OpenXR doesn't wait for the GPU each frame
+
+The Vulkan binding waited on the CPU twice per frame: in WaitOnSyncFd
+until the page's GL work was done, and in CopyToSwapchainImage until the
+copy into the swapchain was done. The render loop only hands the page
+its next frame after the current one is submitted, so the page's CPU
+work and the GPU's work for the previous frame never overlapped: a frame
+took page time + GPU time. Fire Fight 2 (3 ms of script, 16 ms of GPU)
+ran at a third of 108 Hz instead of half.
+
+- WaitOnSyncFd only imports the page-done sync file as a semaphore; the
+  copy's submit waits on it, on the GPU.
+- CopyToSwapchainImage submits without waiting. OpenXR only needs the
+  work submitted to the session's queue before xrReleaseSwapchainImage.
+  Each intermediate image has its own command buffer and fence, and keeps
+  the semaphore its copy waited on until that fence signals.
+- WaitForImage() waits for an image's last copy before the page draws
+  into it again (OnSwapchainImageReady) or it is destroyed; by then it is
+  normally long done.
+- OpenXR requires the GPU to be done with a swapchain before
+  xrDestroySwapchain, and a copy still writing into a destroyed swapchain
+  image faulted the GPU (Steam Frame kernel: "gpu fault ... dir=WRITE",
+  then every GL context on the device was lost and Chromium blocked
+  WebGL). OpenXrGraphicsBinding::OnSwapchainDestroying(), called before
+  xrDestroySwapchain (also when the session ends), lets the Vulkan binding
+  wait for its copies.
+
+Without a GPU fence (CHROMIUM_gpu_fence; ANGLE's OpenGL backend under X11
+has none) the render loop still glFinish()es before the copy, so pages
+only overlap with the GPU on ANGLE's Vulkan backend, which the Frame
+launcher selects. Fire Fight 2 with 2x antialiasing at 1728x1728 per eye:
+a steady 54 fps (half of 108 Hz, p99 frame 18.9 ms), where ANGLE on
+OpenGL over zink ran at 38.
+
+Applies on top of 0009.
+---
+diff --git a/device/vr/openxr/openxr_composition_layer.cc b/device/vr/openxr/openxr_composition_layer.cc
+index 28ff477a65..f43aba5352 100644
+--- a/device/vr/openxr/openxr_composition_layer.cc
++++ b/device/vr/openxr/openxr_composition_layer.cc
+@@ -148,6 +148,7 @@ void OpenXrCompositionLayer::DestroySwapchain(gpu::SharedImageInterface* sii) {
+   }
+ 
+   if (color_swapchain_) {
++    graphics_binding_->OnSwapchainDestroying(*this);
+     xrDestroySwapchain(color_swapchain_);
+     color_swapchain_ = XR_NULL_HANDLE;
+   }
+diff --git a/device/vr/openxr/openxr_graphics_binding.h b/device/vr/openxr/openxr_graphics_binding.h
+index b408470f0f..f7acf1bef1 100644
+--- a/device/vr/openxr/openxr_graphics_binding.h
++++ b/device/vr/openxr/openxr_graphics_binding.h
+@@ -138,6 +138,12 @@ class OpenXrGraphicsBinding {
+   virtual void OnSwapchainImageReady(OpenXrCompositionLayer& layer,
+                                      gpu::SharedImageInterface* sii) = 0;
+ 
++  // Called before `layer`'s swapchain is destroyed (also when the session
++  // ends). OpenXR requires all GPU work that uses the swapchain's images to
++  // have finished by then, so bindings that don't wait for their copies into
++  // it must wait here.
++  virtual void OnSwapchainDestroying(OpenXrCompositionLayer& layer) {}
++
+   // Return if the graphics binding supports multiple XR layers.
+   virtual bool SupportsLayers() const = 0;
+ 
+diff --git a/device/vr/openxr/linux/openxr_vulkan_context.h b/device/vr/openxr/linux/openxr_vulkan_context.h
+index 32c9101c02..dff2477b91 100644
+--- a/device/vr/openxr/linux/openxr_vulkan_context.h
++++ b/device/vr/openxr/linux/openxr_vulkan_context.h
+@@ -38,6 +38,14 @@ class DEVICE_VR_EXPORT OpenXrVulkanContext {
+     // Tracks the current Vulkan image layout so CopyToSwapchainImage can
+     // supply the correct oldLayout in pipeline barriers across frames.
+     VkImageLayout current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
++    // The copy out of this image: its command buffer, the fence it signals,
++    // and the page-done semaphore it waited on, kept until the fence signals.
++    // Each image has its own so a frame's copy is never waited for on the
++    // CPU; WaitForImage() waits before the image is drawn into again.
++    VkCommandBuffer command_buffer = VK_NULL_HANDLE;
++    VkFence copy_fence = VK_NULL_HANDLE;
++    VkSemaphore wait_semaphore = VK_NULL_HANDLE;
++    bool copy_pending = false;
+   };
+ 
+   OpenXrVulkanContext();
+@@ -85,17 +93,24 @@ class DEVICE_VR_EXPORT OpenXrVulkanContext {
+   // Exports the image's VkDeviceMemory as a DMA-BUF FD; invalid on failure.
+   base::ScopedFD ExportImageMemoryFd(const IntermediateImage& image);
+ 
+-  // Destroys the image and frees its memory; safe on already-null handles.
++  // Destroys the image and frees its memory, after its last copy finished;
++  // safe on already-null handles.
+   void DestroyIntermediateImage(IntermediateImage& image);
+ 
+-  // Blocks queue submission until the sync-file FD signals, then waits for the
+-  // submit to complete. The FD is borrowed (dup'ed internally). Returns true
+-  // when there is nothing to wait on (no semaphore-FD extension).
++  // Waits until the last copy out of `image` finished, so it can be drawn into
++  // or destroyed. Usually long done: the image's swapchain slot comes back
++  // only after the runtime has displayed it.
++  void WaitForImage(IntermediateImage& image);
++
++  // Makes the next CopyToSwapchainImage wait on the GPU until the sync-file FD
++  // signals; the CPU does not wait. The FD is borrowed (dup'ed internally).
++  // Returns true when there is nothing to wait on (no semaphore-FD extension).
+   bool WaitOnSyncFd(int fence_fd);
+ 
+-  // Records and submits the src -> dst blit and waits for it. dst must be an
+-  // OpenXR swapchain image of `dst_size`: it is left in
+-  // COLOR_ATTACHMENT_OPTIMAL as xrReleaseSwapchainImage expects; src returns
++  // Records and submits the src -> dst blit without waiting for it: OpenXR
++  // only needs it submitted to the session's queue before the image is
++  // released. dst must be an OpenXR swapchain image of `dst_size`: it is left
++  // in COLOR_ATTACHMENT_OPTIMAL as xrReleaseSwapchainImage expects; src returns
+   // to GENERAL for the next frame. A src of another size is scaled to fill dst.
+   bool CopyToSwapchainImage(IntermediateImage& src,
+                             VkImage dst,
+@@ -126,14 +141,12 @@ class DEVICE_VR_EXPORT OpenXrVulkanContext {
+   // creation.
+   bool has_external_semaphore_fd_ = false;
+ 
+-  // Queue, command pool, command buffer, and submit fence for
+-  // CopyToSwapchainImage blits.
++  // Queue and command pool for CopyToSwapchainImage blits; each intermediate
++  // image has its own command buffer and fence from this pool.
+   VkQueue vk_queue_ = VK_NULL_HANDLE;
+   VkCommandPool vk_command_pool_ = VK_NULL_HANDLE;
+-  VkCommandBuffer vk_command_buffer_ = VK_NULL_HANDLE;
+-  // Reusable fence for GPU-synchronized submit/wait. Replaces per-call
+-  // vkQueueWaitIdle, scoping the CPU stall to the specific submit.
+-  VkFence vk_frame_fence_ = VK_NULL_HANDLE;
++  // The page-done semaphore from WaitOnSyncFd, for the next copy to wait on.
++  VkSemaphore pending_wait_semaphore_ = VK_NULL_HANDLE;
+   // vkCmdBlitImage, for pages drawing at another size than the swapchain's.
+   // gpu::VulkanFunctionPointers has no entry for it, so it is resolved here.
+   PFN_vkCmdBlitImage vk_cmd_blit_image_ = nullptr;
+diff --git a/device/vr/openxr/linux/openxr_vulkan_context.cc b/device/vr/openxr/linux/openxr_vulkan_context.cc
+index 7180d8ab3a..f297d5dd59 100644
+--- a/device/vr/openxr/linux/openxr_vulkan_context.cc
++++ b/device/vr/openxr/linux/openxr_vulkan_context.cc
+@@ -37,16 +37,18 @@ OpenXrVulkanContext::~OpenXrVulkanContext() {
+ 
+ void OpenXrVulkanContext::DestroyCommandPool() {
+   if (vk_device_ != VK_NULL_HANDLE) {
+-    if (vk_frame_fence_ != VK_NULL_HANDLE) {
+-      vkDestroyFence(vk_device_, vk_frame_fence_, nullptr);
++    if (vk_queue_ != VK_NULL_HANDLE) {
++      vkQueueWaitIdle(vk_queue_);
++    }
++    if (pending_wait_semaphore_ != VK_NULL_HANDLE) {
++      vkDestroySemaphore(vk_device_, pending_wait_semaphore_, nullptr);
+     }
+     if (vk_command_pool_ != VK_NULL_HANDLE) {
+       vkDestroyCommandPool(vk_device_, vk_command_pool_, nullptr);
+     }
+   }
+-  vk_frame_fence_ = VK_NULL_HANDLE;
++  pending_wait_semaphore_ = VK_NULL_HANDLE;
+   vk_command_pool_ = VK_NULL_HANDLE;
+-  vk_command_buffer_ = VK_NULL_HANDLE;  // Freed with the pool.
+   // vk_queue_ lifetime is tied to VkDevice; nulled in DestroyVulkanState.
+ }
+ 
+@@ -313,28 +315,6 @@ bool OpenXrVulkanContext::Initialize(XrInstance instance, XrSystemId system) {
+       DestroyVulkanState();
+       return false;
+     }
+-
+-    VkCommandBufferAllocateInfo cb_ai{
+-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+-    cb_ai.commandPool = vk_command_pool_;
+-    cb_ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+-    cb_ai.commandBufferCount = 1;
+-    if (vkAllocateCommandBuffers(vk_device_, &cb_ai, &vk_command_buffer_) !=
+-        VK_SUCCESS) {
+-      DVLOG(1) << __func__ << " vkAllocateCommandBuffers failed";
+-      DestroyVulkanState();
+-      return false;
+-    }
+-
+-    // Create a reusable fence for fence-based submit/wait in WaitOnSyncFd and
+-    // CopyToSwapchainImage, replacing per-call vkQueueWaitIdle.
+-    VkFenceCreateInfo fence_ci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+-    if (vkCreateFence(vk_device_, &fence_ci, nullptr, &vk_frame_fence_) !=
+-        VK_SUCCESS) {
+-      DVLOG(1) << __func__ << " vkCreateFence failed";
+-      DestroyVulkanState();
+-      return false;
+-    }
+   }
+ 
+   // --- Step 9: Populate the graphics binding struct -------------------------
+@@ -611,6 +591,16 @@ base::ScopedFD OpenXrVulkanContext::ExportImageMemoryFd(
+ }
+ 
+ void OpenXrVulkanContext::DestroyIntermediateImage(IntermediateImage& image) {
++  WaitForImage(image);
++  if (image.copy_fence != VK_NULL_HANDLE) {
++    vkDestroyFence(vk_device_, image.copy_fence, nullptr);
++    image.copy_fence = VK_NULL_HANDLE;
++  }
++  if (image.command_buffer != VK_NULL_HANDLE) {
++    vkFreeCommandBuffers(vk_device_, vk_command_pool_, 1,
++                         &image.command_buffer);
++    image.command_buffer = VK_NULL_HANDLE;
++  }
+   if (image.image != VK_NULL_HANDLE) {
+     vkDestroyImage(vk_device_, image.image, nullptr);
+     image.image = VK_NULL_HANDLE;
+@@ -621,6 +611,18 @@ void OpenXrVulkanContext::DestroyIntermediateImage(IntermediateImage& image) {
+   }
+ }
+ 
++void OpenXrVulkanContext::WaitForImage(IntermediateImage& image) {
++  if (!image.copy_pending) {
++    return;
++  }
++  vkWaitForFences(vk_device_, 1, &image.copy_fence, VK_TRUE, UINT64_MAX);
++  image.copy_pending = false;
++  if (image.wait_semaphore != VK_NULL_HANDLE) {
++    vkDestroySemaphore(vk_device_, image.wait_semaphore, nullptr);
++    image.wait_semaphore = VK_NULL_HANDLE;
++  }
++}
++
+ bool OpenXrVulkanContext::WaitOnSyncFd(int fence_fd) {
+   if (!has_external_semaphore_fd_) {
+     return true;  // Extension not available (e.g. SwiftShader).
+@@ -652,42 +654,57 @@ bool OpenXrVulkanContext::WaitOnSyncFd(int fence_fd) {
+     return false;
+   }
+ 
+-  // Submit a wait on the imported semaphore so that subsequent GPU work
+-  // (the blit in CopyToSwapchainImage) does not start until the fence signals.
+-  VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+-  VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+-  submit.waitSemaphoreCount = 1;
+-  submit.pWaitSemaphores = &semaphore;
+-  submit.pWaitDstStageMask = &wait_stage;
+-
+-  // Reset and use the frame fence instead of vkQueueWaitIdle, scoping the CPU
+-  // stall to this specific submit rather than all pending queue work.
+-  vkResetFences(vk_device_, 1, &vk_frame_fence_);
+-  VkResult result = vkQueueSubmit(vk_queue_, 1, &submit, vk_frame_fence_);
+-  if (result == VK_SUCCESS) {
+-    vkWaitForFences(vk_device_, 1, &vk_frame_fence_, VK_TRUE, UINT64_MAX);
++  // The copy that reads the page's image waits on it, on the GPU. The CPU used
++  // to wait here too, which kept the page from starting its next frame until
++  // the GPU had finished this one. A semaphore nothing waited on yet can be
++  // destroyed right away.
++  if (pending_wait_semaphore_ != VK_NULL_HANDLE) {
++    vkDestroySemaphore(vk_device_, pending_wait_semaphore_, nullptr);
+   }
+-
+-  vkDestroySemaphore(vk_device_, semaphore, nullptr);
+-  return result == VK_SUCCESS;
++  pending_wait_semaphore_ = semaphore;
++  return true;
+ }
+ 
+ bool OpenXrVulkanContext::CopyToSwapchainImage(IntermediateImage& src_image,
+                                                VkImage dst,
+                                                const gfx::Size& dst_size) {
+   VkImage src = src_image.image;
+-  vkResetCommandBuffer(vk_command_buffer_, 0);
++  // The image's previous copy (three frames ago) must be done before its
++  // command buffer is recorded again.
++  WaitForImage(src_image);
++  if (src_image.command_buffer == VK_NULL_HANDLE) {
++    VkCommandBufferAllocateInfo cb_ai{
++        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
++    cb_ai.commandPool = vk_command_pool_;
++    cb_ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
++    cb_ai.commandBufferCount = 1;
++    if (vkAllocateCommandBuffers(vk_device_, &cb_ai,
++                                 &src_image.command_buffer) != VK_SUCCESS) {
++      src_image.command_buffer = VK_NULL_HANDLE;
++      return false;
++    }
++  }
++  if (src_image.copy_fence == VK_NULL_HANDLE) {
++    VkFenceCreateInfo fence_ci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
++    if (vkCreateFence(vk_device_, &fence_ci, nullptr, &src_image.copy_fence) !=
++        VK_SUCCESS) {
++      src_image.copy_fence = VK_NULL_HANDLE;
++      return false;
++    }
++  }
++  VkCommandBuffer command_buffer = src_image.command_buffer;
++  vkResetCommandBuffer(command_buffer, 0);
+ 
+   VkCommandBufferBeginInfo begin_info{
+       VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+   begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+-  if (vkBeginCommandBuffer(vk_command_buffer_, &begin_info) != VK_SUCCESS) {
++  if (vkBeginCommandBuffer(command_buffer, &begin_info) != VK_SUCCESS) {
+     return false;
+   }
+ 
+   // Transition src from its tracked layout (UNDEFINED on first use, GENERAL
+   // afterwards) to TRANSFER_SRC_OPTIMAL. srcAccessMask=0 is correct because
+-  // WaitOnSyncFd already serialized the external GL writes on this queue.
++  // the submit waits on WaitOnSyncFd's semaphore for the external GL writes.
+   VkImageMemoryBarrier src_barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+   src_barrier.srcAccessMask = 0;
+   src_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+@@ -712,7 +729,7 @@ bool OpenXrVulkanContext::CopyToSwapchainImage(IntermediateImage& src_image,
+ 
+   // Batch both pre-copy transitions into one call; they share the same stages.
+   const VkImageMemoryBarrier pre_copy_barriers[] = {src_barrier, dst_barrier};
+-  vkCmdPipelineBarrier(vk_command_buffer_, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
++  vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                        nullptr, 2, pre_copy_barriers);
+ 
+@@ -727,7 +744,7 @@ bool OpenXrVulkanContext::CopyToSwapchainImage(IntermediateImage& src_image,
+         static_cast<uint32_t>(std::min(src_image.size.height(),
+                                        dst_size.height())),
+         1};
+-    vkCmdCopyImage(vk_command_buffer_, src,
++    vkCmdCopyImage(command_buffer, src,
+                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+   } else {
+@@ -740,7 +757,7 @@ bool OpenXrVulkanContext::CopyToSwapchainImage(IntermediateImage& src_image,
+     region.srcOffsets[1] = {src_image.size.width(), src_image.size.height(),
+                             1};
+     region.dstOffsets[1] = {dst_size.width(), dst_size.height(), 1};
+-    vk_cmd_blit_image_(vk_command_buffer_, src,
++    vk_cmd_blit_image_(command_buffer, src,
+                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst,
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
+                        VK_FILTER_LINEAR);
+@@ -753,7 +770,7 @@ bool OpenXrVulkanContext::CopyToSwapchainImage(IntermediateImage& src_image,
+     dst_barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+     dst_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+     dst_barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+-    vkCmdPipelineBarrier(vk_command_buffer_, VK_PIPELINE_STAGE_TRANSFER_BIT,
++    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                          VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0,
+                          nullptr, 0, nullptr, 1, &dst_barrier);
+   }
+@@ -764,25 +781,35 @@ bool OpenXrVulkanContext::CopyToSwapchainImage(IntermediateImage& src_image,
+   src_barrier.dstAccessMask = 0;
+   src_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+   src_barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+-  vkCmdPipelineBarrier(vk_command_buffer_, VK_PIPELINE_STAGE_TRANSFER_BIT,
++  vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0,
+                        nullptr, 1, &src_barrier);
+ 
+-  if (vkEndCommandBuffer(vk_command_buffer_) != VK_SUCCESS) {
++  if (vkEndCommandBuffer(command_buffer) != VK_SUCCESS) {
+     return false;
+   }
+ 
+-  // Submit with the frame fence instead of vkQueueWaitIdle, scoping the
+-  // CPU stall to this specific submit.
++  // Submit without waiting: OpenXR only needs the work submitted to the
++  // session's queue before xrReleaseSwapchainImage, and the runtime orders its
++  // reads after it. The page can start its next frame while this one renders.
+   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
++  VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
++  if (pending_wait_semaphore_ != VK_NULL_HANDLE) {
++    submit.waitSemaphoreCount = 1;
++    submit.pWaitSemaphores = &pending_wait_semaphore_;
++    submit.pWaitDstStageMask = &wait_stage;
++  }
+   submit.commandBufferCount = 1;
+-  submit.pCommandBuffers = &vk_command_buffer_;
+-  vkResetFences(vk_device_, 1, &vk_frame_fence_);
+-  VkResult result = vkQueueSubmit(vk_queue_, 1, &submit, vk_frame_fence_);
+-  if (result != VK_SUCCESS) {
++  submit.pCommandBuffers = &command_buffer;
++  vkResetFences(vk_device_, 1, &src_image.copy_fence);
++  if (vkQueueSubmit(vk_queue_, 1, &submit, src_image.copy_fence) !=
++      VK_SUCCESS) {
+     return false;
+   }
+-  vkWaitForFences(vk_device_, 1, &vk_frame_fence_, VK_TRUE, UINT64_MAX);
++  src_image.copy_pending = true;
++  // Destroyed once the copy that waited on it is done (WaitForImage).
++  src_image.wait_semaphore = pending_wait_semaphore_;
++  pending_wait_semaphore_ = VK_NULL_HANDLE;
+ 
+   // Record the new layout for next frame's barrier.
+   src_image.current_layout = VK_IMAGE_LAYOUT_GENERAL;
+diff --git a/device/vr/openxr/linux/openxr_graphics_binding_vulkan.h b/device/vr/openxr/linux/openxr_graphics_binding_vulkan.h
+index eff79866b5..56e0c0460a 100644
+--- a/device/vr/openxr/linux/openxr_graphics_binding_vulkan.h
++++ b/device/vr/openxr/linux/openxr_graphics_binding_vulkan.h
+@@ -53,6 +53,7 @@ class DEVICE_VR_EXPORT OpenXrGraphicsBindingVulkan
+                          const gfx::RectF& right) override;
+   void OnSwapchainImageReady(OpenXrCompositionLayer& layer,
+                              gpu::SharedImageInterface* sii) override;
++  void OnSwapchainDestroying(OpenXrCompositionLayer& layer) override;
+   bool SupportsLayers() const override;
+   void ResizeSharedBuffer(OpenXrCompositionLayer& layer,
+                           OpenXrSwapchainInfo& swap_chain_info,
+diff --git a/device/vr/openxr/linux/openxr_graphics_binding_vulkan.cc b/device/vr/openxr/linux/openxr_graphics_binding_vulkan.cc
+index 2803807fe7..0464e104f0 100644
+--- a/device/vr/openxr/linux/openxr_graphics_binding_vulkan.cc
++++ b/device/vr/openxr/linux/openxr_graphics_binding_vulkan.cc
+@@ -385,10 +385,32 @@ bool OpenXrGraphicsBindingVulkan::SetOverlayTexture(
+ void OpenXrGraphicsBindingVulkan::OnSwapchainImageReady(
+     OpenXrCompositionLayer& layer,
+     gpu::SharedImageInterface* sii) {
+-  // Bring the slot the page draws into next to its framebuffer size, as the
+-  // Android binding does; the others follow as they come up.
+-  if (OpenXrSwapchainInfo* swap_chain_info = layer.GetActiveSwapchainImage()) {
+-    ResizeSharedBuffer(layer, *swap_chain_info, sii);
++  OpenXrSwapchainInfo* swap_chain_info = layer.GetActiveSwapchainImage();
++  if (!swap_chain_info || !vulkan_ || intermediate_images_.empty()) {
++    return;
++  }
++  // The page draws into this slot next: its last copy must be done.
++  const size_t index = static_cast<size_t>(
++      swap_chain_info - layer.GetSwapchainImages().data());
++  if (index < intermediate_images_.size()) {
++    vulkan_->WaitForImage(intermediate_images_[index]);
++  }
++  // Bring the slot to the page's framebuffer size, as the Android binding
++  // does; the others follow as they come up.
++  ResizeSharedBuffer(layer, *swap_chain_info, sii);
++}
++
++void OpenXrGraphicsBindingVulkan::OnSwapchainDestroying(
++    OpenXrCompositionLayer& layer) {
++  // The last frames' copies into the swapchain are not waited for when they
++  // are submitted; one still writing into a destroyed swapchain image faulted
++  // the GPU (Steam Frame: "gpu fault ... dir=WRITE", then every GL context on
++  // the device was lost).
++  if (!vulkan_) {
++    return;
++  }
++  for (OpenXrVulkanContext::IntermediateImage& image : intermediate_images_) {
++    vulkan_->WaitForImage(image);
+   }
+ }
+ 
+@@ -418,8 +440,7 @@ void OpenXrGraphicsBindingVulkan::ResizeSharedBuffer(
+     return;
+   }
+ 
+-  // Replace only this slot. Its previous image is idle: CopyToSwapchainImage
+-  // waited for the last blit from it.
++  // Replace only this slot (DestroyIntermediateImage waits for its last copy).
+   if (swap_chain_info.shared_image) {
+     swap_chain_info.shared_image->UpdateDestructionSyncToken(
+         swap_chain_info.sync_token);
+-- 
+2.43.0

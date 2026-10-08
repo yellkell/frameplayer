@@ -1,0 +1,212 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Wed, 7 Oct 2026 12:00:00 +0000
+Subject: [PATCH 14/14] media: V4L2 hardware video decode for WebXR on the
+ Steam Frame
+
+Builds with use_v4l2_codec=true run Chromium's V4L2 stateful decoder on
+the Frame's Qualcomm iris decoder (/dev/video-dec0) when started with
+--enable-features=AcceleratedVideoDecoder,PreferV4L2VideoAcceleration.
+Without it there is no hardware decode on the Frame and no HEVC at all,
+which most 6K-8K VR video uses; with it 8K60 HEVC plays at 60 fps inside a
+WebXR session at the full 108 Hz.
+
+- The stateful decoder declared its OUTPUT (bitstream) format as 0x0;
+  iris sizes its buffers from the stream and refused VIDIOC_REQBUFS
+  (EINVAL). Declare the coded size, with 8 MiB buffers above 4K.
+- HEVC was NOTIMPLEMENTED() in the stateful decoder. Stateful decoders
+  take whole Annex B access units, as for VP8/VP9, which the demuxer
+  delivers (parameter sets ahead of key frames).
+- WebGL could not import the decoder's NV12 DMA-BUF shared images with
+  ANGLE on Vulkan ("invalid mailbox name"; video textures stayed black
+  while <video> itself played). On Linux, multi-planar frames take the
+  intermediate RGBA shared image path, as canvas uploads do.
+- The AV1 stateless delegate needs kernel headers newer than the Linux
+  sysroot's; it is only built for ChromeOS (iris has no AV1 anyway).
+
+Known limit: iris admits an 8K session only while no other decoder
+session is open (its check multiplies by the session count), so 8K fails
+to start while a previous page's decoder is still closing or Steam holds
+one; FramePlayer works around this with a primer frame.
+---
+diff --git a/media/gpu/v4l2/BUILD.gn b/media/gpu/v4l2/BUILD.gn
+index 0427cb60c8..91e384646d 100644
+--- a/media/gpu/v4l2/BUILD.gn
++++ b/media/gpu/v4l2/BUILD.gn
+@@ -60,8 +60,9 @@ source_set("v4l2") {
+     "vp9/vp9_v4l2_compressed_header_types.h",
+   ]
+ 
+-  # enable_av1_v4l2_decoder
+-  if (use_av1_hw_decoder) {
++  # enable_av1_v4l2_decoder. The AV1 stateless controls are only in the
++  # kernel headers of ChromeOS sysroots; Linux sysroots predate them.
++  if (use_av1_hw_decoder && is_chromeos) {
+     sources += [
+       "v4l2_video_decoder_delegate_av1.cc",
+       "v4l2_video_decoder_delegate_av1.h",
+diff --git a/media/gpu/v4l2/v4l2_stateful_video_decoder.cc b/media/gpu/v4l2/v4l2_stateful_video_decoder.cc
+index 5978d3f07c..8ad33bb903 100644
+--- a/media/gpu/v4l2/v4l2_stateful_video_decoder.cc
++++ b/media/gpu/v4l2/v4l2_stateful_video_decoder.cc
+@@ -392,14 +392,19 @@ void V4L2StatefulVideoDecoder::Initialize(const VideoDecoderConfig& config,
+   const auto profile_as_v4l2_fourcc =
+       VideoCodecProfileToV4L2PixFmt(config.profile(), /*slice_based=*/false);
+ 
+-  // Allocate larger |OUTPUT_queue_| buffers for resolutions above 1080p.
++  // Allocate larger |OUTPUT_queue_| buffers for resolutions above 1080p, and
++  // above 4K (8K VR video at 60-100 Mbps has key frames over 4 MiB).
+   // TODO(hnt): Investigate ways to reduce this size.
+   constexpr size_t kMiB = 1024 * 1024;
+   constexpr int kFullHDNumPixels = 1920 * 1080;
++  constexpr int k4KNumPixels = 4096 * 2160;
++  const int area = config.coded_size().GetArea();
+   const size_t kInputBufferInMBs =
+-      (config.coded_size().GetArea() <= kFullHDNumPixels) ? 2 : 4;
++      area <= kFullHDNumPixels ? 2 : (area <= k4KNumPixels ? 4 : 8);
++  // The stream's size, not 0x0: drivers that size their buffers from it,
++  // like Qualcomm's iris (Steam Frame), refuse VIDIOC_REQBUFS otherwise.
+   const auto v4l2_format = OUTPUT_queue_->SetFormat(
+-      profile_as_v4l2_fourcc, gfx::Size(), kInputBufferInMBs * kMiB);
++      profile_as_v4l2_fourcc, config.coded_size(), kInputBufferInMBs * kMiB);
+   if (!v4l2_format) {
+     std::move(init_cb).Run(DecoderStatus::Codes::kFailedToCreateDecoder);
+     return;
+@@ -516,12 +521,10 @@ void V4L2StatefulVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
+       decoder_buffer_and_callbacks_.push(std::move(a));
+     }
+ 
+-  } else if (VideoCodecProfileToVideoCodec(config_.profile()) ==
+-             VideoCodec::kHEVC) {
+-    NOTIMPLEMENTED();
+-    std::move(decode_cb).Run(DecoderStatus::Codes::kUnsupportedCodec);
+-    return;
+   } else {
++    // VP8/VP9, and HEVC: the demuxer hands over whole access units (Annex B,
++    // parameter sets ahead of key frames), which stateful decoders take as
++    // they are (Qualcomm iris on the Steam Frame).
+     decoder_buffer_and_callbacks_.emplace(std::move(buffer),
+                                           std::move(decode_cb));
+   }
+diff --git a/media/gpu/v4l2/v4l2_utils.cc b/media/gpu/v4l2/v4l2_utils.cc
+index 3337f51d34..dee9d79afc 100644
+--- a/media/gpu/v4l2/v4l2_utils.cc
++++ b/media/gpu/v4l2/v4l2_utils.cc
+@@ -199,7 +199,7 @@ VideoCodecProfile V4L2ProfileToVideoCodecProfile(uint32_t v4l2_codec,
+       }
+       break;
+ #endif
+-#if BUILDFLAG(USE_AV1_HW_DECODER)
++#if BUILDFLAG(USE_AV1_HW_DECODER) && BUILDFLAG(IS_CHROMEOS)
+     case V4L2_CID_MPEG_VIDEO_AV1_PROFILE:
+       switch (v4l2_profile) {
+         case V4L2_MPEG_VIDEO_AV1_PROFILE_MAIN:
+@@ -341,7 +341,7 @@ static const std::map<v4l2_enum_type, v4l2_enum_type>
+         {V4L2_PIX_FMT_VP8_FRAME, V4L2_CID_MPEG_VIDEO_VP8_PROFILE},
+         {V4L2_PIX_FMT_VP9, V4L2_CID_MPEG_VIDEO_VP9_PROFILE},
+         {V4L2_PIX_FMT_VP9_FRAME, V4L2_CID_MPEG_VIDEO_VP9_PROFILE},
+-#if BUILDFLAG(USE_AV1_HW_DECODER)
++#if BUILDFLAG(USE_AV1_HW_DECODER) && BUILDFLAG(IS_CHROMEOS)
+         {V4L2_PIX_FMT_AV1, V4L2_CID_MPEG_VIDEO_AV1_PROFILE},
+         {V4L2_PIX_FMT_AV1_FRAME, V4L2_CID_MPEG_VIDEO_AV1_PROFILE},
+ #endif
+@@ -362,7 +362,7 @@ static const std::map<v4l2_enum_type, std::vector<VideoCodecProfile>>
+ #endif  // BUILDFLAG(ENABLE_HEVC_PARSER_AND_HW_DECODER)
+         {V4L2_CID_MPEG_VIDEO_VP8_PROFILE, {VP8PROFILE_ANY}},
+         {V4L2_CID_MPEG_VIDEO_VP9_PROFILE, {VP9PROFILE_PROFILE0}},
+-#if BUILDFLAG(USE_AV1_HW_DECODER)
++#if BUILDFLAG(USE_AV1_HW_DECODER) && BUILDFLAG(IS_CHROMEOS)
+         {V4L2_CID_MPEG_VIDEO_AV1_PROFILE, {AV1PROFILE_PROFILE_MAIN}},
+ #endif
+ };
+@@ -382,7 +382,7 @@ static const std::map<VideoCodecProfile,
+         {VP8PROFILE_ANY, MAKE_V4L2_CODEC_PAIR(V4L2_PIX_FMT_VP8, FRAME)},
+         {VP9PROFILE_PROFILE0, MAKE_V4L2_CODEC_PAIR(V4L2_PIX_FMT_VP9, FRAME)},
+         {VP9PROFILE_PROFILE2, MAKE_V4L2_CODEC_PAIR(V4L2_PIX_FMT_VP9, FRAME)},
+-#if BUILDFLAG(USE_AV1_HW_DECODER)
++#if BUILDFLAG(USE_AV1_HW_DECODER) && BUILDFLAG(IS_CHROMEOS)
+         {AV1PROFILE_PROFILE_MAIN,
+          MAKE_V4L2_CODEC_PAIR(V4L2_PIX_FMT_AV1, FRAME)},
+ #endif
+diff --git a/media/gpu/v4l2/v4l2_video_decoder.cc b/media/gpu/v4l2/v4l2_video_decoder.cc
+index 2870e6f3b7..bf495f77df 100644
+--- a/media/gpu/v4l2/v4l2_video_decoder.cc
++++ b/media/gpu/v4l2/v4l2_video_decoder.cc
+@@ -8,6 +8,7 @@
+ 
+ #include <algorithm>
+ 
++#include "build/build_config.h"
+ #include "base/compiler_specific.h"
+ #include "base/functional/bind.h"
+ #include "base/functional/callback_helpers.h"
+@@ -765,7 +766,7 @@ CroStatus V4L2VideoDecoder::SetExtCtrlsInit(const gfx::Size& size,
+   struct v4l2_ctrl_hevc_sps v4l2_hevc_sps;
+   struct v4l2_ctrl_vp8_frame v4l2_vp8_frame;
+   struct v4l2_ctrl_vp9_frame v4l2_vp9_frame;
+-#if BUILDFLAG(USE_AV1_HW_DECODER)
++#if BUILDFLAG(USE_AV1_HW_DECODER) && BUILDFLAG(IS_CHROMEOS)
+   struct v4l2_ctrl_av1_sequence v4l2_av1_sequence;
+ #endif
+ 
+@@ -828,7 +829,7 @@ CroStatus V4L2VideoDecoder::SetExtCtrlsInit(const gfx::Size& size,
+     ctrl.ptr = &v4l2_vp9_frame;
+ 
+     ctrls.push_back(ctrl);
+-#if BUILDFLAG(USE_AV1_HW_DECODER)
++#if BUILDFLAG(USE_AV1_HW_DECODER) && BUILDFLAG(IS_CHROMEOS)
+   } else if (input_format_fourcc_ == V4L2_PIX_FMT_AV1_FRAME) {
+     // AV1 requires that the |bit_depth| parameter be set to enable
+     // formats on the CAPTURE queue. And flags has to be set for profile 0
+diff --git a/media/gpu/v4l2/v4l2_video_decoder_backend_stateless.cc b/media/gpu/v4l2/v4l2_video_decoder_backend_stateless.cc
+index a890ebb6f6..c53219ab22 100644
+--- a/media/gpu/v4l2/v4l2_video_decoder_backend_stateless.cc
++++ b/media/gpu/v4l2/v4l2_video_decoder_backend_stateless.cc
+@@ -21,6 +21,7 @@
+ #include "base/posix/eintr_wrapper.h"
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/trace_event/trace_event.h"
++#include "build/build_config.h"
+ #include "media/base/decoder_status.h"
+ #include "media/base/video_codecs.h"
+ #include "media/base/video_frame.h"
+@@ -754,7 +755,7 @@ bool V4L2StatelessVideoDecoderBackend::CreateDecoder() {
+     decoder_ = std::make_unique<VP9Decoder>(
+         std::make_unique<V4L2VideoDecoderDelegateVP9>(this, device_.get()),
+         profile_, color_space_);
+-#if BUILDFLAG(USE_AV1_HW_DECODER)
++#if BUILDFLAG(USE_AV1_HW_DECODER) && BUILDFLAG(IS_CHROMEOS)
+   } else if (profile_ >= AV1PROFILE_MIN && profile_ <= AV1PROFILE_MAX) {
+     decoder_ = std::make_unique<AV1Decoder>(
+         std::make_unique<V4L2VideoDecoderDelegateAV1>(this, device_.get()),
+diff --git a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
+index af7ab57d85..bf1eb9dd24 100644
+--- a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
++++ b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
+@@ -6670,10 +6670,20 @@ void WebGLRenderingContextBase::TexImageHelperMediaVideoFrame(
+       auto* gl = ContextGL();
+       const auto shared_image = media_video_frame->shared_image();
+       SkAlphaType dst_alpha_type = params.GetDestinationAlphaType();
+-      if (gl->CanCopySharedImageDirectlyToGLTexture(
+-              media::IsOpaque(media_video_frame->format()), shared_image.get(),
+-              params.target, adjusted_internalformat, params.type, params.level,
+-              dst_alpha_type)) {
++      bool copy_directly = gl->CanCopySharedImageDirectlyToGLTexture(
++          media::IsOpaque(media_video_frame->format()), shared_image.get(),
++          params.target, adjusted_internalformat, params.type, params.level,
++          dst_alpha_type);
++#if BUILDFLAG(IS_LINUX)
++      // A hardware decoder's multi-planar frame (NV12 DMA-BUF from V4L2 on
++      // the Steam Frame) can't be imported into WebGL's context with ANGLE
++      // on Vulkan ("invalid mailbox name", the texture stayed black); the
++      // raster side converts it to RGBA first, as for a canvas.
++      if (!shared_image->format().is_single_plane()) {
++        copy_directly = false;
++      }
++#endif
++      if (copy_directly) {
+         gl->BindTexture(params.target, texture->Object());
+         gl->TexImage2D(params.target, params.level, adjusted_internalformat,
+                        media_video_frame->visible_rect().width(),
+-- 
+2.43.0

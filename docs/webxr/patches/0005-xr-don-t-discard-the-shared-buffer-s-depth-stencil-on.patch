@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Sat, 3 Oct 2026 17:20:00 +0000
+Subject: [PATCH 5/5] xr: don't discard the shared buffer's depth/stencil on
+ Linux
+
+XRWebGLDrawingBuffer::DoneWithSharedBuffer() discards the depth and stencil
+attachments of the WebXR framebuffer before handing the shared buffer to
+the XR service. On Linux the shared buffer is a Vulkan image that the
+OpenXR service copies into the runtime's swapchain from its own device.
+With ANGLE on desktop GL over zink (Steam Frame: Turnip, Adreno 750) the
+discard also lost colour rendering that was still in flight: in an
+XRWebGLLayer session the right eye (drawn last) came through black or
+flickering, and late passes such as water were missing. Simple scenes were
+unaffected, which hid it.
+
+Verified on a Steam Frame with headset captures of an IWSDK/three.js r184
+game: right eye black in 7 of 8 captures with the discard (also with a
+glFinish() after it), both eyes complete in 8 of 8 without it. Calling
+gl.finish() from the page before Blink's end-of-frame work also fixed it,
+pointing at the discard rather than a missing GPU fence.
+
+Skip the discard on Linux; it is only a bandwidth hint.
+
+Bug: none
+---
+ .../renderer/platform/graphics/gpu/xr_webgl_drawing_buffer.cc    | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/third_party/blink/renderer/platform/graphics/gpu/xr_webgl_drawing_buffer.cc b/third_party/blink/renderer/platform/graphics/gpu/xr_webgl_drawing_buffer.cc
+index 1470d471c7..ef75b15426 100644
+--- a/third_party/blink/renderer/platform/graphics/gpu/xr_webgl_drawing_buffer.cc
++++ b/third_party/blink/renderer/platform/graphics/gpu/xr_webgl_drawing_buffer.cc
+@@ -331,7 +331,14 @@ XRWebGLDrawingBuffer::DoneWithSharedBuffer() {
+   // Discard the depth and stencil attachments since we're done with them.
+   // Don't discard the color buffer, we do need this rendered into the
+   // shared buffer.
+-  if (discard_framebuffer_supported_) {
++  //
++  // Not on Linux: there the shared buffer is a Vulkan image the OpenXR service
++  // copies from another device, and with ANGLE on desktop GL over zink (Steam
++  // Frame: Turnip, Adreno 750) the discard also loses colour rendering that is
++  // still in flight. The eye drawn last came through black or flickering and
++  // late passes such as water were missing. Skipping a discard only costs
++  // bandwidth.
++  if (discard_framebuffer_supported_ && !BUILDFLAG(IS_LINUX)) {
+     const GLenum kAttachments[3] = {GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT};
+     gl->BindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
+     gl->DiscardFramebufferEXT(GL_FRAMEBUFFER, 2, kAttachments);
+-- 
+2.43.0
+

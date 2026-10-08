@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frame WebXR Check</title>
+<style>
+  :root { --bg:#111418; --fg:#e8eaed; --dim:#9aa0a6; --ok:#4caf7d; --bad:#e5534b; --warn:#d4a72c; --card:#1b2026; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.45 system-ui, sans-serif; }
+  main { max-width:900px; margin:0 auto; padding:24px 16px; }
+  h1 { font-size:24px; margin:0 0 4px; }
+  p.sub { color:var(--dim); margin:0 0 20px; }
+  table { border-collapse:collapse; width:100%; background:var(--card); border-radius:8px; overflow:hidden; }
+  td { padding:8px 12px; border-top:1px solid #2a3038; vertical-align:top; }
+  td:first-child { color:var(--dim); width:40%; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); }
+  button { font:inherit; padding:12px 20px; border-radius:8px; border:0; background:#3b6fd8; color:#fff; cursor:pointer; margin:16px 8px 0 0; }
+  button:disabled { background:#444; color:#999; cursor:default; }
+  pre { background:var(--card); padding:12px; border-radius:8px; overflow:auto; max-height:420px; font-size:13px; }
+  ol { color:var(--dim); padding-left:20px; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<main>
+  <h1>Frame WebXR check</h1>
+  <p class="sub">Checks the Steam Frame Chromium build: immersive VR, the <code>valve-frame</code> controller layout, and that Menu doesn't end the session.</p>
+  <table id="env"></table>
+  <button id="enter" disabled>Enter VR</button>
+  <ol>
+    <li>Press <b>every</b> control on both controllers: triggers, grips, stick clicks, A B X Y, D-pad, shoulders, view, menu. Roll both sticks round.</li>
+    <li>Press <b>Menu</b> at least once: the session should keep running.</li>
+    <li>To finish, hold <b>both triggers and both grips</b> for 2 seconds (or use the Steam button).</li>
+  </ol>
+  <h2 style="font-size:18px;margin-top:28px">WebXR to try</h2>
+  <ul>
+    <li><a href="https://yellkell.com/fac">Fish &amp; Chips</a></li>
+    <li><a href="https://immersive-web.github.io/webxr-samples/">WebXR Samples</a></li>
+    <li><a href="https://threejs.org/examples/webxr_vr_video.html">three.js stereo 360 video</a></li>
+  </ul>
+  <div id="result" hidden>
+    <h2 id="verdict"></h2>
+    <button id="copy">Copy report</button><button id="download">Download report</button>
+    <pre id="report"></pre>
+  </div>
+</main>
+<script type="module">
+import * as THREE from 'three';
+
+// valve-frame layout, fixed by IWFDK Chromium patch 0004 (FRAME.md section 3).
+const FRAME_LAYOUT = {
+  left:  ['trigger','squeeze',null,'stick click','D-pad up','D-pad down','D-pad left','D-pad right','shoulder','view'],
+  right: ['trigger','squeeze',null,'stick click','A','B','X','Y','shoulder','menu'],
+};
+const MENU = { hand: 'right', index: 9 };
+const $ = (id) => document.getElementById(id);
+let isFrameBrowser = /Linux (aarch64|arm64)/i.test(navigator.userAgent);
+
+// ?emulate=frame (patched browser) or ?emulate=touch (unpatched browser on a
+// Frame: SteamVR's Touch emulation) runs the page on a desktop through IWER.
+// The emulated device is window.iwerDevice, for driving it from DevTools.
+const emulate = new URLSearchParams(location.search).get('emulate');
+async function installEmulator(kind) {
+  const { XRDevice, metaQuest3, oculusTouchV3 } =
+    await import('https://cdn.jsdelivr.net/npm/iwer@2.5.0/build/iwer.module.js');
+  const b = (id) => ({ id, type: 'binary' });
+  const pad = (face) => ({
+    mapping: 'xr-standard',
+    buttons: [{ id: 'trigger', type: 'analog', eventTrigger: 'select' },
+      { id: 'squeeze', type: 'analog', eventTrigger: 'squeeze' }, null, b('thumbstick'), ...face.map(b)],
+    axes: [null, null, { id: 'thumbstick', type: 'x-axis' }, { id: 'thumbstick', type: 'y-axis' }],
+  });
+  const valveFrame = {
+    profileId: 'valve-frame',
+    fallbackProfileIds: ['generic-trigger-squeeze-thumbstick'],
+    layout: {
+      left: { ...oculusTouchV3.layout.left, numHapticActuators: 0,
+        gamepad: pad(['dpad-up', 'dpad-down', 'dpad-left', 'dpad-right', 'shoulder', 'view']) },
+      right: { ...oculusTouchV3.layout.right, numHapticActuators: 0,
+        gamepad: pad(['a-button', 'b-button', 'x-button', 'y-button', 'shoulder', 'menu']) },
+    },
+  };
+  const touch = { ...oculusTouchV3, profileId: 'oculus-touch', fallbackProfileIds: ['generic-trigger-squeeze-thumbstick'] };
+  const device = new XRDevice({
+    ...metaQuest3,
+    name: `Steam Frame (emulated, ${kind})`,
+    controllerConfig: kind === 'touch' ? touch : valveFrame,
+    supportedSessionModes: ['inline', 'immersive-vr'],
+    userAgent: 'Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36',
+  });
+  device.installRuntime({ forceInstall: true });
+  window.iwerDevice = device;
+  isFrameBrowser = true;
+}
+
+const report = {
+  tool: 'frame-webxr-check 1',
+  // Set by the Frame title's launcher: chromium-xr-frame or chromium-xr-frame-sandboxed.
+  title: new URLSearchParams(location.search).get('title'),
+  time: new Date().toISOString(),
+  userAgent: navigator.userAgent,
+  navigatorXr: 'xr' in navigator,
+  supported: {},
+  session: null,
+  inputs: {},
+  menuTest: 'not pressed',
+  end: null,
+};
+
+function row(k, v, cls = '') { return `<tr><td>${k}</td><td class="${cls}">${v}</td></tr>`; }
+function renderEnv() {
+  const s = report.supported;
+  const yn = (b) => b === undefined ? ['…', ''] : b ? ['yes', 'ok'] : ['no', 'bad'];
+  $('env').innerHTML =
+    (report.title ? row('Launched as', report.title === 'chromium-xr-frame-sandboxed'
+      ? 'Chromium XR Sandboxed (seccomp on)' : 'Chromium XR (seccomp off)') : '') +
+    row('Browser on a Steam Frame (Linux aarch64)', isFrameBrowser ? 'yes' : 'no', isFrameBrowser ? 'ok' : 'warn') +
+    row('navigator.xr', report.navigatorXr ? 'yes' : 'no', report.navigatorXr ? 'ok' : 'bad') +
+    row('immersive-vr supported', ...yn(s['immersive-vr'])) +
+    row('immersive-ar supported', yn(s['immersive-ar'])[0], s['immersive-ar'] ? 'ok' : 'warn') +
+    row('Secure context', window.isSecureContext ? 'yes' : 'no (use https or localhost)', window.isSecureContext ? 'ok' : 'bad');
+}
+
+async function probe() {
+  // Chromium's reduced user agent says "Linux x86_64" on every Linux CPU, so
+  // ask for the real architecture (the Frame reports "arm").
+  try {
+    const ua = await navigator.userAgentData?.getHighEntropyValues(['architecture', 'bitness', 'platform']);
+    if (ua) {
+      report.uaArchitecture = `${ua.platform} ${ua.architecture}${ua.bitness ? ' ' + ua.bitness : ''}`;
+      if (ua.platform === 'Linux' && ua.architecture === 'arm') isFrameBrowser = true;
+    }
+  } catch {}
+  report.isSteamFrameBrowser = isFrameBrowser;
+  report.navigatorXr = 'xr' in navigator;
+  if (report.navigatorXr) {
+    for (const mode of ['immersive-vr', 'immersive-ar']) {
+      try { report.supported[mode] = await navigator.xr.isSessionSupported(mode); }
+      catch (e) { report.supported[mode] = false; report.supported[mode + ' error'] = String(e); }
+    }
+  }
+  renderEnv();
+  $('enter').disabled = !report.supported['immersive-vr'];
+}
+
+// ---- Scene -------------------------------------------------------------
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.xr.enabled = true;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x15191f);
+const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 100);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 2));
+const floor = new THREE.GridHelper(10, 20, 0x445566, 0x2a3038);
+scene.add(floor);
+
+const panelCanvas = document.createElement('canvas');
+panelCanvas.width = 1600; panelCanvas.height = 1000;
+const ctx = panelCanvas.getContext('2d');
+const panelTex = new THREE.CanvasTexture(panelCanvas);
+panelTex.colorSpace = THREE.SRGBColorSpace;
+const panel = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.0), new THREE.MeshBasicMaterial({ map: panelTex }));
+panel.position.set(0, 1.4, -1.4);
+scene.add(panel);
+
+for (let i = 0; i < 2; i++) {
+  const grip = renderer.xr.getControllerGrip(i);
+  grip.add(new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.12), new THREE.MeshStandardMaterial({ color: i ? 0x3b6fd8 : 0xd8833b })));
+  scene.add(grip);
+  const ray = renderer.xr.getController(i);
+  ray.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]), new THREE.LineBasicMaterial({ color: 0xffffff })));
+  scene.add(ray);
+}
+
+// ---- Input tracking ----------------------------------------------------
+function inputRecord(src) {
+  const hand = src.handedness;
+  let r = report.inputs[hand];
+  const gp = src.gamepad;
+  if (!r) {
+    r = report.inputs[hand] = {
+      profiles: src.profiles, mapping: gp?.mapping ?? null,
+      buttonCount: gp?.buttons.length ?? 0, axisCount: gp?.axes.length ?? 0,
+      hapticActuators: gp?.hapticActuators?.length ?? 0, vibrationActuator: !!gp?.vibrationActuator,
+      hand: !!src.hand, targetRayMode: src.targetRayMode,
+      buttons: [], axesMin: [], axesMax: [],
+    };
+  }
+  // Profiles can change if the runtime rebinds; keep the latest.
+  r.profiles = src.profiles; r.buttonCount = gp?.buttons.length ?? 0; r.axisCount = gp?.axes.length ?? 0;
+  return r;
+}
+
+let lastPress = null;       // {hand, index, t}
+let menuPressedAt = 0;
+let exitHoldStart = 0;
+let frames = 0, firstFrameT = 0, lastFrameT = 0, maxGap = 0;
+
+function track(session, t) {
+  let allHeld = 0;
+  for (const src of session.inputSources) {
+    if (!src.gamepad || !src.handedness || src.handedness === 'none') continue;
+    const r = inputRecord(src);
+    const gp = src.gamepad;
+    gp.buttons.forEach((b, i) => {
+      const s = r.buttons[i] ??= { pressed: false, touched: false, maxValue: 0, now: false, nowValue: 0 };
+      if (b.pressed && !s.now) lastPress = { hand: src.handedness, index: i, t };
+      s.now = b.pressed; s.nowValue = b.value;
+      s.pressed ||= b.pressed; s.touched ||= b.touched; s.maxValue = Math.max(s.maxValue, b.value);
+      if (src.handedness === MENU.hand && i === MENU.index && b.pressed && !menuPressedAt) menuPressedAt = t;
+    });
+    gp.axes.forEach((v, i) => {
+      r.axesMin[i] = Math.min(r.axesMin[i] ?? 0, v);
+      r.axesMax[i] = Math.max(r.axesMax[i] ?? 0, v);
+    });
+    if (gp.buttons[0]?.pressed && gp.buttons[1]?.pressed) allHeld++;
+  }
+  if (menuPressedAt && t - menuPressedAt > 1000 && report.menuTest === 'not pressed') {
+    report.menuTest = 'pressed; session kept running';
+  }
+  if (allHeld === 2) {
+    exitHoldStart ||= t;
+    if (t - exitHoldStart > 2000) { report.end = 'finished by holding triggers and grips'; session.end(); }
+  } else exitHoldStart = 0;
+}
+
+function isFrameLayout(r) { return r?.profiles?.[0] === 'valve-frame' && r.buttonCount === 10; }
+function layoutName() {
+  const rs = Object.values(report.inputs);
+  if (!rs.length) return 'none';
+  if (rs.every(isFrameLayout)) return 'frame';
+  return isFrameBrowser ? 'remapped' : 'other';
+}
+function missing() {
+  const out = [];
+  for (const hand of ['left', 'right']) {
+    const r = report.inputs[hand];
+    if (!r) { out.push(`${hand} controller`); continue; }
+    if (!isFrameLayout(r)) continue;
+    FRAME_LAYOUT[hand].forEach((name, i) => { if (name && !r.buttons[i]?.pressed) out.push(`${hand} ${name}`); });
+  }
+  return out;
+}
+
+// ---- Panel -------------------------------------------------------------
+function drawPanel(t) {
+  ctx.fillStyle = '#1b2026'; ctx.fillRect(0, 0, 1600, 1000);
+  ctx.fillStyle = '#e8eaed'; ctx.font = 'bold 44px system-ui';
+  ctx.fillText('Frame WebXR check', 40, 70);
+  ctx.font = '30px system-ui';
+  const layout = layoutName();
+  ctx.fillStyle = layout === 'frame' ? '#4caf7d' : '#d4a72c';
+  ctx.fillText(`layout: ${layout}`, 40, 120);
+  ctx.fillStyle = report.menuTest.startsWith('pressed') ? '#4caf7d' : '#9aa0a6';
+  ctx.fillText(`menu: ${report.menuTest}`, 420, 120);
+  const fps = frames > 1 ? (frames - 1) / ((lastFrameT - firstFrameT) / 1000) : 0;
+  ctx.fillStyle = '#9aa0a6'; ctx.fillText(`${fps.toFixed(1)} fps   max gap ${maxGap.toFixed(1)} ms`, 1040, 120);
+
+  ['left', 'right'].forEach((hand, col) => {
+    const x = 40 + col * 780;
+    const r = report.inputs[hand];
+    ctx.fillStyle = '#e8eaed'; ctx.font = 'bold 34px system-ui';
+    ctx.fillText(hand, x, 185);
+    ctx.font = '22px system-ui'; ctx.fillStyle = '#9aa0a6';
+    ctx.fillText(r ? `${r.profiles.join(', ')}  (${r.buttonCount} buttons, ${r.axisCount} axes)` : 'not connected', x, 218);
+    if (!r) return;
+    const names = isFrameLayout(r) ? FRAME_LAYOUT[hand] : [];
+    ctx.font = '28px system-ui';
+    for (let i = 0; i < Math.max(r.buttonCount, names.length); i++) {
+      const s = r.buttons[i];
+      const y = 265 + i * 52;
+      const name = names[i] === null ? '(placeholder)' : names[i] ?? `button ${i}`;
+      ctx.fillStyle = s?.now ? '#3b6fd8' : s?.pressed ? '#2d5a40' : '#2a3038';
+      ctx.fillRect(x, y - 34, 700, 44);
+      ctx.fillStyle = names[i] === null ? '#666' : '#e8eaed';
+      ctx.fillText(`${i}  ${name}`, x + 12, y);
+      if (s) {
+        ctx.fillStyle = '#9aa0a6';
+        ctx.fillText(`${s.touched ? 'touched ' : ''}${s.nowValue.toFixed(2)}`, x + 470, y);
+      }
+    }
+    // Thumbstick axes (xr-standard: 2/3).
+    const ax = r.axesMax.length > 3 ? 2 : 0;
+    ctx.fillStyle = '#9aa0a6'; ctx.font = '22px system-ui';
+    const rng = (i) => `[${(r.axesMin[i] ?? 0).toFixed(2)}, ${(r.axesMax[i] ?? 0).toFixed(2)}]`;
+    ctx.fillText(`stick x ${rng(ax)}  y ${rng(ax + 1)}`, x, 265 + 10 * 52 + 10);
+  });
+  ctx.fillStyle = '#9aa0a6'; ctx.font = '24px system-ui';
+  const m = missing();
+  ctx.fillText(layout !== 'frame' ? 'button checklist needs the valve-frame layout (raw buttons shown)'
+    : m.length ? `not pressed yet: ${m.slice(0, 8).join(', ')}${m.length > 8 ? '…' : ''}` : 'every control seen', 40, 975);
+  if (exitHoldStart) { ctx.fillStyle = '#d4a72c'; ctx.fillText('finishing…', 1400, 975); }
+  panelTex.needsUpdate = true;
+}
+
+// ---- Session -----------------------------------------------------------
+let lastDraw = 0;
+renderer.setAnimationLoop((t, frame) => {
+  if (!frame) return;
+  const session = renderer.xr.getSession();
+  if (!firstFrameT) firstFrameT = t; else maxGap = Math.max(maxGap, t - lastFrameT);
+  lastFrameT = t; frames++;
+  track(session, t);
+  if (t - lastDraw > 66) { drawPanel(t); lastDraw = t; }
+  renderer.render(scene, camera);
+});
+
+function finish(session) {
+  const startedFor = lastFrameT - firstFrameT;
+  report.session.durationMs = Math.round(startedFor);
+  report.session.frames = frames;
+  report.session.avgFps = frames > 1 ? +((frames - 1) / (startedFor / 1000)).toFixed(2) : 0;
+  report.session.maxFrameGapMs = +maxGap.toFixed(1);
+  if (!report.end) {
+    report.end = lastPress && lastFrameT - lastPress.t < 1500
+      ? `ended ${Math.round(lastFrameT - lastPress.t)} ms after ${lastPress.hand} button ${lastPress.index} was pressed`
+      : 'ended by the browser or runtime (Steam button / dashboard?)';
+  }
+  if (menuPressedAt && report.menuTest === 'not pressed') report.menuTest = 'pressed; SESSION ENDED within 1 s';
+  for (const r of Object.values(report.inputs)) for (const b of r.buttons) if (b) { delete b.now; delete b.nowValue; }
+  report.layout = layoutName();
+  report.notPressed = report.layout === 'frame' ? missing() : null;
+  const pass = report.layout === 'frame' && !report.notPressed.length && report.menuTest.endsWith('kept running');
+  $('verdict').textContent = pass ? 'PASS: valve-frame layout, every control seen, Menu kept the session'
+    : report.layout !== 'frame' ? `Result: layout ${report.layout} (${Object.values(report.inputs)[0]?.profiles?.[0] ?? 'no controllers'}), not valve-frame`
+    : `Result: layout frame; ${report.notPressed.length} controls not seen; menu ${report.menuTest}`;
+  $('verdict').className = pass ? 'ok' : 'warn';
+  const json = JSON.stringify(report, null, 2);
+  $('report').textContent = json;
+  $('result').hidden = false;
+  try { localStorage.setItem('frame-webxr-check:last', json); } catch {}
+}
+
+$('enter').onclick = async () => {
+  $('enter').disabled = true;
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'hand-tracking'] });
+    report.session = {
+      started: new Date().toISOString(),
+      enabledFeatures: session.enabledFeatures ?? null,
+      frameRate: session.frameRate ?? null,
+      supportedFrameRates: session.supportedFrameRates ? [...session.supportedFrameRates] : null,
+      environmentBlendMode: session.environmentBlendMode,
+    };
+    renderer.xr.setReferenceSpaceType(session.enabledFeatures?.includes('local-floor') ? 'local-floor' : 'local');
+    session.addEventListener('end', () => { finish(session); $('enter').disabled = false; });
+    await renderer.xr.setSession(session);
+  } catch (e) {
+    report.session = { error: String(e) };
+    $('verdict').textContent = `Could not start VR: ${e}`;
+    $('verdict').className = 'bad';
+    $('report').textContent = JSON.stringify(report, null, 2);
+    $('result').hidden = false;
+    $('enter').disabled = false;
+  }
+};
+$('copy').onclick = () => navigator.clipboard.writeText($('report').textContent);
+$('download').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([$('report').textContent], { type: 'application/json' }));
+  a.download = `frame-webxr-check-${Date.now()}.json`;
+  a.click();
+};
+
+if (emulate) {
+  try { await installEmulator(emulate); report.emulated = emulate; }
+  catch (e) { report.emulated = `failed: ${e}`; }
+}
+renderEnv();
+probe();
+</script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Mon, 5 Oct 2026 15:00:00 +0000
+Subject: [PATCH 12/13] xr: softer controller vibration
+
+Pages tune their rumble on Meta Quest, whose Touch controllers vibrate
+far more softly than Steam Frame controllers at the same amplitude;
+played as is (0008), every game's rumble felt heavy.
+
+OpenXrController::ApplyHapticFeedback scales the amplitude by 0.35.
+CHROMIUM_XR_HAPTICS_SCALE (0 to 1) in the browser's environment, which
+its XR process inherits, overrides the scale.
+
+Applies on top of 0008.
+---
+diff --git a/device/vr/openxr/openxr_controller.cc b/device/vr/openxr/openxr_controller.cc
+index fbf148541f..24602bac3d 100644
+--- a/device/vr/openxr/openxr_controller.cc
++++ b/device/vr/openxr/openxr_controller.cc
+@@ -11,7 +11,9 @@
+ #include "base/check.h"
+ #include "base/compiler_specific.h"
+ #include "base/containers/span.h"
++#include "base/environment.h"
+ #include "base/notreached.h"
++#include "base/strings/string_number_conversions.h"
+ #include "base/strings/string_util.h"
+ #include "device/gamepad/public/cpp/gamepad.h"
+ #include "device/vr/openxr/openxr_extension_helper.h"
+@@ -27,6 +29,26 @@ namespace device {
+ 
+ namespace {
+ 
++// Pages tune their rumble on Meta Quest, whose Touch controllers vibrate far
++// more softly than Steam Frame controllers at the same amplitude: played as
++// is, every game's rumble felt heavy. Scale it down;
++// CHROMIUM_XR_HAPTICS_SCALE (0 to 1) in the browser's environment overrides.
++constexpr float kDefaultHapticAmplitudeScale = 0.35f;
++
++float GetHapticAmplitudeScale() {
++  static const float scale = [] {
++    double value = 0;
++    std::optional<std::string> env =
++        base::Environment::Create()->GetVar("CHROMIUM_XR_HAPTICS_SCALE");
++    if (env && base::StringToDouble(*env, &value) && value >= 0 &&
++        value <= 1) {
++      return static_cast<float>(value);
++    }
++    return kDefaultHapticAmplitudeScale;
++  }();
++  return scale;
++}
++
+ const char* GetStringFromType(OpenXrHandednessType type) {
+   switch (type) {
+     case OpenXrHandednessType::kLeft:
+@@ -808,6 +830,7 @@ XrResult OpenXrController::ApplyHapticFeedback(float amplitude,
+ 
+   XrHapticActionInfo action_info = {XR_TYPE_HAPTIC_ACTION_INFO};
+   action_info.action = haptic_action_;
++  amplitude = std::min(amplitude, 1.0f) * GetHapticAmplitudeScale();
+   if (amplitude <= 0.0f || !duration.is_positive()) {
+     return xrStopHapticFeedback(session_, &action_info);
+   }
+@@ -815,7 +838,7 @@ XrResult OpenXrController::ApplyHapticFeedback(float amplitude,
+   XrHapticVibration vibration = {XR_TYPE_HAPTIC_VIBRATION};
+   vibration.duration = duration.InNanoseconds();
+   vibration.frequency = XR_FREQUENCY_UNSPECIFIED;
+-  vibration.amplitude = std::min(amplitude, 1.0f);
++  vibration.amplitude = amplitude;
+   return xrApplyHapticFeedback(
+       session_, &action_info,
+       reinterpret_cast<const XrHapticBaseHeader*>(&vibration));
+-- 
+2.43.0

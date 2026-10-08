@@ -1,0 +1,47 @@
+From 256d97444212fbe6d67dc76d851c19974e9832a2 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Fri, 2 Oct 2026 23:11:45 +0000
+Subject: [PATCH 2/3] vr: let SteamVR's runtime read the XR process's own /proc
+ entries
+
+SteamVR's vrclient identifies the calling process to vrserver through
+/proc/self: it resolves the bare link (as realpath() does) and reads the
+process's own status, command line and executable. The XR device
+service's broker grants no /proc paths, so on Steam Frame
+xrCreateInstance failed with VRInitError_Init_Internal once
+getsockopt(SO_PEERCRED) was allowed (utzcoz/chromium-webxr-linux#7).
+
+Grant, for the SteamVR runtime only, read access to "/proc/self" and
+the five entries under it that a process uses to describe itself. The
+broker rewrites all of them to the sandboxed process's own pid, so the
+grant cannot reach any other process. Depends on the broker rewriting
+the bare "/proc/self" link as well as the prefixed form.
+
+Bug: none
+---
+ .../isolated_xr_device/xr_sandbox_hook_linux.cc      | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/content/services/isolated_xr_device/xr_sandbox_hook_linux.cc b/content/services/isolated_xr_device/xr_sandbox_hook_linux.cc
+index 5adcd2e..9d8f47c 100644
+--- a/content/services/isolated_xr_device/xr_sandbox_hook_linux.cc
++++ b/content/services/isolated_xr_device/xr_sandbox_hook_linux.cc
+@@ -324,6 +324,18 @@ std::vector<BrokerFilePermission> GetOpenXrFilePermissions(
+     if (!home.empty()) {
+       add_dir_rw(home + "/.local/share/Steam/logs");
+     }
++
++    // vrclient identifies the calling process to vrserver through /proc: it
++    // resolves the bare /proc/self link (as realpath() does) and reads the
++    // process's own status, command line and executable. The broker rewrites
++    // every /proc/self form to this process's pid, so these grants only ever
++    // reach its own entries. Without them vrserver was handed the broker's
++    // pid and refused the session (utzcoz/chromium-webxr-linux#7).
++    permissions.push_back(BrokerFilePermission::ReadOnly("/proc/self"));
++    for (const char* entry : {"cmdline", "comm", "exe", "stat", "status"}) {
++      permissions.push_back(BrokerFilePermission::ReadOnly(
++          base::StringPrintf("/proc/self/%s", entry)));
++    }
+   }
+ 
+   // Mesa on-disk shader caches; the driver creates and rewrites entries.

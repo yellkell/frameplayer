@@ -1,0 +1,143 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # Pinned so a new stable release's lints cannot break CI unannounced;
+      # bump deliberately (and fix what its clippy reports).
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+          components: clippy, rustfmt
+          targets: aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build nasm pkg-config mesa-vulkan-drivers zip
+          # Ubuntu's meson (1.3) does not recognise zig's linker; use the
+          # version the cross build is tested with.
+          pipx install meson==1.12.1
+          cargo install --locked cargo-zigbuild
+      - name: Restore FFmpeg builds
+        id: ffmpeg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: third_party/ffmpeg
+          key: ffmpeg-${{ hashFiles('tools/build-ffmpeg.sh') }}
+      - name: Build FFmpeg (x86_64 for tests, aarch64 for the Frame)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: tools/build-ffmpeg.sh x86_64 aarch64
+      # Saved right away, so a later failing step does not throw it away.
+      - name: Save FFmpeg builds
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: third_party/ffmpeg
+          key: ffmpeg-${{ hashFiles('tools/build-ffmpeg.sh') }}
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/third_party/ffmpeg/x86_64/lib
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+        run: cargo test --workspace
+      # Every screen as a flat PNG, for design review (artifact ui-preview).
+      - name: UI preview
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/third_party/ffmpeg/x86_64/lib
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+        run: tools/ui-preview.sh ui-preview
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-preview
+          path: ui-preview/
+      - name: Package for the Steam Frame (aarch64, glibc 2.28)
+        run: tools/package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frameplayer-aarch64
+          path: dist/
+
+  # The PC-side installer, for each desktop OS.
+  installer:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: frameplayer-install-linux-x86_64
+            exe: frameplayer-install
+          - os: windows-latest
+            name: frameplayer-install-windows-x86_64
+            exe: frameplayer-install.exe
+          - os: macos-latest
+            name: frameplayer-install-macos-arm64
+            exe: frameplayer-install
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p frameplayer-install
+      - run: cargo build --release -p frameplayer-install
+      - name: Stage
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "target/release/${{ matrix.exe }}" "out/${{ matrix.name }}${{ endsWith(matrix.exe, '.exe') && '.exe' || '' }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: out/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [check, installer]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: frameplayer-aarch64
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: frameplayer-install-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/checkout@v4
+        with:
+          path: src
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Sign the update manifest
+        env:
+          FP_RELEASE_KEY: ${{ secrets.FP_RELEASE_KEY }}
+        run: |
+          if [ -z "$FP_RELEASE_KEY" ]; then
+            echo "::warning::FP_RELEASE_KEY secret not set; manifest.json is unsigned and in-app updates will refuse it"
+            exit 0
+          fi
+          umask 077
+          printf '%s\n' "$FP_RELEASE_KEY" > "$RUNNER_TEMP/release.key"
+          cargo run --manifest-path src/Cargo.toml --release -p fp-updater --bin fp-release -- sign dist/manifest.json --key "$RUNNER_TEMP/release.key"
+          rm -f "$RUNNER_TEMP/release.key"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

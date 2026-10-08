@@ -1,0 +1,37 @@
+[package]
+name = "fp-sources"
+version = "0.1.0"
+description = "FramePlayer media sources: local folders, HTTP(S), WebDAV, DLNA/UPnP, DeoVR/HereSphere feeds and SMB2/3, with random-access ByteSources for the demuxer"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[features]
+default = ["smb"]
+# Pure-Rust SMB2/3 client (smb-rs in its blocking, multi-threaded mode).
+smb = ["dep:smb", "dep:picky-krb"]
+
+[dependencies]
+fp-core = { path = "../fp-core" }
+base64 = "0.22"
+log = "0.4"
+percent-encoding = "2.3"
+quick-xml = "0.38"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+# rustls + ring, webpki roots: no OpenSSL, no system libraries at build time.
+ureq = { version = "3.1", default-features = false, features = ["rustls"] }
+url = "2.5"
+
+# smb-rs: sync mode (no async runtime), NTLM through sspi with the ring backend.
+smb = { version = "0.12.1", default-features = false, features = ["multi_threaded", "sign", "encrypt"], optional = true }
+# sspi 0.21.3 (pinned exactly by smb 0.12.1) fails to compile against
+# picky-krb 0.12.5, which added an enum variant in a patch release. Pin the
+# last compatible release until smb moves to a newer sspi.
+picky-krb = { version = "=0.12.4", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+tiny_http = "0.12"

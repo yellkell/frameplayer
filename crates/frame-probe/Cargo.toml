@@ -1,0 +1,19 @@
+[package]
+name = "frame-probe"
+version = "0.1.0"
+description = "Reports what a Steam Frame offers a native Linux ARM64 VR video player"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+# Vulkan through the system loader (Turnip on the Frame), loaded at run time.
+ash = "0.38.0"
+libc = "0.2.190"
+# Runtime loaded directly from the active OpenXR manifest: no C++ loader to
+# build or ship. See src/xr_loader.rs.
+libloading = "0.8"
+openxr = { version = "0.22.0", default-features = false }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"

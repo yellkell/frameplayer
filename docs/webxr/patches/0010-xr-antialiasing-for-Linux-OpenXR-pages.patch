@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Mon, 5 Oct 2026 15:00:00 +0000
+Subject: [PATCH 10/13] xr: antialiasing for Linux OpenXR pages
+
+XRWebGLLayer antialias was always false on the Steam Frame: the OpenXR
+device offers antialiasing only when the runtime's
+maxSwapchainSampleCount is above 1, and SteamVR reports 1. That limit is
+about rendering into the swapchain itself, which Linux never does:
+pages draw into a SharedImage that XRWebGLDrawingBuffer resolves before
+the Vulkan binding copies it into the swapchain. Pages tuned on Quest,
+whose browser renders them with MSAA, looked jagged and shimmered.
+
+On Linux, CanEnableAntiAliasing() is always true. Patch 0013 makes Blink
+use 2 samples on Linux arm64. With ANGLE on Vulkan, Blink's implicit
+resolve (GL_EXT_multisampled_render_to_texture) never reached the
+headset, so the Frame launcher disables that extension and Blink
+resolves with a blit.
+
+Touches only device/vr/openxr/openxr_view_configuration.cc, which no
+other patch changes.
+---
+diff --git a/device/vr/openxr/openxr_view_configuration.cc b/device/vr/openxr/openxr_view_configuration.cc
+index d88ba5627f..9c0c4c1f2d 100644
+--- a/device/vr/openxr/openxr_view_configuration.cc
++++ b/device/vr/openxr/openxr_view_configuration.cc
+@@ -305,6 +305,13 @@ void OpenXrViewConfiguration::SetViews(std::vector<XrView> views) {
+ }
+ 
+ bool OpenXrViewConfiguration::CanEnableAntiAliasing() const {
++#if BUILDFLAG(IS_LINUX)
++  // Linux pages always draw into a SharedImage that Blink resolves itself
++  // (XRWebGLDrawingBuffer) before the Vulkan binding copies it into the
++  // swapchain, so the runtime's swapchain sample count doesn't limit it.
++  // SteamVR reports 1, which left every page without antialiasing.
++  return true;
++#else
+   // From the OpenXR Spec:
+   // maxSwapchainSampleCount is the maximum number of sub-data element samples
+   // supported for swapchain images that will be rendered into for this view.
+@@ -314,6 +321,7 @@ bool OpenXrViewConfiguration::CanEnableAntiAliasing() const {
+   return std::ranges::all_of(properties_, [](const OpenXrViewProperties& view) {
+     return view.MaxSwapchainSampleCount() > 1;
+   });
++#endif
+ }
+ 
+ }  // namespace device
+-- 
+2.43.0

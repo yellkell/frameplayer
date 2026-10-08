@@ -1,0 +1,188 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Sat, 3 Oct 2026 18:40:00 +0000
+Subject: [PATCH 6/6] vr: Quest-compatible Steam Frame gamepad
+
+Applies on top of IWFDK's 0004 (valve-frame profile). Pages written for
+Meta Quest controllers didn't work with the Frame: they don't know the
+valve-frame profile, so they showed no controller model, and the face
+buttons were in Frame-specific slots.
+
+- Report "oculus-touch-v3" and "oculus-touch" after "valve-frame", so
+  input-profile libraries (three.js, IWSDK) fall back to Touch models and
+  the Touch button layout.
+- Lay out the gamepad like Touch: 4 = A/X, 5 = B/Y, 6 = thumbrest
+  (placeholder). The Frame-only controls follow at fixed slots: right
+  7 X, 8 Y, 9 shoulder, 10 menu; left 7-10 D-pad up/down/left/right,
+  11 shoulder, 12 view.
+- The Frame has X/Y on the right controller, Touch on the left: mirror the
+  right controller's X/Y into the left gamepad's slots 4 and 5.
+
+Frame-aware code (IWFDK) still sees valve-frame first and reads the
+Frame-only controls from slot 7 on.
+
+Bug: none
+---
+ device/vr/openxr/openxr_controller.cc              | 54 +++++++++++++++-------
+ device/vr/openxr/openxr_controller.h               |  3 ++
+ device/vr/openxr/openxr_input_helper.cc            | 23 +++++++++
+ device/vr/openxr/openxr_interaction_profiles.cc    |  4 +-
+ .../openxr/openxr_interaction_profiles_unittest.cc |  4 ++
+ 5 files changed, 70 insertions(+), 18 deletions(-)
+
+diff --git a/device/vr/openxr/openxr_controller.cc b/device/vr/openxr/openxr_controller.cc
+index f2fa170..b5dd891 100644
+--- a/device/vr/openxr/openxr_controller.cc
++++ b/device/vr/openxr/openxr_controller.cc
+@@ -141,19 +141,33 @@ const char* GetStringFromInteractionProfile(
+   }
+ }
+ 
+-// Gamepad slots 4-9 of a Steam Frame controller, after the xr-standard
+-// trigger, squeeze, touchpad (placeholder) and thumbstick. Fixed so that the
+-// "valve-frame" input profile's indices never shift; slots 4-7 are the four
+-// face buttons (A/B/X/Y on the right, the D-pad on the left).
+-constexpr OpenXrButtonType kValveFrameLeftSlots[] = {
+-    OpenXrButtonType::kDpadUp,   OpenXrButtonType::kDpadDown,
+-    OpenXrButtonType::kDpadLeft, OpenXrButtonType::kDpadRight,
+-    OpenXrButtonType::kShoulder, OpenXrButtonType::kView,
++// Gamepad slots 4 onwards of a Steam Frame controller, after the xr-standard
++// trigger, squeeze, touchpad (placeholder) and thumbstick. Slots 4-6 follow
++// the Meta Touch layout ("oculus-touch-v3", the profile reported after
++// "valve-frame"): A/X, B/Y, thumbrest. That way pages written for Quest
++// controllers work unchanged. The Frame has no X/Y on the left controller,
++// so OpenXRInputHelper copies the right controller's X/Y into the left's
++// slots 4-5 (left here as placeholders). The Frame-only controls follow from
++// slot 7, at fixed indices. std::nullopt is an always-released placeholder.
++constexpr std::optional<OpenXrButtonType> kValveFrameLeftSlots[] = {
++    std::nullopt,                 // 4: X (the right controller's X)
++    std::nullopt,                 // 5: Y (the right controller's Y)
++    std::nullopt,                 // 6: thumbrest (none on the Frame)
++    OpenXrButtonType::kDpadUp,    // 7
++    OpenXrButtonType::kDpadDown,  // 8
++    OpenXrButtonType::kDpadLeft,  // 9
++    OpenXrButtonType::kDpadRight, // 10
++    OpenXrButtonType::kShoulder,  // 11
++    OpenXrButtonType::kView,      // 12
+ };
+-constexpr OpenXrButtonType kValveFrameRightSlots[] = {
+-    OpenXrButtonType::kButton1,  OpenXrButtonType::kButton2,
+-    OpenXrButtonType::kButton3,  OpenXrButtonType::kButton4,
+-    OpenXrButtonType::kShoulder, OpenXrButtonType::kAppMenu,
++constexpr std::optional<OpenXrButtonType> kValveFrameRightSlots[] = {
++    OpenXrButtonType::kButton1,   // 4: A
++    OpenXrButtonType::kButton2,   // 5: B
++    std::nullopt,                 // 6: thumbrest (none on the Frame)
++    OpenXrButtonType::kButton3,   // 7: X
++    OpenXrButtonType::kButton4,   // 8: Y
++    OpenXrButtonType::kShoulder,  // 9
++    OpenXrButtonType::kAppMenu,   // 10: menu
+ };
+ 
+ }  // namespace
+@@ -541,13 +555,19 @@ std::optional<Gamepad> OpenXrController::GetWebXRGamepad() const {
+ 
+   if (interaction_profile_ ==
+       mojom::OpenXrInteractionProfileType::kValveFrame) {
+-    const base::span<const OpenXrButtonType> slots =
++    const base::span<const std::optional<OpenXrButtonType>> slots =
+         type_ == OpenXrHandednessType::kLeft
+-            ? base::span<const OpenXrButtonType>(kValveFrameLeftSlots)
+-            : base::span<const OpenXrButtonType>(kValveFrameRightSlots);
+-    for (OpenXrButtonType slot : slots) {
++            ? base::span<const std::optional<OpenXrButtonType>>(
++                  kValveFrameLeftSlots)
++            : base::span<const std::optional<OpenXrButtonType>>(
++                  kValveFrameRightSlots);
++    for (const std::optional<OpenXrButtonType>& slot : slots) {
++      std::optional<GamepadButton> button;
++      if (slot) {
++        button = GetButton(*slot);
++      }
+       builder.AddOptionalButtonData(
+-          GetButton(slot).value_or(GamepadButton(false, false, 0.0)));
++          button.value_or(GamepadButton(false, false, 0.0)));
+     }
+     return builder.GetGamepad();
+   }
+diff --git a/device/vr/openxr/openxr_controller.h b/device/vr/openxr/openxr_controller.h
+index da207b8..9e58392 100644
+--- a/device/vr/openxr/openxr_controller.h
++++ b/device/vr/openxr/openxr_controller.h
+@@ -56,6 +56,9 @@ class OpenXrController {
+   mojom::XRHandedness GetHandness() const;
+   std::optional<GamepadButton> GetButton(OpenXrButtonType type) const;
+   std::optional<Gamepad> GetWebXRGamepad() const;
++  mojom::OpenXrInteractionProfileType interaction_profile() const {
++    return interaction_profile_;
++  }
+ 
+   XrSpace GetInputSpace(mojom::XRInputSourceSpaceType space_type) const;
+ 
+diff --git a/device/vr/openxr/openxr_input_helper.cc b/device/vr/openxr/openxr_input_helper.cc
+index 5a6da2b..b353f9f 100644
+--- a/device/vr/openxr/openxr_input_helper.cc
++++ b/device/vr/openxr/openxr_input_helper.cc
+@@ -201,6 +201,29 @@ std::vector<mojom::XRInputSourceStatePtr> OpenXRInputHelper::GetInputState(
+ 
+     state->gamepad = controller->GetWebXRGamepad();
+ 
++    // Quest compatibility for the Steam Frame: its X/Y are on the right
++    // controller, where Touch has them on the left. Mirror the right
++    // controller's X/Y into the left gamepad's Touch X/Y slots (4 and 5).
++    if (state->gamepad &&
++        controller->interaction_profile() ==
++            mojom::OpenXrInteractionProfileType::kValveFrame &&
++        controller->GetHandness() == mojom::XRHandedness::LEFT &&
++        state->gamepad->buttons_length > 5) {
++      for (OpenXrControllerState& other : controller_states_) {
++        if (other.controller.GetHandness() != mojom::XRHandedness::RIGHT ||
++            other.controller.interaction_profile() !=
++                mojom::OpenXrInteractionProfileType::kValveFrame) {
++          continue;
++        }
++        if (auto x = other.controller.GetButton(OpenXrButtonType::kButton3)) {
++          state->gamepad->buttons[4] = x.value();
++        }
++        if (auto y = other.controller.GetButton(OpenXrButtonType::kButton4)) {
++          state->gamepad->buttons[5] = y.value();
++        }
++      }
++    }
++
+     // This will return null if hand tracking isn't possible/enabled.
+     state->hand_tracking_data = controller->GetHandTrackingData();
+ 
+diff --git a/device/vr/openxr/openxr_interaction_profiles.cc b/device/vr/openxr/openxr_interaction_profiles.cc
+index 881d191..6bfa472 100644
+--- a/device/vr/openxr/openxr_interaction_profiles.cc
++++ b/device/vr/openxr/openxr_interaction_profiles.cc
+@@ -96,7 +96,9 @@ GetOpenXrInputProfilesMap() {
+ 
+           // Valve Steam Frame
+           {OpenXrInteractionProfileType::kValveFrame,
+-           {{"", {"valve-frame", "generic-trigger-squeeze-thumbstick"}}}},
++           {{"",
++             {"valve-frame", "oculus-touch-v3", "oculus-touch",
++              "generic-trigger-squeeze-thumbstick"}}}},
+ 
+           // Vive
+           {OpenXrInteractionProfileType::kHTCVive,
+diff --git a/device/vr/openxr/openxr_interaction_profiles_unittest.cc b/device/vr/openxr/openxr_interaction_profiles_unittest.cc
+index b9f78c4..c86bdb1 100644
+--- a/device/vr/openxr/openxr_interaction_profiles_unittest.cc
++++ b/device/vr/openxr/openxr_interaction_profiles_unittest.cc
+@@ -50,6 +50,10 @@ TEST(OpenXrInteractionProfilesTest, ValveFrameProfile) {
+       GetOpenXrInputProfilesMap().at(OpenXrInteractionProfileType::kValveFrame);
+   ASSERT_EQ(input_profiles.size(), 1u);
+   EXPECT_EQ(input_profiles[0].input_profiles.front(), "valve-frame");
++  // Pages that only know Meta Touch controllers fall back to it; the
++  // gamepad layout's first slots follow Touch (see openxr_controller.cc).
++  ASSERT_GE(input_profiles[0].input_profiles.size(), 2u);
++  EXPECT_EQ(input_profiles[0].input_profiles[1], "oculus-touch-v3");
+ 
+   // The menu button must not be bound to kMenu, which exits the session.
+   for (const auto* maps : {&frame->common_button_maps, &frame->left_button_maps,
+-- 
+2.43.0
+

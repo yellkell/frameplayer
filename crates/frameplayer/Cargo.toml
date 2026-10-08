@@ -1,0 +1,34 @@
+[package]
+name = "frameplayer"
+version = "0.3.0-alpha.5"
+description = "Native VR video player for the Valve Steam Frame"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+ash = "0.38"
+crossbeam-channel = "0.5"
+egui = { version = "0.32.3", features = ["bytemuck"] }
+fp-core = { path = "../fp-core" }
+fp-haptics = { path = "../fp-haptics" }
+fp-library = { path = "../fp-library" }
+fp-media = { path = "../fp-media" }
+fp-remote = { path = "../fp-remote" }
+fp-render = { path = "../fp-render" }
+fp-sources = { path = "../fp-sources" }
+fp-updater = { path = "../fp-updater" }
+fp-xr = { path = "../fp-xr" }
+glam = "0.33"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+log = "0.4"
+# Checks the passthrough unlock licence (already built for rustls).
+ring = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# DevTools connection of the embedded web view (no TLS: loopback only).
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+png = "0.18"
