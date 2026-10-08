@@ -130,6 +130,35 @@ fn candidates(video: bool, codec: ff::AVCodecID, hw: HwDecode, native: bool) -> 
     c
 }
 
+/// Runs `f` with the calling thread allowed on every CPU, so the threads it
+/// starts inherit that: a software decoder sizes its pool from the CPUs it
+/// may use and starts its workers when opened. Steam launches games on the
+/// Frame's five big cores only (`STEAM_LAUNCH_WRAPPER_AFFINITY_LIST=0xf8`),
+/// where 8K60 AV1 decodes at 61 fps with nothing else running and falls
+/// behind once the compositor and renderer share them; the other three add
+/// ~7%. SteamVR's tracking there runs at nice -10, so it still comes first.
+fn on_all_cpus<T>(f: impl FnOnce() -> T) -> T {
+    #[cfg(target_os = "linux")]
+    // SAFETY: plain affinity calls on the calling thread with owned sets.
+    unsafe {
+        let size = std::mem::size_of::<libc::cpu_set_t>();
+        let mut old: libc::cpu_set_t = std::mem::zeroed();
+        if libc::sched_getaffinity(0, size, &mut old) == 0 {
+            let mut all: libc::cpu_set_t = std::mem::zeroed();
+            let cpus = libc::sysconf(libc::_SC_NPROCESSORS_CONF).clamp(1, 1024) as usize;
+            for cpu in 0..cpus {
+                libc::CPU_SET(cpu, &mut all);
+            }
+            if libc::sched_setaffinity(0, size, &all) == 0 {
+                let r = f();
+                libc::sched_setaffinity(0, size, &old);
+                return r;
+            }
+        }
+    }
+    f()
+}
+
 /// Packets kept while the native decoder starts up, replayed into the
 /// fallback decoder if it fails before its first frame.
 #[cfg(target_os = "linux")]
@@ -306,7 +335,12 @@ impl Decoder {
                 let v = CString::new("8").unwrap_or_default();
                 ff::av_dict_set(&mut opts, k.as_ptr(), v.as_ptr(), 0);
             }
-            let r = ff::avcodec_open2(ctx, codec, &mut opts);
+            let video = (*par).codec_type == ff::AVMEDIA_TYPE_VIDEO;
+            let r = if video && !hardware {
+                on_all_cpus(|| ff::avcodec_open2(ctx, codec, &mut opts))
+            } else {
+                ff::avcodec_open2(ctx, codec, &mut opts)
+            };
             ff::av_dict_free(&mut opts);
             check(
                 r,
