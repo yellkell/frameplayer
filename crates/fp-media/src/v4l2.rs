@@ -556,6 +556,7 @@ mod linux {
     use std::time::{Duration, Instant};
 
     const NV12: u32 = fourcc(b"NV12");
+    const P010: u32 = fourcc(b"P010");
     /// Give up when the device makes no progress for this long.
     const STALL: Duration = Duration::from_secs(5);
 
@@ -656,7 +657,7 @@ mod linux {
         stream_size: (u32, u32),
         /// The primer trick is active (declared OUTPUT size was lowered).
         primed: bool,
-        /// 10-bit stream (decoded to NV12 by the driver).
+        /// 10-bit stream (decoded to P010).
         ten_bit: bool,
         bsf: *mut ff::AVBSFContext,
         out_free: Vec<u32>,
@@ -1138,6 +1139,12 @@ mod linux {
             }
         }
 
+        /// NV12, or P010 for a 10-bit stream (NV12 would hold only the low
+        /// 8 bits of each sample).
+        fn capture_format(&self) -> u32 {
+            if self.ten_bit { P010 } else { NV12 }
+        }
+
         fn g_fmt_capture(&self) -> Result<Format> {
             let mut f = Format::new(BUF_TYPE_CAPTURE_MPLANE);
             ioctl(&self.fd, VIDIOC_G_FMT, &mut f).map_err(|e| err("G_FMT capture", e))?;
@@ -1157,7 +1164,7 @@ mod linux {
 
         /// The CAPTURE layout for format `f` (visible size from COMPOSE).
         fn layout(&self, f: &Format) -> Result<Nv12Layout> {
-            if f.pixelformat() != NV12 || f.num_planes() != 1 {
+            if f.pixelformat() != self.capture_format() || f.num_planes() != 1 {
                 return Err(Error::Unsupported(format!(
                     "V4L2 capture format {} with {} planes",
                     fourcc_str(f.pixelformat()),
@@ -1204,12 +1211,14 @@ mod linux {
                     .map(fourcc_str)
                     .collect::<Vec<_>>()
             );
-            if f.pixelformat() != NV12 {
-                f.set_pixelformat(NV12);
+            let want = self.capture_format();
+            if f.pixelformat() != want {
+                f.set_pixelformat(want);
                 ioctl(&self.fd, VIDIOC_S_FMT, &mut f).map_err(|e| err("S_FMT capture", e))?;
                 f = self.g_fmt_capture()?;
                 log::info!(
-                    "V4L2 capture after asking for NV12: {} stride {} size {}",
+                    "V4L2 capture after asking for {}: {} stride {} size {}",
+                    fourcc_str(want),
                     fourcc_str(f.pixelformat()),
                     f.bytesperline(0),
                     f.sizeimage(0)
@@ -1314,9 +1323,16 @@ mod linux {
             self.drc_pending = false;
             let mut f = self.g_fmt_capture()?;
             // A 10-bit stream comes back as Q10C; iris also hands it out as
-            // NV12 (8-bit), which then fits the primed buffers.
-            if f.pixelformat() != NV12 {
-                f.set_pixelformat(NV12);
+            // P010 (and as NV12 holding only the low 8 bits of each sample).
+            let want = self.capture_format();
+            log::info!(
+                "V4L2 source change: capture {} {}x{}",
+                fourcc_str(f.pixelformat()),
+                f.width(),
+                f.height()
+            );
+            if f.pixelformat() != want {
+                f.set_pixelformat(want);
                 ioctl(&self.fd, VIDIOC_S_FMT, &mut f).map_err(|e| err("S_FMT capture", e))?;
                 f = self.g_fmt_capture()?;
             }
@@ -1334,7 +1350,7 @@ mod linux {
                 .unwrap_or(((0, 0), 0, 0));
             let need = f.sizeimage(0) as usize;
             let new_format = (f.width(), f.height());
-            if f.pixelformat() == NV12
+            if f.pixelformat() == self.capture_format()
                 && can_reuse_capture(allocated_for, count, smallest, new_format, min, need)
             {
                 let layout = self.layout(&f)?;
@@ -1414,7 +1430,11 @@ mod linux {
                 f.data[1] = dst.add(y_len);
                 f.linesize[0] = l.stride as i32;
                 f.linesize[1] = l.stride as i32;
-                f.format = ff::AV_PIX_FMT_NV12;
+                f.format = if self.ten_bit {
+                    ff::AV_PIX_FMT_P010LE
+                } else {
+                    ff::AV_PIX_FMT_NV12
+                };
                 f.width = l.width as i32;
                 f.height = l.height as i32;
                 f.pts = pts;
