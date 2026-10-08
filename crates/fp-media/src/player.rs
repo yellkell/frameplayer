@@ -548,17 +548,13 @@ impl Player {
             }
         } else {
             let t = s.clock.now();
+            let late = (3.0 / s.video_fps.max(1.0)).clamp(0.03, 0.1);
             let mut shown: Option<Arc<VideoFrame>> = None;
             let mut dropped = 0;
-            while let Some(f) = frames.front() {
-                if f.pts <= t + 0.002 {
-                    if shown.is_some() {
-                        dropped += 1;
-                    }
-                    shown = frames.pop_front();
-                } else {
-                    break;
-                }
+            if let Some(i) = pick_due(frames.iter().map(|f| f.pts), t, late) {
+                frames.drain(..i);
+                dropped = i as u64;
+                shown = frames.pop_front();
             }
             if let Some(f) = shown {
                 *s.current.lock().unwrap_or_else(|e| e.into_inner()) = Some(f);
@@ -619,6 +615,26 @@ impl Drop for Player {
     fn drop(&mut self) {
         self.close();
     }
+}
+
+/// Which queued frame (times oldest first) to show at clock `t`; the ones
+/// before it are dropped. The oldest due frame at most `late` behind the
+/// clock, so frames a software decoder delivers in bursts while behind are
+/// shown in turn (the newest alone would waste the rest of the burst);
+/// frames further behind are dropped to catch up. With every due frame
+/// that late, the newest. `None` when nothing is due.
+fn pick_due(pts: impl Iterator<Item = f64>, t: f64, late: f64) -> Option<usize> {
+    let mut newest_due = None;
+    for (i, p) in pts.enumerate() {
+        if p > t + 0.002 {
+            break;
+        }
+        if p >= t - late {
+            return Some(i);
+        }
+        newest_due = Some(i);
+    }
+    newest_due
 }
 
 fn spawn(name: &str, f: impl FnOnce() + Send + 'static) -> JoinHandle<()> {
@@ -1037,6 +1053,21 @@ mod tests {
             std::thread::sleep(Duration::from_millis(11));
         }
         shown
+    }
+
+    #[test]
+    fn due_frames_are_shown_in_turn_unless_too_late() {
+        let late = 0.05;
+        let at = |pts: &[f64], t| pick_due(pts.iter().copied(), t, late);
+        assert_eq!(at(&[], 1.0), None);
+        assert_eq!(at(&[1.1, 1.2], 1.0), None, "nothing due yet");
+        assert_eq!(at(&[1.0, 1.1], 1.0), Some(0));
+        // A burst of due frames within the tolerance: oldest first.
+        assert_eq!(at(&[0.97, 0.985, 1.0], 1.0), Some(0));
+        // Too late ones are dropped up to the first within tolerance.
+        assert_eq!(at(&[0.90, 0.93, 0.96, 0.98, 1.2], 1.0), Some(2));
+        // Everything due is too late: the newest.
+        assert_eq!(at(&[0.80, 0.85, 0.90, 1.2], 1.0), Some(2));
     }
 
     #[test]
