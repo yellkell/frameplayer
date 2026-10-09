@@ -2,7 +2,7 @@
 
 use super::theme::{self, Weight};
 use super::{icons, widgets};
-use egui::{Align2, Color32, Event, Key, Modifiers, Sense, Vec2};
+use egui::{Align2, Event, Key, Modifiers, Sense, Vec2};
 
 const ROWS: [&str; 4] = ["1234567890-", "qwertyuiop/", "asdfghjkl:_", "zxcvbnm.@?&"];
 const KEY_H: f32 = 60.0;
@@ -23,45 +23,20 @@ enum Style {
 
 /// One key; true when pressed. `label` may be an icon.
 fn key(ui: &mut egui::Ui, label: &str, w: f32, style: Style, icon: bool) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, KEY_H), Sense::click());
-    let t = ui
-        .ctx()
-        .animate_bool_with_time(resp.id, resp.hovered(), 0.08);
-    let down = resp.is_pointer_button_down_on();
-    let (bg, fg) = match style {
-        Style::Char => (
-            theme::SURFACE_2.lerp_to_gamma(theme::SURFACE_3, t),
-            theme::TEXT,
-        ),
-        Style::Function => (
-            theme::SURFACE.lerp_to_gamma(theme::SURFACE_2, t),
-            theme::TEXT_2.lerp_to_gamma(Color32::WHITE, t),
-        ),
-        Style::Action => (
-            theme::ACCENT.lerp_to_gamma(theme::ACCENT_HOVER, t),
-            Color32::WHITE,
-        ),
-        Style::On => (theme::TEXT, theme::BG),
-    };
-    let bg = if down {
-        bg.lerp_to_gamma(theme::ACCENT, 0.5)
-    } else {
-        bg
-    };
-    let _ = bg;
-    // Raised keys: Enter is the accent, shift glows while it is on.
+    let (_, resp) = ui.allocate_exact_size(Vec2::new(w, KEY_H), Sense::click());
+    // Raised keys: Enter is the accent, shift glows while it is on, and
+    // function keys keep a quieter label.
     let kind = if style == Style::Action {
         widgets::Kind::Primary
     } else {
         widgets::Kind::Secondary
     };
-    let (face, key_fg) = widgets::key_face_kind(ui, &resp, 12.0, style == Style::On, kind);
-    let fg = if style == Style::Char || style == Style::Action {
-        key_fg
+    let (face, fg) = widgets::key_face_kind(ui, &resp, 12.0, style == Style::On, kind);
+    let fg = if style == Style::Function {
+        fg.lerp_to_gamma(theme::TEXT_2, 0.5)
     } else {
-        fg.lerp_to_gamma(key_fg, 0.5)
+        fg
     };
-    let rect = face;
     let p = ui.painter();
     let font = if icon {
         theme::icon(26.0)
@@ -70,7 +45,7 @@ fn key(ui: &mut egui::Ui, label: &str, w: f32, style: Style, icon: bool) -> bool
     } else {
         theme::font(Weight::Medium, 25.0)
     };
-    p.text(rect.center(), Align2::CENTER_CENTER, label, font, fg);
+    p.text(face.center(), Align2::CENTER_CENTER, label, font, fg);
     resp.clicked()
 }
 
