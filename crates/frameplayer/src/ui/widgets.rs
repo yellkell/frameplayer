@@ -202,7 +202,13 @@ pub fn key_face(ui: &Ui, resp: &Response, radius: f32, selected: bool) -> (Rect,
     let down = resp.is_pointer_button_down_on();
     let dy = if down { 0.5 } else { -1.5 * t };
     let rect = resp.rect.shrink(3.0).translate(Vec2::new(0.0, dy));
-    let shade = |c: Color32| if down { mix(c, Color32::BLACK, 0.15) } else { c };
+    let shade = |c: Color32| {
+        if down {
+            mix(c, Color32::BLACK, 0.15)
+        } else {
+            c
+        }
+    };
     let look = super::depth::Raised {
         top: shade(mix(mix(KEY_TOP, KEY_TOP_HOVER, t), KEY_TOP_ON, s)),
         bottom: shade(mix(mix(KEY_BOTTOM, KEY_BOTTOM_HOVER, t), KEY_BOTTOM_ON, s)),

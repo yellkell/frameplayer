@@ -375,8 +375,14 @@ fn play_button(ui: &mut egui::Ui, paused: bool) -> egui::Response {
             dome,
             r,
             depth::Raised {
-                top: lit(Color32::from_rgb(104, 198, 255), Color32::from_rgb(140, 214, 255)),
-                bottom: lit(Color32::from_rgb(14, 106, 190), Color32::from_rgb(22, 128, 222)),
+                top: lit(
+                    Color32::from_rgb(104, 198, 255),
+                    Color32::from_rgb(140, 214, 255),
+                ),
+                bottom: lit(
+                    Color32::from_rgb(14, 106, 190),
+                    Color32::from_rgb(22, 128, 222),
+                ),
                 light: Color32::from_white_alpha(150),
                 lift: if down { 0.3 } else { 0.9 },
                 glow: Some(theme::ACCENT.gamma_multiply(0.45 + 0.25 * t)),

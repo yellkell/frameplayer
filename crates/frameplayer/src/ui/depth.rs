@@ -11,7 +11,10 @@ use egui::{Color32, CornerRadius, Mesh, Painter, Pos2, Rect, Shape, Vec2};
 /// Points round a rounded rectangle, clockwise on screen from the left
 /// end of the top-left corner, each with its outward normal.
 fn outline(rect: Rect, radius: f32) -> Vec<(Pos2, Vec2)> {
-    let r = radius.min(rect.width() / 2.0).min(rect.height() / 2.0).max(0.0);
+    let r = radius
+        .min(rect.width() / 2.0)
+        .min(rect.height() / 2.0)
+        .max(0.0);
     let seg = ((r * 0.6).ceil() as usize).clamp(2, 20);
     let corners = [
         (Pos2::new(rect.left() + r, rect.top() + r), PI),
@@ -80,7 +83,9 @@ pub fn edge(
     side: Side,
     outside: bool,
 ) {
-    p.add(Shape::mesh(edge_mesh(rect, radius, width, color, side, outside)));
+    p.add(Shape::mesh(edge_mesh(
+        rect, radius, width, color, side, outside,
+    )));
 }
 
 fn edge_mesh(
