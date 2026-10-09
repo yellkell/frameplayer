@@ -35,7 +35,8 @@ run on a headset (`tools/frame-probe.sh --build`); results go in
 
 FramePlayer is licensed under either of [Apache License, Version 2.0](LICENSE-APACHE)
 or [MIT license](LICENSE-MIT), at your option. Bundled third-party libraries
-and fonts keep their own licences; see [packaging/licenses](packaging/licenses/THIRD-PARTY.txt).
+and fonts keep their own licences, and the controller pictures are renders of
+Valve's Steam Frame controller models; see [packaging/licenses](packaging/licenses/THIRD-PARTY.txt).
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion in FramePlayer by you, as defined in the Apache-2.0 license, shall

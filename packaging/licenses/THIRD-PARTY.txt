@@ -27,3 +27,12 @@ Inter 4.1 by Rasmus Andersson (Regular, Medium, SemiBold, Bold; subset)
 Phosphor Icons (regular and fill weights)
   Licence: MIT, text in Phosphor-MIT.txt.
   Source: https://github.com/phosphor-icons/core
+
+Pictures embedded in the frameplayer binary:
+
+Steam Frame controllers (Settings > Controller): renders of Valve's own
+  controller models as SteamVR ships them, made with Blender
+  (crates/frameplayer/assets/controllers/). The controllers' design and
+  models are Valve Corporation's; these pictures are not covered by
+  FramePlayer's MIT / Apache-2.0 licence. Steam and the Steam logo are
+  trademarks of Valve Corporation.
