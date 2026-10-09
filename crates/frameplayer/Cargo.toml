@@ -1,6 +1,6 @@
 [package]
 name = "frameplayer"
-version = "0.3.0-alpha.5"
+version = "0.3.0-alpha.6"
 description = "Native VR video player for the Valve Steam Frame"
 edition.workspace = true
 rust-version.workspace = true
