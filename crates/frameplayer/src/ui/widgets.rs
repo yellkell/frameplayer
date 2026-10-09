@@ -65,6 +65,70 @@ impl Tip for Response {
     }
 }
 
+fn dimensional_id() -> egui::Id {
+    egui::Id::new("fp-dimensional")
+}
+
+/// Draws this panel's widgets with depth: raised cards and keys, sunken
+/// tracks and trays (the adjust panel). Other panels stay flat.
+pub fn set_dimensional(ctx: &egui::Context, on: bool) {
+    ctx.data_mut(|d| d.insert_temp(dimensional_id(), on));
+}
+
+fn dimensional(ui: &Ui) -> bool {
+    ui.ctx()
+        .data(|d| d.get_temp::<bool>(dimensional_id()))
+        .unwrap_or(false)
+}
+
+/// Room round a floating panel's body in its panel, for the shadow the
+/// body casts on the scene.
+pub const SHADOW_ROOM: egui::Margin = egui::Margin {
+    left: 20,
+    right: 20,
+    top: 8,
+    bottom: 28,
+};
+
+/// Paints a panel's body as a raised slab, lit along its top edge and
+/// casting a soft shadow, under everything else in `ctx`; returns the
+/// body's rect (the panel less [`SHADOW_ROOM`]).
+pub fn panel_slab(ctx: &egui::Context, radius: f32) -> Rect {
+    let rect = ctx.screen_rect() - SHADOW_ROOM;
+    let p = ctx.layer_painter(egui::LayerId::background());
+    p.add(
+        egui::epaint::Shadow {
+            offset: [0, 12],
+            blur: 30,
+            spread: 0,
+            color: Color32::from_black_alpha(140),
+        }
+        .as_shape(rect, CornerRadius::same(radius as u8)),
+    );
+    super::depth::raised(
+        &p,
+        rect,
+        radius,
+        super::depth::Raised {
+            top: Color32::from_rgb(29, 36, 46),
+            bottom: Color32::from_rgb(14, 18, 24),
+            light: Color32::from_white_alpha(30),
+            lift: 0.6,
+            glow: None,
+        },
+    );
+    super::depth::edge(
+        &p,
+        rect,
+        radius,
+        2.0,
+        Color32::from_black_alpha(140),
+        super::depth::Side::Bottom,
+        false,
+    );
+    rect
+}
+
 /// What a button is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -103,7 +167,18 @@ pub fn button_sized(
     let content = text.size().x + icon_g.as_ref().map(|g| g.size().x + gap).unwrap_or(0.0);
     let size = Vec2::new((content + pad * 2.0).max(height), height);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
-    if ui.is_rect_visible(rect) {
+    if ui.is_rect_visible(rect) && dimensional(ui) && kind != Kind::Ghost {
+        let (face, fg) = key_face_kind(ui, &resp, height * 0.25, false, kind);
+        let mut x = face.center().x - content / 2.0;
+        let p = ui.painter();
+        if let Some(g) = icon_g {
+            let y = face.center().y - g.size().y / 2.0;
+            p.galley_with_override_text_color(Pos2::new(x, y), g.clone(), fg);
+            x += g.size().x + gap;
+        }
+        let y = face.center().y - text.size().y / 2.0;
+        p.galley_with_override_text_color(Pos2::new(x, y), text, fg);
+    } else if ui.is_rect_visible(rect) {
         let t = anim(ui, resp.id, resp.hovered());
         let down = resp.is_pointer_button_down_on();
         let (bg, fg) = match kind {
@@ -149,6 +224,9 @@ pub fn button_sized(
 
 /// A round icon-only button. `selected` marks a toggle that is on.
 pub fn icon_button(ui: &mut Ui, icon: &str, size: f32, selected: bool) -> Response {
+    if dimensional(ui) {
+        return key(ui, icon, size, selected);
+    }
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
     if ui.is_rect_visible(rect) {
         let t = anim(ui, resp.id, resp.hovered());
@@ -183,6 +261,139 @@ pub fn icon_button(ui: &mut Ui, icon: &str, size: f32, selected: bool) -> Respon
     resp
 }
 
+const KEY_TOP: Color32 = Color32::from_rgb(58, 69, 83);
+const KEY_BOTTOM: Color32 = Color32::from_rgb(35, 42, 51);
+const KEY_TOP_HOVER: Color32 = Color32::from_rgb(72, 84, 98);
+const KEY_BOTTOM_HOVER: Color32 = Color32::from_rgb(45, 54, 65);
+const KEY_TOP_ON: Color32 = Color32::from_rgb(31, 76, 114);
+const KEY_BOTTOM_ON: Color32 = Color32::from_rgb(21, 52, 82);
+const KEY_FG_ON: Color32 = Color32::from_rgb(125, 200, 255);
+/// The sunken trays that hold groups of keys.
+pub const WELL: Color32 = Color32::from_rgb(10, 13, 17);
+
+/// Paints the raised body of a key filling `resp.rect` (less a margin for
+/// its shadow), lifted under the pointer and sunk while pressed; returns
+/// the body's rect and the colour for what goes on it.
+pub fn key_face(ui: &Ui, resp: &Response, radius: f32, selected: bool) -> (Rect, Color32) {
+    key_face_kind(ui, resp, radius, selected, Kind::Secondary)
+}
+
+/// [`key_face`] for a button of `kind`: Primary is an accent key, Danger
+/// has red text.
+pub fn key_face_kind(
+    ui: &Ui,
+    resp: &Response,
+    radius: f32,
+    selected: bool,
+    kind: Kind,
+) -> (Rect, Color32) {
+    if kind == Kind::Primary {
+        let t = anim(ui, resp.id, resp.hovered());
+        let down = resp.is_pointer_button_down_on();
+        let dy = if down { 0.5 } else { -1.5 * t };
+        let rect = resp.rect.shrink(3.0).translate(Vec2::new(0.0, dy));
+        let look = super::depth::Raised {
+            top: mix(
+                Color32::from_rgb(92, 190, 255),
+                Color32::from_rgb(128, 208, 255),
+                t,
+            ),
+            bottom: mix(
+                Color32::from_rgb(16, 112, 196),
+                Color32::from_rgb(24, 132, 224),
+                t,
+            ),
+            light: Color32::from_white_alpha(130),
+            lift: if down { 0.2 } else { 0.7 + 0.5 * t },
+            glow: Some(theme::ACCENT.gamma_multiply(0.3 + 0.2 * t)),
+        };
+        super::depth::raised(ui.painter(), rect, radius.min(rect.height() / 2.0), look);
+        return (rect, Color32::WHITE);
+    }
+    let t = anim(ui, resp.id, resp.hovered());
+    let s = anim(ui, resp.id.with("sel"), selected);
+    let down = resp.is_pointer_button_down_on();
+    let dy = if down { 0.5 } else { -1.5 * t };
+    let rect = resp.rect.shrink(3.0).translate(Vec2::new(0.0, dy));
+    let shade = |c: Color32| {
+        if down {
+            mix(c, Color32::BLACK, 0.15)
+        } else {
+            c
+        }
+    };
+    let look = super::depth::Raised {
+        top: shade(mix(mix(KEY_TOP, KEY_TOP_HOVER, t), KEY_TOP_ON, s)),
+        bottom: shade(mix(mix(KEY_BOTTOM, KEY_BOTTOM_HOVER, t), KEY_BOTTOM_ON, s)),
+        light: mix(
+            Color32::from_white_alpha((70.0 + 30.0 * t) as u8),
+            KEY_FG_ON.gamma_multiply(0.4),
+            s,
+        ),
+        lift: if down { 0.2 } else { 0.6 + 0.6 * t },
+        glow: (s > 0.0).then(|| theme::ACCENT.gamma_multiply(0.35 * s)),
+    };
+    super::depth::raised(ui.painter(), rect, radius.min(rect.height() / 2.0), look);
+    let fg = mix(mix(theme::TEXT, Color32::WHITE, t), KEY_FG_ON, s);
+    let fg = if kind == Kind::Danger {
+        theme::ERROR
+    } else {
+        fg
+    };
+    (rect, fg)
+}
+
+/// A raised round key, for the control bar. `selected` marks a toggle
+/// that is on.
+pub fn key(ui: &mut Ui, icon: &str, size: f32, selected: bool) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let (face, fg) = key_face(ui, &resp, size, selected);
+        ui.painter().text(
+            face.center(),
+            Align2::CENTER_CENTER,
+            icon,
+            theme::icon(size * 0.46),
+            fg,
+        );
+    }
+    resp
+}
+
+/// A raised pill key with a short label, for the control bar.
+pub fn pill_key(ui: &mut Ui, label: &str, selected: bool) -> Response {
+    let g = ui.painter().layout_no_wrap(
+        label.to_string(),
+        theme::font(Weight::SemiBold, 17.0),
+        Color32::WHITE,
+    );
+    let size = Vec2::new((g.size().x + 34.0).max(52.0), 46.0);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    if ui.is_rect_visible(rect) {
+        let (face, fg) = key_face(ui, &resp, size.y, selected);
+        ui.painter()
+            .galley_with_override_text_color(face.center() - g.size() / 2.0, g, fg);
+    }
+    resp
+}
+
+/// A sunken tray holding a group of keys on the control bar.
+pub fn well<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let slot = ui.painter().add(egui::Shape::Noop);
+    let inner = egui::Frame::new()
+        .inner_margin(egui::Margin::same(5))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            add(ui)
+        });
+    let r = inner.response.rect;
+    ui.painter().set(
+        slot,
+        egui::Shape::Vec(super::depth::sunken_shapes(r, r.height() / 2.0, WELL)),
+    );
+    inner.inner
+}
+
 /// A chip: a short choice in a row of choices (filters, formats, tabs).
 pub fn chip(ui: &mut Ui, label: &str, selected: bool) -> Response {
     chip_icon(ui, None, label, selected)
@@ -207,7 +418,24 @@ pub fn chip_icon(ui: &mut Ui, icon: Option<&str>, label: &str, selected: bool) -
     let content = text.size().x + icon_g.as_ref().map(|g| g.size().x + gap).unwrap_or(0.0);
     let (rect, resp) =
         ui.allocate_exact_size(Vec2::new((content + 32.0).max(h), h), Sense::click());
-    if ui.is_rect_visible(rect) {
+    if ui.is_rect_visible(rect) && dimensional(ui) {
+        let (face, fg) = key_face(ui, &resp, h / 2.0, selected);
+        let p = ui.painter();
+        let mut x = face.center().x - content / 2.0;
+        if let Some(g) = icon_g {
+            p.galley_with_override_text_color(
+                Pos2::new(x, face.center().y - g.size().y / 2.0),
+                g.clone(),
+                fg,
+            );
+            x += g.size().x + gap;
+        }
+        p.galley_with_override_text_color(
+            Pos2::new(x, face.center().y - text.size().y / 2.0),
+            text,
+            fg,
+        );
+    } else if ui.is_rect_visible(rect) {
         let t = anim(ui, resp.id, resp.hovered());
         let s = anim(ui, resp.id.with("sel"), selected);
         let bg = mix(mix(theme::SURFACE_2, theme::SURFACE_3, t), theme::TEXT, s);
@@ -240,7 +468,39 @@ pub fn switch(ui: &mut Ui, on: &mut bool) -> Response {
         *on = !*on;
         resp.mark_changed();
     }
-    if ui.is_rect_visible(rect) {
+    if ui.is_rect_visible(rect) && dimensional(ui) {
+        // A sunken slot that fills with the accent, a raised knob in it.
+        let h = anim(ui, resp.id, resp.hovered());
+        let t = anim(ui, resp.id.with("on"), *on);
+        let p = ui.painter();
+        super::depth::sunken(p, rect, 16.0, WELL);
+        if t > 0.0 {
+            let fill = rect.shrink(1.0);
+            p.rect_filled(
+                fill,
+                CornerRadius::same(15),
+                theme::ACCENT.gamma_multiply(t),
+            );
+            super::depth::fill_vgradient(
+                p,
+                fill,
+                15.0,
+                Color32::from_rgb(98, 196, 255).gamma_multiply(t),
+                Color32::from_rgb(22, 132, 226).gamma_multiply(t),
+            );
+            super::depth::edge(
+                p,
+                rect,
+                16.0,
+                4.0,
+                Color32::from_black_alpha(120),
+                super::depth::Side::Top,
+                false,
+            );
+        }
+        let x = egui::lerp((rect.left() + 16.0)..=(rect.right() - 16.0), t);
+        knob(p, Pos2::new(x, rect.center().y - h), 12.0 + h);
+    } else if ui.is_rect_visible(rect) {
         let h = anim(ui, resp.id, resp.hovered());
         let t = anim(ui, resp.id.with("on"), *on);
         let p = ui.painter();
@@ -280,6 +540,28 @@ pub fn section_label(ui: &mut Ui, text: &str) {
 
 /// A raised group of rows.
 pub fn card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    if dimensional(ui) {
+        let slot = ui.painter().add(egui::Shape::Noop);
+        let inner = egui::Frame::new()
+            .inner_margin(egui::Margin::symmetric(4, 4))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.spacing_mut().item_spacing.y = 0.0;
+                add(ui)
+            });
+        let look = super::depth::Raised {
+            top: Color32::from_rgb(30, 37, 47),
+            bottom: Color32::from_rgb(21, 26, 33),
+            light: Color32::from_white_alpha(26),
+            lift: 0.5,
+            glow: None,
+        };
+        ui.painter().set(
+            slot,
+            egui::Shape::Vec(super::depth::raised_shapes(inner.response.rect, 14.0, look)),
+        );
+        return inner.inner;
+    }
     egui::Frame::new()
         .fill(theme::SURFACE)
         .stroke(Stroke::new(1.0_f32, theme::STROKE))
@@ -313,13 +595,7 @@ impl Rows<'_> {
     ) -> R {
         let ui = &mut *self.ui;
         if self.n > 0 {
-            let x = ui.max_rect().x_range();
-            let y = ui.cursor().top();
-            ui.painter().hline(
-                (x.min + 16.0)..=(x.max - 16.0),
-                y,
-                Stroke::new(1.0_f32, theme::STROKE),
-            );
+            separator(ui);
         }
         self.n += 1;
         egui::Frame::new()
@@ -397,13 +673,7 @@ impl Rows<'_> {
     pub fn content<R>(&mut self, add: impl FnOnce(&mut Ui) -> R) -> R {
         let ui = &mut *self.ui;
         if self.n > 0 {
-            let x = ui.max_rect().x_range();
-            let y = ui.cursor().top();
-            ui.painter().hline(
-                (x.min + 16.0)..=(x.max - 16.0),
-                y,
-                Stroke::new(1.0_f32, theme::STROKE),
-            );
+            separator(ui);
         }
         self.n += 1;
         egui::Frame::new()
@@ -413,6 +683,28 @@ impl Rows<'_> {
                 add(ui)
             })
             .inner
+    }
+}
+
+/// The line between rows: a hairline, or a groove when dimensional.
+fn separator(ui: &Ui) {
+    let x = ui.max_rect().x_range();
+    let x = (x.min + 16.0)..=(x.max - 16.0);
+    let y = ui.cursor().top();
+    if dimensional(ui) {
+        ui.painter().hline(
+            x.clone(),
+            y - 0.5,
+            Stroke::new(1.0_f32, Color32::from_black_alpha(120)),
+        );
+        ui.painter().hline(
+            x,
+            y + 0.5,
+            Stroke::new(1.0_f32, Color32::from_white_alpha(12)),
+        );
+    } else {
+        ui.painter()
+            .hline(x, y, Stroke::new(1.0_f32, theme::STROKE));
     }
 }
 
@@ -488,25 +780,57 @@ pub fn slider(
             0.0
         };
         let x = egui::lerp(rail_x.clone(), f);
-        let h = 6.0 + t * 2.0;
+        let h = 7.0 + t * 2.0;
         let y = rect.center().y;
-        let p = ui.painter();
-        let round = CornerRadius::same((h / 2.0) as u8);
-        p.rect_filled(
-            Rect::from_x_y_ranges(rail_x.clone(), (y - h / 2.0)..=(y + h / 2.0)),
-            round,
-            theme::SURFACE_3,
-        );
-        p.rect_filled(
-            Rect::from_x_y_ranges(*rail_x.start()..=x, (y - h / 2.0)..=(y + h / 2.0)),
-            round,
-            theme::ACCENT,
-        );
-        let r = 9.0 + t * 2.0;
-        p.circle_filled(Pos2::new(x, y + 1.5), r, Color32::from_black_alpha(90));
-        p.circle_filled(Pos2::new(x, y), r, Color32::WHITE);
+        let rail = Rect::from_x_y_ranges(rail_x.clone(), (y - h / 2.0)..=(y + h / 2.0));
+        let done = Rect::from_x_y_ranges(*rail_x.start()..=x, rail.y_range());
+        super::depth::sunken(ui.painter(), rail, h / 2.0, WELL);
+        rail_fill(ui.painter(), rail, done);
+        knob(ui.painter(), Pos2::new(x, y), 9.0 + t * 2.0);
     }
     resp
+}
+
+/// The accent fill over the `done` part of a sunken rail (seek bar,
+/// sliders), glowing a little.
+pub fn rail_fill(p: &egui::Painter, rail: Rect, done: Rect) {
+    let r = rail.height() / 2.0;
+    if done.width() > 0.5 {
+        let done = done.intersect(rail);
+        p.add(
+            egui::epaint::Shadow {
+                offset: [0, 0],
+                blur: 10,
+                spread: 0,
+                color: theme::ACCENT.gamma_multiply(0.3),
+            }
+            .as_shape(done, CornerRadius::same(r as u8)),
+        );
+        p.rect_filled(done, CornerRadius::same(r as u8), theme::ACCENT);
+        super::depth::fill_vgradient(
+            p,
+            done,
+            r,
+            Color32::from_rgb(98, 196, 255),
+            Color32::from_rgb(22, 132, 226),
+        );
+    }
+}
+
+/// The white knob on a rail: a raised disc of radius `r` at `c`.
+pub fn knob(p: &egui::Painter, c: Pos2, r: f32) {
+    super::depth::raised(
+        p,
+        Rect::from_center_size(c, Vec2::splat(r * 2.0)),
+        r,
+        super::depth::Raised {
+            top: Color32::WHITE,
+            bottom: Color32::from_rgb(208, 215, 224),
+            light: Color32::WHITE,
+            lift: 0.8,
+            glow: None,
+        },
+    );
 }
 
 /// A row of equal segments, each an icon over a label, one selected;
@@ -514,8 +838,13 @@ pub fn slider(
 pub fn segmented(ui: &mut Ui, items: &[(&str, &str)], selected: usize) -> Option<usize> {
     let h = 66.0;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::hover());
-    ui.painter()
-        .rect_filled(rect, CornerRadius::same(16), theme::SURFACE);
+    let dim = dimensional(ui);
+    if dim {
+        super::depth::sunken(ui.painter(), rect, 16.0, WELL);
+    } else {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(16), theme::SURFACE);
+    }
     let n = items.len().max(1) as f32;
     let w = (rect.width() - 8.0) / n;
     let mut clicked = None;
@@ -528,8 +857,30 @@ pub fn segmented(ui: &mut Ui, items: &[(&str, &str)], selected: usize) -> Option
         let t = anim(ui, resp.id, resp.hovered());
         let s = anim(ui, resp.id.with("sel"), i == selected);
         let p = ui.painter();
-        let bg = Color32::from_white_alpha((t * 10.0) as u8).lerp_to_gamma(theme::SURFACE_3, s);
-        p.rect_filled(seg, CornerRadius::same(12), bg);
+        if dim {
+            // The chosen tab is a raised key in the tray; the others rise
+            // a little under the pointer.
+            let lift = (t * (1.0 - s)).max(s);
+            if lift > 0.01 {
+                let down = resp.is_pointer_button_down_on();
+                let face = seg.shrink(2.0).translate(Vec2::new(0.0, -t * (1.0 - s)));
+                super::depth::raised(
+                    p,
+                    face,
+                    11.0,
+                    super::depth::Raised {
+                        top: mix(KEY_TOP, KEY_TOP_HOVER, t).gamma_multiply(lift),
+                        bottom: mix(KEY_BOTTOM, KEY_BOTTOM_HOVER, t).gamma_multiply(lift),
+                        light: Color32::from_white_alpha((60.0 * lift) as u8),
+                        lift: if down { 0.2 } else { 0.7 * lift },
+                        glow: None,
+                    },
+                );
+            }
+        } else {
+            let bg = Color32::from_white_alpha((t * 10.0) as u8).lerp_to_gamma(theme::SURFACE_3, s);
+            p.rect_filled(seg, CornerRadius::same(12), bg);
+        }
         let fg = mix(mix(theme::TEXT_2, theme::TEXT, t), Color32::WHITE, s);
         p.text(
             seg.center() - Vec2::new(0.0, 10.0),
@@ -568,12 +919,22 @@ pub fn nav_tab(ui: &mut Ui, icon: &str, label: &str, selected: bool) -> Response
     if ui.is_rect_visible(rect) {
         let t = anim(ui, resp.id, resp.hovered());
         let s = anim(ui, resp.id.with("sel"), selected);
+        let dim = dimensional(ui);
         let p = ui.painter();
-        p.rect_filled(
-            rect,
-            CornerRadius::same(12),
-            Color32::from_white_alpha((t * 12.0) as u8),
-        );
+        let mut rect = rect;
+        if dim {
+            // The chosen tab is a raised key; others rise under the pointer.
+            if selected || t > 0.01 {
+                let (face, _) = key_face(ui, &resp, 12.0, false);
+                rect = face;
+            }
+        } else {
+            p.rect_filled(
+                rect,
+                CornerRadius::same(12),
+                Color32::from_white_alpha((t * 12.0) as u8),
+            );
+        }
         let fg = mix(mix(theme::TEXT_2, theme::TEXT, t), Color32::WHITE, s);
         let mut x = rect.center().x - content / 2.0;
         p.galley_with_override_text_color(
@@ -587,7 +948,7 @@ pub fn nav_tab(ui: &mut Ui, icon: &str, label: &str, selected: bool) -> Response
             text,
             fg,
         );
-        if s > 0.0 {
+        if s > 0.0 && !dim {
             let w = content * s;
             let bar = Rect::from_center_size(
                 Pos2::new(rect.center().x, rect.bottom() - 2.0),

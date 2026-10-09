@@ -2,7 +2,7 @@
 
 use super::theme::Weight;
 use super::widgets::{Kind, Tip};
-use super::{Action, View, fmt_time, icons, premium, theme, widgets};
+use super::{Action, View, depth, fmt_time, icons, premium, theme, widgets};
 use egui::{Align, Color32, Layout, RichText, Sense, Vec2};
 use fp_core::format::{Projection, StereoLayout, VideoFormat};
 use fp_core::view::ViewSettings;
@@ -53,10 +53,11 @@ pub fn format_choices() -> Vec<(&'static str, VideoFormat)> {
 /// groups of controls (browse and sound left, transport centred, view
 /// right).
 pub fn control_bar(ctx: &egui::Context, v: &mut View) {
+    // The bar floats in its panel: the outer margin leaves room for its
+    // shadow on the video.
+    widgets::panel_slab(ctx, 28.0);
     let frame = egui::Frame::new()
-        .fill(theme::BG)
-        .stroke(egui::Stroke::new(1.0_f32, theme::STROKE))
-        .corner_radius(28)
+        .outer_margin(widgets::SHADOW_ROOM)
         .inner_margin(egui::Margin::symmetric(28, 18));
     egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
         let Some(pb) = v.playback.as_deref_mut() else {
@@ -155,46 +156,47 @@ pub fn control_bar(ctx: &egui::Context, v: &mut View) {
                 .max_rect(row)
                 .layout(Layout::left_to_right(Align::Center)),
         );
-        left.spacing_mut().item_spacing.x = 8.0;
-        if widgets::icon_button(&mut left, icons::SQUARES_FOUR, 52.0, false)
-            .tip("Library")
-            .clicked()
-        {
-            v.actions.push(Action::ShowBrowser(true));
-        }
-        let speed = pb.player.speed();
-        if widgets::chip(&mut left, &fmt_speed(speed), (speed - 1.0).abs() > 1e-3)
-            .tip("Speed")
-            .clicked()
-        {
-            v.actions.push(Action::SetSpeed(next_speed(speed)));
-        }
-        left.add_space(4.0);
-        let vol = pb.player.volume();
-        let speaker = if vol <= 0.001 {
-            icons::SPEAKER_X
-        } else if vol < 0.5 {
-            icons::SPEAKER_LOW
-        } else {
-            icons::SPEAKER_HIGH
-        };
-        if widgets::icon_button(&mut left, speaker, 48.0, false)
-            .tip(if vol <= 0.001 { "Unmute" } else { "Mute" })
-            .clicked()
-        {
-            if vol <= 0.001 {
-                v.actions.push(Action::SetVolume(
-                    v.state.unmute_volume.take().unwrap_or(1.0),
-                ));
-            } else {
-                v.state.unmute_volume = Some(vol);
-                v.actions.push(Action::SetVolume(0.0));
+        widgets::well(&mut left, |ui| {
+            if widgets::key(ui, icons::SQUARES_FOUR, 52.0, false)
+                .tip("Library")
+                .clicked()
+            {
+                v.actions.push(Action::ShowBrowser(true));
             }
-        }
-        let mut vol_edit = vol;
-        if widgets::slider(&mut left, &mut vol_edit, 0.0..=1.5, 130.0).changed() {
-            v.actions.push(Action::SetVolume(vol_edit));
-        }
+            let speed = pb.player.speed();
+            if widgets::pill_key(ui, &fmt_speed(speed), (speed - 1.0).abs() > 1e-3)
+                .tip("Speed")
+                .clicked()
+            {
+                v.actions.push(Action::SetSpeed(next_speed(speed)));
+            }
+            let vol = pb.player.volume();
+            let speaker = if vol <= 0.001 {
+                icons::SPEAKER_X
+            } else if vol < 0.5 {
+                icons::SPEAKER_LOW
+            } else {
+                icons::SPEAKER_HIGH
+            };
+            if widgets::key(ui, speaker, 52.0, false)
+                .tip(if vol <= 0.001 { "Unmute" } else { "Mute" })
+                .clicked()
+            {
+                if vol <= 0.001 {
+                    v.actions.push(Action::SetVolume(
+                        v.state.unmute_volume.take().unwrap_or(1.0),
+                    ));
+                } else {
+                    v.state.unmute_volume = Some(vol);
+                    v.actions.push(Action::SetVolume(0.0));
+                }
+            }
+            let mut vol_edit = vol;
+            if widgets::slider(ui, &mut vol_edit, 0.0..=1.5, 130.0).changed() {
+                v.actions.push(Action::SetVolume(vol_edit));
+            }
+            ui.add_space(6.0);
+        });
 
         let centre_w = 56.0 + 16.0 + 72.0 + 16.0 + 56.0;
         let centre = egui::Rect::from_center_size(row.center(), Vec2::new(centre_w, row.height()));
@@ -222,49 +224,47 @@ pub fn control_bar(ctx: &egui::Context, v: &mut View) {
                 .max_rect(row)
                 .layout(Layout::right_to_left(Align::Center)),
         );
-        right.spacing_mut().item_spacing.x = 8.0;
-        if widgets::icon_button(&mut right, icons::X, 52.0, false)
-            .tip("Close")
-            .clicked()
-        {
-            v.actions.push(Action::ClosePlayback);
-        }
-        if widgets::icon_button(&mut right, icons::EYE_SLASH, 52.0, false)
-            .tip("Hide")
-            .clicked()
-        {
-            v.actions.push(Action::HideControls);
-        }
-        if v.passthrough_available
-            && widgets::icon_button(&mut right, icons::EYEGLASSES, 52.0, v.settings.passthrough)
-                .tip("Passthrough")
+        widgets::well(&mut right, |ui| {
+            if widgets::key(ui, icons::X, 52.0, false)
+                .tip("Close")
                 .clicked()
-        {
-            v.actions.push(Action::TogglePassthrough);
-        }
-        if widgets::icon_button(&mut right, icons::CROSSHAIR, 52.0, false)
-            .tip("Recenter")
-            .clicked()
-        {
-            v.actions.push(Action::Recenter);
-        }
-        if widgets::icon_button(&mut right, icons::BOOKMARK_SIMPLE, 52.0, false)
-            .tip("Bookmark")
-            .clicked()
-        {
-            v.actions.push(Action::AddBookmark);
-        }
-        if widgets::icon_button(
-            &mut right,
-            icons::SLIDERS_HORIZONTAL,
-            52.0,
-            v.state.adjust_open,
-        )
-        .tip("Adjust")
-        .clicked()
-        {
-            v.state.adjust_open = !v.state.adjust_open;
-        }
+            {
+                v.actions.push(Action::ClosePlayback);
+            }
+            if widgets::key(ui, icons::EYE_SLASH, 52.0, false)
+                .tip("Hide")
+                .clicked()
+            {
+                v.actions.push(Action::HideControls);
+            }
+            // Your room only shows around flat videos.
+            if v.passthrough_available
+                && pb.format.projection == Projection::Flat
+                && widgets::key(ui, icons::ARMCHAIR, 52.0, v.settings.passthrough)
+                    .tip("Room")
+                    .clicked()
+            {
+                v.actions.push(Action::TogglePassthrough);
+            }
+            if widgets::key(ui, icons::CROSSHAIR, 52.0, false)
+                .tip("Recenter")
+                .clicked()
+            {
+                v.actions.push(Action::Recenter);
+            }
+            if widgets::key(ui, icons::BOOKMARK_SIMPLE, 52.0, false)
+                .tip("Bookmark")
+                .clicked()
+            {
+                v.actions.push(Action::AddBookmark);
+            }
+            if widgets::key(ui, icons::SLIDERS_HORIZONTAL, 52.0, v.state.adjust_open)
+                .tip("Adjust")
+                .clicked()
+            {
+                v.state.adjust_open = !v.state.adjust_open;
+            }
+        });
     });
 }
 
@@ -284,7 +284,7 @@ fn fmt_speed(speed: f64) -> String {
     format!("{}×", s.trim_end_matches('0').trim_end_matches('.'))
 }
 
-/// A quiet pill naming the video's format.
+/// A small raised pill naming the video's format.
 fn format_pill(ui: &mut egui::Ui, text: &str) -> egui::Response {
     let g = ui.painter().layout_no_wrap(
         text.to_string(),
@@ -295,19 +295,25 @@ fn format_pill(ui: &mut egui::Ui, text: &str) -> egui::Response {
     let t = ui
         .ctx()
         .animate_bool_with_time(resp.id, resp.hovered(), 0.12);
-    let bg = if t > 0.5 {
-        theme::SURFACE_3
-    } else {
-        theme::SURFACE_2
-    };
-    let fg = if t > 0.5 { theme::TEXT } else { theme::TEXT_2 };
-    ui.painter()
-        .rect_filled(rect, egui::CornerRadius::same(8), bg);
+    depth::raised(
+        ui.painter(),
+        rect,
+        8.0,
+        depth::Raised {
+            top: Color32::from_rgb(46, 54, 65).lerp_to_gamma(Color32::from_rgb(62, 72, 86), t),
+            bottom: Color32::from_rgb(33, 40, 49).lerp_to_gamma(Color32::from_rgb(44, 52, 63), t),
+            light: Color32::from_white_alpha(26),
+            lift: 0.3,
+            glow: None,
+        },
+    );
+    let fg = theme::TEXT_2.lerp_to_gamma(theme::TEXT, t);
     ui.painter().galley(rect.center() - g.size() / 2.0, g, fg);
     resp
 }
 
-/// The big round play / pause button.
+/// The big round play / pause button: a glossy accent dome that glows on
+/// the bar.
 fn play_button(ui: &mut egui::Ui, paused: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(Vec2::splat(72.0), Sense::click());
     if ui.is_rect_visible(rect) {
@@ -315,50 +321,59 @@ fn play_button(ui: &mut egui::Ui, paused: bool) -> egui::Response {
             .ctx()
             .animate_bool_with_time(resp.id, resp.hovered(), 0.12);
         let down = resp.is_pointer_button_down_on();
-        let p = ui.painter();
-        let r = 36.0 + t * 2.0 - if down { 2.0 } else { 0.0 };
-        widgets::shadow(
-            p,
-            egui::Rect::from_center_size(rect.center(), Vec2::splat(r * 2.0)),
-            (r) as u8,
-            0.6,
-        );
-        p.circle_filled(
-            rect.center(),
+        let r = 34.0 + t * 2.0 - if down { 2.0 } else { 0.0 };
+        let c = rect.center() + Vec2::new(0.0, if down { 0.5 } else { -t });
+        let dome = egui::Rect::from_center_size(c, Vec2::splat(r * 2.0));
+        let lit = |a: Color32, b: Color32| a.lerp_to_gamma(b, t);
+        depth::raised(
+            ui.painter(),
+            dome,
             r,
-            theme::TEXT.lerp_to_gamma(Color32::WHITE, t),
+            depth::Raised {
+                top: lit(
+                    Color32::from_rgb(104, 198, 255),
+                    Color32::from_rgb(140, 214, 255),
+                ),
+                bottom: lit(
+                    Color32::from_rgb(14, 106, 190),
+                    Color32::from_rgb(22, 128, 222),
+                ),
+                light: Color32::from_white_alpha(150),
+                lift: if down { 0.3 } else { 0.9 },
+                glow: Some(theme::ACCENT.gamma_multiply(0.45 + 0.25 * t)),
+            },
         );
         if paused {
-            widgets::play_mark(p, rect.center(), 30.0, theme::BG);
+            widgets::play_mark(ui.painter(), c, 28.0, Color32::WHITE);
         } else {
-            widgets::pause_mark(p, rect.center(), 28.0, theme::BG);
+            widgets::pause_mark(ui.painter(), c, 26.0, Color32::WHITE);
         }
     }
     resp
 }
 
-/// Seek back or forward by `secs`: a circular arrow with the seconds in it.
+/// Seek back or forward by `secs`: a raised key with a circular arrow and
+/// the seconds in it.
 fn skip_button(ui: &mut egui::Ui, secs: f64) -> egui::Response {
     let icon = if secs < 0.0 {
         icons::ARROW_COUNTER_CLOCKWISE
     } else {
         icons::ARROW_CLOCKWISE
     };
-    let resp = widgets::icon_button(ui, "", 56.0, false);
-    let c = resp.rect.center();
-    let t = ui
-        .ctx()
-        .animate_bool_with_time(resp.id, resp.hovered(), 0.12);
-    let fg = theme::TEXT.lerp_to_gamma(Color32::WHITE, t);
-    let p = ui.painter();
-    p.text(c, egui::Align2::CENTER_CENTER, icon, theme::icon(36.0), fg);
-    p.text(
-        c + Vec2::new(0.0, 1.0),
-        egui::Align2::CENTER_CENTER,
-        format!("{}", secs.abs().round() as i64),
-        theme::font(Weight::Bold, 11.0),
-        fg,
-    );
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(56.0), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let (face, fg) = widgets::key_face(ui, &resp, 56.0, false);
+        let c = face.center();
+        let p = ui.painter();
+        p.text(c, egui::Align2::CENTER_CENTER, icon, theme::icon(32.0), fg);
+        p.text(
+            c + Vec2::new(0.0, 1.0),
+            egui::Align2::CENTER_CENTER,
+            format!("{}", secs.abs().round() as i64),
+            theme::font(Weight::Bold, 10.0),
+            fg,
+        );
+    }
     resp
 }
 
@@ -374,10 +389,10 @@ fn seek_bar(
     let active = resp.hovered() || resp.dragged();
     let t = ui.ctx().animate_bool_with_time(resp.id, active, 0.12);
     let painter = ui.painter();
-    let h = 6.0 + t * 4.0;
+    let h = 8.0 + t * 4.0;
     let track = egui::Rect::from_center_size(rect.center(), Vec2::new(rect.width(), h));
     let round = egui::CornerRadius::same((h / 2.0) as u8);
-    painter.rect_filled(track, round, theme::SURFACE_3);
+    depth::sunken(painter, track, h / 2.0, widgets::WELL);
     // Haptic heatmap just above the track.
     if let Some(hm) = &pb.heatmap {
         let n = hm.colors.len().max(1) as f32;
@@ -408,15 +423,13 @@ fn seek_bar(
         }
     }
     let done = egui::Rect::from_min_max(track.min, egui::pos2(to_x(frac), track.bottom()));
-    painter.rect_filled(done, round, theme::ACCENT);
+    widgets::rail_fill(painter, track, done);
     for (m, _) in &pb.markers {
         let x = to_x((*m / duration).clamp(0.0, 1.0) as f32);
         painter.circle_filled(egui::pos2(x, track.center().y), 3.0, theme::WARN);
     }
     let knob = egui::pos2(to_x(frac), track.center().y);
-    let r = 7.0 + t * 4.0;
-    painter.circle_filled(knob + Vec2::new(0.0, 1.5), r, Color32::from_black_alpha(90));
-    painter.circle_filled(knob, r, Color32::WHITE);
+    widgets::knob(painter, knob, 8.0 + t * 4.0);
 
     let to_time = |x: f32| ((x - track.left()) / track.width()).clamp(0.0, 1.0) as f64 * duration;
     if let Some(p) = resp.hover_pos().or(resp.interact_pointer_pos()) {
@@ -477,10 +490,9 @@ const TABS: [(&str, &str); 7] = [
 
 /// Format, view adjustments, tracks and haptics for the open video.
 pub fn adjust_panel(ctx: &egui::Context, v: &mut View) {
+    widgets::panel_slab(ctx, 28.0);
     let frame = egui::Frame::new()
-        .fill(theme::BG)
-        .stroke(egui::Stroke::new(1.0_f32, theme::STROKE))
-        .corner_radius(28)
+        .outer_margin(widgets::SHADOW_ROOM)
         .inner_margin(egui::Margin::same(22));
     egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
         let Some(pb) = v.playback.as_deref_mut() else {

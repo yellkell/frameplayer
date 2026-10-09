@@ -67,7 +67,7 @@ impl ButtonAction {
             ButtonAction::ResetPicture => "Reset picture",
             ButtonAction::ShowHideControls => "Show / hide controls",
             ButtonAction::AdjustPanel => "Adjust panel",
-            ButtonAction::Passthrough => "Passthrough",
+            ButtonAction::Passthrough => "Show your room",
             ButtonAction::Recenter => "Recenter",
         }
     }
@@ -83,6 +83,7 @@ impl ButtonAction {
             ButtonAction::ResetPicture => "Reset view",
             ButtonAction::ShowHideControls => "Show/hide UI",
             ButtonAction::AdjustPanel => "Adjust",
+            ButtonAction::Passthrough => "Room",
             other => other.label(),
         }
     }

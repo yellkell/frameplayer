@@ -129,6 +129,7 @@ fn fonts() -> FontDefinitions {
 
 pub fn apply(ctx: &egui::Context) {
     ctx.set_fonts(fonts());
+    super::widgets::set_dimensional(ctx, true);
     let mut style = (*ctx.style()).clone();
     style.text_styles = [
         (TextStyle::Small, font(Weight::Regular, 15.0)),

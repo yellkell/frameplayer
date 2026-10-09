@@ -1,8 +1,8 @@
 //! A virtual keyboard panel for text fields (search, addresses, passwords).
 
-use super::icons;
 use super::theme::{self, Weight};
-use egui::{Align2, Color32, Event, Key, Modifiers, Sense, Vec2};
+use super::{icons, widgets};
+use egui::{Align2, Event, Key, Modifiers, Sense, Vec2};
 
 const ROWS: [&str; 4] = ["1234567890-", "qwertyuiop/", "asdfghjkl:_", "zxcvbnm.@?&"];
 const KEY_H: f32 = 60.0;
@@ -23,42 +23,21 @@ enum Style {
 
 /// One key; true when pressed. `label` may be an icon.
 fn key(ui: &mut egui::Ui, label: &str, w: f32, style: Style, icon: bool) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(w, KEY_H), Sense::click());
-    let t = ui
-        .ctx()
-        .animate_bool_with_time(resp.id, resp.hovered(), 0.08);
-    let down = resp.is_pointer_button_down_on();
-    let (bg, fg) = match style {
-        Style::Char => (
-            theme::SURFACE_2.lerp_to_gamma(theme::SURFACE_3, t),
-            theme::TEXT,
-        ),
-        Style::Function => (
-            theme::SURFACE.lerp_to_gamma(theme::SURFACE_2, t),
-            theme::TEXT_2.lerp_to_gamma(Color32::WHITE, t),
-        ),
-        Style::Action => (
-            theme::ACCENT.lerp_to_gamma(theme::ACCENT_HOVER, t),
-            Color32::WHITE,
-        ),
-        Style::On => (theme::TEXT, theme::BG),
-    };
-    let bg = if down {
-        bg.lerp_to_gamma(theme::ACCENT, 0.5)
+    let (_, resp) = ui.allocate_exact_size(Vec2::new(w, KEY_H), Sense::click());
+    // Raised keys: Enter is the accent, shift glows while it is on, and
+    // function keys keep a quieter label.
+    let kind = if style == Style::Action {
+        widgets::Kind::Primary
     } else {
-        bg
+        widgets::Kind::Secondary
+    };
+    let (face, fg) = widgets::key_face_kind(ui, &resp, 12.0, style == Style::On, kind);
+    let fg = if style == Style::Function {
+        fg.lerp_to_gamma(theme::TEXT_2, 0.5)
+    } else {
+        fg
     };
     let p = ui.painter();
-    let r = rect.expand(t * 1.0);
-    p.rect_filled(r, egui::CornerRadius::same(12), bg);
-    if t > 0.0 {
-        p.rect_stroke(
-            r,
-            egui::CornerRadius::same(12),
-            egui::Stroke::new(1.5_f32, Color32::from_white_alpha((t * 60.0) as u8)),
-            egui::StrokeKind::Outside,
-        );
-    }
     let font = if icon {
         theme::icon(26.0)
     } else if label.chars().count() > 1 {
@@ -66,7 +45,7 @@ fn key(ui: &mut egui::Ui, label: &str, w: f32, style: Style, icon: bool) -> bool
     } else {
         theme::font(Weight::Medium, 25.0)
     };
-    p.text(rect.center(), Align2::CENTER_CENTER, label, font, fg);
+    p.text(face.center(), Align2::CENTER_CENTER, label, font, fg);
     resp.clicked()
 }
 
@@ -75,10 +54,9 @@ fn key(ui: &mut egui::Ui, label: &str, w: f32, style: Style, icon: bool) -> bool
 pub fn keyboard(ctx: &egui::Context, shift: &mut bool) -> (Vec<Event>, bool) {
     let mut out = Vec::new();
     let mut close = false;
+    widgets::panel_slab(ctx, 24.0);
     let frame = egui::Frame::new()
-        .fill(theme::BG)
-        .stroke(egui::Stroke::new(1.0_f32, theme::STROKE))
-        .corner_radius(24)
+        .outer_margin(widgets::SHADOW_ROOM)
         .inner_margin(egui::Margin::same(14));
     egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
         ui.spacing_mut().item_spacing = Vec2::new(GAP, GAP);

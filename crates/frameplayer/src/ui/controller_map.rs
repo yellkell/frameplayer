@@ -1,9 +1,11 @@
-//! Settings > Controller: both Frame controllers drawn face-on, every
-//! remappable button glowing, a label beside each saying what it does.
-//! Pointing at a button and pulling the trigger opens its choices below.
+//! Settings > Controller: both Frame controllers face-on, every remappable
+//! button glowing, a label beside each saying what it does. Pointing at a
+//! button and pulling the trigger opens its choices below.
 //!
-//! The drawing is our own, laid out from the Frame controller models
-//! (part centres measured face-on, in units of the round head's radius).
+//! The pictures are Blender renders of Valve's controller models as SteamVR
+//! ships them (assets/controllers, credited in packaging/licenses). Part
+//! centres come from the same renders, in units of the round head's radius
+//! from its centre.
 
 use super::theme::{self, Weight};
 use super::widgets;
@@ -12,17 +14,30 @@ use crate::bindings::{Axis, AxisAction, Button, ButtonAction, HandBindings, LEFT
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2};
 use std::time::Duration;
 
-const BODY: Color32 = Color32::from_rgb(52, 60, 72);
-const BODY_EDGE: Color32 = Color32::from_rgb(74, 84, 99);
-const KEY: Color32 = Color32::from_rgb(30, 35, 43);
+/// The bumper band's colour: the controllers' light grey.
+const KEY: Color32 = Color32::from_rgb(168, 172, 178);
+/// The head's top edge in each render, measured every 5° from 120° to 60°
+/// above the head's centre (head radii from it): the bumper band follows
+/// it, over the bumper's real width.
+const RIM: [[f32; 13]; 2] = [
+    [
+        1.044, 1.048, 1.05, 1.052, 1.054, 1.056, 1.056, 1.056, 1.058, 1.054, 1.056, 1.056, 1.054,
+    ],
+    [
+        1.058, 1.06, 1.062, 1.064, 1.066, 1.064, 1.064, 1.064, 1.062, 1.062, 1.058, 1.056, 1.054,
+    ],
+];
+/// How thick the bumper band is, and where its top is (head radii).
+const BUMPER_W: f32 = 0.075;
+const BUMPER_TOP: f32 = 1.056 + BUMPER_W;
 const LABEL_W: f32 = 170.0;
 const GAP: f32 = 14.0;
 
 /// A remappable place on the drawing.
 #[derive(Clone, Copy)]
 enum Spot {
-    /// A round button: centre and radius (head radii), its letter.
-    Round(f32, f32, f32, Button, &'static str),
+    /// A round button: centre and radius (head radii).
+    Round(f32, f32, f32, Button),
     /// Menu / View: a small pill.
     Pill(f32, f32, Button),
     /// One arm of the D-pad (its centre).
@@ -31,37 +46,74 @@ enum Spot {
     Bumper,
 }
 
-/// Right controller; the left is its mirror image with a D-pad for A/B/X/Y.
+/// The D-pad's centre and how far each arm's centre is from it.
+const DPAD: (f32, f32, f32) = (-0.427, -0.094, 0.235);
+
+/// The right controller has A/B/X/Y, the left a D-pad in their place.
 fn spots(hand: usize) -> Vec<Spot> {
     if hand == RIGHT {
         vec![
             Spot::Bumper,
-            Spot::Pill(-0.05, -0.32, Button::Menu),
-            Spot::Round(0.39, -0.25, 0.13, Button::North, "Y"),
-            Spot::Round(0.17, 0.01, 0.13, Button::West, "X"),
-            Spot::Round(0.66, -0.03, 0.13, Button::East, "B"),
-            Spot::Round(0.44, 0.23, 0.13, Button::South, "A"),
-            Spot::Stick(-0.33, 0.26),
+            Spot::Pill(-0.065, -0.384, Button::Menu),
+            Spot::Round(0.378, -0.352, 0.132, Button::North),
+            Spot::Round(0.180, -0.072, 0.132, Button::West),
+            Spot::Round(0.659, -0.155, 0.132, Button::East),
+            Spot::Round(0.461, 0.126, 0.132, Button::South),
+            Spot::Stick(-0.288, 0.222),
         ]
     } else {
-        let (cx, cy, d) = (-0.42, -0.01, 0.235);
+        let (cx, cy, d) = DPAD;
         vec![
             Spot::Bumper,
-            Spot::Pill(0.05, -0.32, Button::Menu),
+            Spot::Pill(0.068, -0.377, Button::Menu),
             Spot::Arm(cx, cy - d, Button::North),
             Spot::Arm(cx - d, cy, Button::West),
             Spot::Arm(cx + d, cy, Button::East),
             Spot::Arm(cx, cy + d, Button::South),
-            Spot::Stick(0.33, 0.26),
+            Spot::Stick(0.300, 0.226),
         ]
     }
+}
+
+/// Where each render sits around the head, in head radii from its centre:
+/// left, top, right, bottom.
+fn picture_rect(hand: usize) -> [f32; 4] {
+    if hand == RIGHT {
+        [-1.028, -1.096, 1.033, 2.452]
+    } else {
+        [-1.029, -1.088, 1.033, 2.511]
+    }
+}
+
+/// The controller's picture, loaded into `ctx` on first use.
+fn picture(ctx: &egui::Context, hand: usize) -> Option<egui::TextureHandle> {
+    let id = egui::Id::new(("controller-picture", hand));
+    if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return Some(t);
+    }
+    let bytes: &[u8] = if hand == RIGHT {
+        include_bytes!("../../assets/controllers/right.png")
+    } else {
+        include_bytes!("../../assets/controllers/left.png")
+    };
+    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let size = [img.width() as usize, img.height() as usize];
+    let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
+    let name = if hand == RIGHT {
+        "right-controller"
+    } else {
+        "left-controller"
+    };
+    let t = ctx.load_texture(name, color, egui::TextureOptions::LINEAR);
+    ctx.data_mut(|d| d.insert_temp(id, t.clone()));
+    Some(t)
 }
 
 impl Spot {
     /// Which binding the spot opens.
     fn slot(self, hand: usize) -> RemapSlot {
         match self {
-            Spot::Round(.., b, _) | Spot::Pill(_, _, b) | Spot::Arm(_, _, b) => {
+            Spot::Round(.., b) | Spot::Pill(_, _, b) | Spot::Arm(_, _, b) => {
                 RemapSlot::Button(hand, b)
             }
             Spot::Stick(..) => RemapSlot::Axis(hand, Axis::StickX),
@@ -78,20 +130,30 @@ impl Spot {
         }
     }
 
-    fn centre(self, hand: usize) -> (f32, f32) {
+    fn centre(self) -> (f32, f32) {
         match self {
             Spot::Round(x, y, ..)
             | Spot::Pill(x, y, _)
             | Spot::Arm(x, y, _)
             | Spot::Stick(x, y) => (x, y),
-            Spot::Bumper => (if hand == RIGHT { 0.05 } else { -0.05 }, -1.12),
+            Spot::Bumper => (0.0, -BUMPER_TOP),
+        }
+    }
+
+    /// Which label column the spot's label goes in: negative is left. The
+    /// bumper's goes on the controller's outer side.
+    fn side(self, hand: usize) -> f32 {
+        match self {
+            Spot::Bumper if hand == RIGHT => 1.0,
+            Spot::Bumper => -1.0,
+            _ => self.centre().0,
         }
     }
 
     /// What the label beside the spot says.
     fn lines(self, map: &HandBindings) -> Vec<String> {
         match self {
-            Spot::Round(.., b, _) | Spot::Pill(_, _, b) | Spot::Arm(_, _, b) => {
+            Spot::Round(.., b) | Spot::Pill(_, _, b) | Spot::Arm(_, _, b) => {
                 vec![map.button(b).short_label().to_string()]
             }
             Spot::Bumper => vec![map.button(Button::Shoulder).short_label().to_string()],
@@ -137,7 +199,7 @@ pub fn controller_map(ui: &mut egui::Ui, v: &mut View) {
         let map = v.settings.controls.hand(hand);
         let mut w = [0.0_f32; 2];
         for spot in spots(hand) {
-            let col = (spot.centre(hand).0 >= 0.0) as usize;
+            let col = (spot.side(hand) >= 0.0) as usize;
             w[col] = w[col].max(label_width(ui, &spot.lines(map)));
         }
         w
@@ -147,7 +209,7 @@ pub fn controller_map(ui: &mut egui::Ui, v: &mut View) {
         .map(|w| (each - w[0] - w[1] - 2.0 * GAP) / 2.0)
         .fold(f32::MAX, f32::min)
         .clamp(54.0, 125.0);
-    let h = r * 3.95 + 64.0;
+    let h = r * 3.6 + 64.0;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(avail, h), Sense::hover());
     let t = ui.input(|i| i.time) as f32;
     for (i, hand) in [LEFT, RIGHT].into_iter().enumerate() {
@@ -160,13 +222,10 @@ pub fn controller_map(ui: &mut egui::Ui, v: &mut View) {
         } else {
             (lo + hi) / 2.0
         };
-        let centre = Pos2::new(cx, rect.top() + 30.0 + r * 1.45);
+        let centre = Pos2::new(cx, rect.top() + 20.0 + r * 1.12);
         draw_hand(ui, v, hand, centre, r, t);
         ui.painter().text(
-            Pos2::new(
-                centre.x + if hand == RIGHT { 0.27 } else { -0.27 } * r,
-                rect.bottom(),
-            ),
+            Pos2::new(centre.x, rect.bottom()),
             Align2::CENTER_BOTTOM,
             if hand == RIGHT { "Right" } else { "Left" },
             theme::font(Weight::SemiBold, 16.0),
@@ -181,52 +240,16 @@ pub fn controller_map(ui: &mut egui::Ui, v: &mut View) {
 }
 
 fn draw_hand(ui: &mut egui::Ui, v: &mut View, hand: usize, c: Pos2, r: f32, t: f32) {
-    let side = if hand == RIGHT { 1.0 } else { -1.0 };
     let at = |x: f32, y: f32| Pos2::new(c.x + x * r, c.y + y * r);
     let p = ui.painter().clone();
 
-    // Body: the round head and the handle under it, outlined as one shape.
-    let handle = Rect::from_min_max(at(side * 0.27 - 0.45, 0.4), at(side * 0.27 + 0.45, 2.5));
-    let round = CornerRadius::same((0.45 * r) as u8);
-    p.circle_filled(c, r + 2.0, BODY_EDGE);
-    p.rect_filled(handle.expand(2.0), round, BODY_EDGE);
-    p.rect_filled(handle, round, BODY);
-    p.circle_filled(c, r, BODY);
-    // A soft highlight on the head.
-    let mut glow = egui::Mesh::default();
-    glow.colored_vertex(at(-0.2, -0.3), Color32::from_white_alpha(18));
-    for k in 0..=40 {
-        let a = k as f32 / 40.0 * std::f32::consts::TAU;
-        glow.colored_vertex(c + Vec2::angled(a) * r, Color32::TRANSPARENT);
-    }
-    for k in 1..=40 {
-        glow.add_triangle(0, k, k + 1);
-    }
-    p.add(Shape::mesh(glow));
-    // Grip button on the handle's inner side, and the system button: not
-    // remappable, drawn quietly.
-    let grip = Rect::from_center_size(
-        at(side * 0.27 - side * 0.5, 1.15),
-        Vec2::new(0.12 * r, 0.34 * r),
-    );
-    p.rect_filled(grip, CornerRadius::same(4), BODY_EDGE);
-    p.circle_stroke(
-        at(side * 0.16, 0.58),
-        0.12 * r,
-        Stroke::new(1.5_f32, BODY_EDGE),
-    );
-    if hand == LEFT {
-        // The D-pad's cross, under its arm hotspots.
-        let (cx, cy, d, w) = (-0.42, -0.01, 0.235, 0.21);
-        p.rect_filled(
-            Rect::from_center_size(at(cx, cy), Vec2::new((2.0 * d + w) * r, w * r)),
-            CornerRadius::same(6),
-            KEY,
-        );
-        p.rect_filled(
-            Rect::from_center_size(at(cx, cy), Vec2::new(w * r, (2.0 * d + w) * r)),
-            CornerRadius::same(6),
-            KEY,
+    if let Some(tex) = picture(ui.ctx(), hand) {
+        let [l, t_, rr, b] = picture_rect(hand);
+        p.image(
+            tex.id(),
+            Rect::from_min_max(at(l, t_), at(rr, b)),
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+            Color32::WHITE,
         );
     }
 
@@ -234,7 +257,7 @@ fn draw_hand(ui: &mut egui::Ui, v: &mut View, hand: usize, c: Pos2, r: f32, t: f
     let open = v.state.remap_open;
     let mut labels: Vec<(f32, Pos2, Vec<String>, f32)> = Vec::new();
     for (k, spot) in spots(hand).into_iter().enumerate() {
-        let (sx, sy) = spot.centre(hand);
+        let (sx, sy) = spot.centre();
         let pos = at(sx, sy);
         let hit = match spot {
             Spot::Round(_, _, rad, ..) => {
@@ -263,7 +286,7 @@ fn draw_hand(ui: &mut egui::Ui, v: &mut View, hand: usize, c: Pos2, r: f32, t: f
                 Some(spot.slot(hand))
             };
         }
-        labels.push((sx, pos, spot.lines(&map), hover.max(sel)));
+        labels.push((spot.side(hand), pos, spot.lines(&map), hover.max(sel)));
     }
 
     // Labels in a column on each side, nudged apart, with leader lines.
@@ -322,7 +345,8 @@ fn draw_hand(ui: &mut egui::Ui, v: &mut View, hand: usize, c: Pos2, r: f32, t: f
     }
 }
 
-/// One hotspot: its glow, then the key itself.
+/// One hotspot: a halo round the real button in the picture, filled with
+/// the accent while its choices are open.
 fn draw_spot(
     p: &egui::Painter,
     spot: Spot,
@@ -333,92 +357,82 @@ fn draw_spot(
     hand: usize,
 ) {
     let glow = |a: f32| theme::ACCENT.gamma_multiply((a * strength).clamp(0.0, 1.0));
-    let key = KEY.lerp_to_gamma(theme::ACCENT, sel);
-    let ink = theme::TEXT_2.lerp_to_gamma(Color32::WHITE, strength.max(sel));
+    let fill = theme::ACCENT.gamma_multiply(0.45 * sel);
+    let ring = Stroke::new(
+        2.0_f32,
+        theme::ACCENT_HOVER.gamma_multiply(strength.max(sel)),
+    );
     match spot {
-        Spot::Round(_, _, rad, _, letter) => {
-            let rr = rad * r;
-            for (k, a) in [0.12, 0.22, 0.4].into_iter().enumerate() {
-                p.circle_filled(pos, rr + (3 - k) as f32 * 4.5, glow(a));
-            }
-            p.circle_filled(pos, rr, key);
-            p.text(
-                pos,
-                Align2::CENTER_CENTER,
-                letter,
-                theme::font(Weight::Bold, rr),
-                ink,
-            );
-        }
-        Spot::Pill(..) => {
-            let rect = Rect::from_center_size(pos, Vec2::new(0.28 * r, 0.14 * r));
-            for (k, a) in [0.12, 0.22, 0.4].into_iter().enumerate() {
-                let e = (3 - k) as f32 * 4.5;
-                p.rect_filled(
-                    rect.expand(e),
-                    CornerRadius::same((0.07 * r + e) as u8),
-                    glow(a),
+        Spot::Round(..) | Spot::Stick(..) => {
+            let rr = match spot {
+                Spot::Round(_, _, rad, ..) => rad,
+                _ => 0.33,
+            } * r;
+            for (k, a) in [0.1, 0.2, 0.35].into_iter().enumerate() {
+                p.circle_stroke(
+                    pos,
+                    rr + 2.0 + (3 - k) as f32 * 2.5,
+                    Stroke::new(3.0_f32, glow(a)),
                 );
             }
-            p.rect_filled(rect, CornerRadius::same((0.07 * r) as u8), key);
-            let s = 0.035 * r;
-            let line = Stroke::new(1.5_f32, ink);
-            if hand == RIGHT {
-                // Menu: three lines.
-                for k in [-1.0, 0.0, 1.0] {
-                    let y = pos.y + k * s * 0.8;
-                    p.line_segment(
-                        [Pos2::new(pos.x - s * 1.3, y), Pos2::new(pos.x + s * 1.3, y)],
-                        line,
-                    );
-                }
-            } else {
-                // View: two overlapping windows.
-                for (dx, dy) in [(-0.35, -0.35), (0.35, 0.35)] {
-                    let w = Rect::from_center_size(
-                        pos + Vec2::new(dx * s, dy * s),
-                        Vec2::new(1.8 * s, 1.4 * s),
-                    );
-                    p.rect_stroke(w, CornerRadius::same(1), line, StrokeKind::Inside);
-                }
-            }
+            p.circle_filled(pos, rr, fill);
+            p.circle_stroke(pos, rr + 1.5, ring);
         }
-        Spot::Arm(..) => {
-            let rect = Rect::from_center_size(pos, Vec2::splat(0.21 * r));
-            for (k, a) in [0.15, 0.3, 0.5].into_iter().enumerate() {
-                let e = (3 - k) as f32 * 3.0;
-                p.rect_filled(rect.expand(e), CornerRadius::same((4.0 + e) as u8), glow(a));
+        Spot::Pill(..) | Spot::Arm(..) => {
+            let (size, round) = match spot {
+                Spot::Pill(..) => (Vec2::new(0.3 * r, 0.15 * r), 0.075 * r),
+                _ => (Vec2::splat(0.2 * r), 0.04 * r),
+            };
+            let rect = Rect::from_center_size(pos, size);
+            for (k, a) in [0.1, 0.2, 0.35].into_iter().enumerate() {
+                let e = 2.0 + (3 - k) as f32 * 2.5;
+                p.rect_stroke(
+                    rect.expand(e),
+                    CornerRadius::same((round + e) as u8),
+                    Stroke::new(3.0_f32, glow(a)),
+                    StrokeKind::Middle,
+                );
             }
-            p.rect_filled(rect, CornerRadius::same(4), key);
-        }
-        Spot::Stick(..) => {
-            let rr = 0.3 * r;
-            for (k, a) in [0.1, 0.2, 0.36].into_iter().enumerate() {
-                p.circle_filled(pos, rr + (3 - k) as f32 * 6.0, glow(a));
-            }
-            p.circle_filled(pos, rr, Color32::from_rgb(24, 28, 35));
-            p.circle_filled(pos, rr * 0.78, key);
-            p.circle_stroke(
-                pos,
-                rr * 0.55,
-                Stroke::new(1.5_f32, Color32::from_white_alpha(22)),
+            p.rect_filled(rect, CornerRadius::same(round as u8), fill);
+            p.rect_stroke(
+                rect.expand(1.5),
+                CornerRadius::same((round + 1.5) as u8),
+                ring,
+                StrokeKind::Middle,
             );
         }
         Spot::Bumper => {
-            // The bumper sits under the head's top edge: drawn as a band
-            // just outside it.
-            let c = pos + Vec2::new(0.0, 1.12 * r);
-            let arc: Vec<Pos2> = (0..=24)
-                .map(|k| {
-                    let a = (-125.0 + 70.0 * k as f32 / 24.0).to_radians();
-                    c + Vec2::angled(a) * (r + 0.1 * r)
+            // The bumper is on top of the head, out of sight face-on: a
+            // band lying on the head's top edge, as wide as the bumper,
+            // stands for it.
+            let c = pos + Vec2::new(0.0, BUMPER_TOP * r);
+            let rim = &RIM[(hand == RIGHT) as usize];
+            let band: Vec<Pos2> = rim
+                .iter()
+                .enumerate()
+                .map(|(k, d)| {
+                    let a = (-120.0 + 5.0 * k as f32).to_radians();
+                    c + Vec2::angled(a) * (d + BUMPER_W / 2.0 - 0.01) * r
                 })
                 .collect();
+            let w = BUMPER_W * r;
+            let cap = |pts: &[Pos2], width: f32, color: Color32| {
+                p.add(Shape::line(pts.to_vec(), Stroke::new(width, color)));
+                for end in [pts[0], pts[pts.len() - 1]] {
+                    p.circle_filled(end, width / 2.0, color);
+                }
+            };
+            cap(&band, w + 6.0 + 6.0 * strength, glow(0.35));
+            cap(&band, w, KEY.lerp_to_gamma(theme::ACCENT, sel));
+            // A lit top edge so it reads as a part, not a stroke.
+            let lip: Vec<Pos2> = band
+                .iter()
+                .map(|q| *q + (*q - c).normalized() * (w * 0.3))
+                .collect();
             p.add(Shape::line(
-                arc.clone(),
-                Stroke::new(0.16 * r + 8.0 * strength, glow(0.3)),
+                lip,
+                Stroke::new(1.2_f32, Color32::from_white_alpha(90)),
             ));
-            p.add(Shape::line(arc, Stroke::new(0.12 * r, key)));
         }
     }
 }

@@ -3,6 +3,7 @@
 //! an [`Action`] for the app to apply.
 
 pub mod controller_map;
+pub mod depth;
 pub mod icons;
 pub mod keyboard;
 pub mod library;
