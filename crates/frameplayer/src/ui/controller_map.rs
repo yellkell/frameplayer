@@ -398,7 +398,7 @@ fn draw_spot(
         Spot::Round(..) | Spot::Stick(..) => {
             let rr = match spot {
                 Spot::Round(_, _, rad, ..) => rad,
-                _ => 0.33,
+                _ => 0.28,
             } * r;
             for (k, a) in [0.1, 0.2, 0.35].into_iter().enumerate() {
                 let e = 2.0 + (3 - k) as f32 * 2.5;
@@ -440,7 +440,7 @@ fn draw_spot(
         }
         Spot::Bumper => {
             if let Some((tex, rect)) = bumper_glow {
-                let tint = theme::ACCENT.gamma_multiply((0.55 * strength).max(0.9 * sel));
+                let tint = theme::ACCENT.gamma_multiply((0.75 * strength).max(0.95 * sel));
                 p.image(
                     tex.id(),
                     rect,
