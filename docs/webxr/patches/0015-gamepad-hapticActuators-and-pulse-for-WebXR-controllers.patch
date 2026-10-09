@@ -1,0 +1,305 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Fri, 9 Oct 2026 14:30:00 +0000
+Subject: [PATCH 15/15] gamepad: hapticActuators and pulse() for WebXR
+ controllers
+
+Many WebXR pages vibrate controllers with the Gamepad Extensions API that
+Meta Quest's browser exposes:
+inputSource.gamepad.hapticActuators[0].pulse(value, duration). Babylon.js,
+many three.js games and Fire Fight 2's Rave Raid do this. Chromium has
+neither, so `hapticActuators?.[0]?.pulse?.()` quietly does nothing and
+those pages never vibrate. playEffect pages (0008) do vibrate.
+
+- Gamepad.hapticActuators: a frozen array holding the gamepad's vibration
+  actuator, if it has one. The array object stays the same while the
+  actuator does.
+- GamepadHapticActuator.pulse(value, duration): a dual-rumble effect at
+  |value| for |duration| ms. It goes through the same delegate (XR
+  controllers, 0008) or gamepad-service path as playEffect. Out-of-range
+  values are clamped, as on Quest. It resolves true once the pulse has
+  played, or once a newer effect has replaced it. It resolves false if
+  the device can't play it.
+
+Applies on top of 0008.
+---
+diff --git a/third_party/blink/renderer/modules/gamepad/gamepad.cc b/third_party/blink/renderer/modules/gamepad/gamepad.cc
+index 809a66c521..08970d29a1 100644
+--- a/third_party/blink/renderer/modules/gamepad/gamepad.cc
++++ b/third_party/blink/renderer/modules/gamepad/gamepad.cc
+@@ -208,6 +208,23 @@ GamepadHapticActuator* Gamepad::vibrationActuator() const {
+   return client_->GetVibrationActuatorForGamepad(*this);
+ }
+ 
++const FrozenArray<GamepadHapticActuator>& Gamepad::hapticActuators() {
++  // The same array while the vibration actuator stays the same.
++  GamepadHapticActuator* actuator = vibrationActuator();
++  if (!haptic_actuators_ ||
++      haptic_actuators_->size() != (actuator ? 1u : 0u) ||
++      (actuator && (*haptic_actuators_)[0] != actuator)) {
++    HeapVector<Member<GamepadHapticActuator>> actuators;
++    if (actuator) {
++      actuators.push_back(actuator);
++    }
++    haptic_actuators_ =
++        MakeGarbageCollected<FrozenArray<GamepadHapticActuator>>(
++            std::move(actuators));
++  }
++  return *haptic_actuators_.Get();
++}
++
+ void Gamepad::SetVibrationActuatorInfo(
+     const device::GamepadHapticActuator& actuator) {
+   has_vibration_actuator_ = actuator.not_null;
+@@ -238,6 +255,7 @@ void Gamepad::Trace(Visitor* visitor) const {
+   visitor->Trace(client_);
+   visitor->Trace(buttons_);
+   visitor->Trace(touch_events_);
++  visitor->Trace(haptic_actuators_);
+   ScriptWrappable::Trace(visitor);
+ }
+ 
+diff --git a/third_party/blink/renderer/modules/gamepad/gamepad.h b/third_party/blink/renderer/modules/gamepad/gamepad.h
+index 50e8a0be2c..ae27d1f2eb 100644
+--- a/third_party/blink/renderer/modules/gamepad/gamepad.h
++++ b/third_party/blink/renderer/modules/gamepad/gamepad.h
+@@ -28,6 +28,7 @@
+ 
+ #include "base/time/time.h"
+ #include "device/gamepad/public/cpp/gamepad.h"
++#include "third_party/blink/renderer/bindings/core/v8/frozen_array.h"
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_gamepad_mapping_type.h"
+ #include "third_party/blink/renderer/core/dom/dom_high_res_time_stamp.h"
+ #include "third_party/blink/renderer/modules/gamepad/gamepad_button.h"
+@@ -90,6 +91,7 @@ class MODULES_EXPORT Gamepad final : public ScriptWrappable {
+   bool isButtonDataDirty() const { return is_button_data_dirty_; }
+ 
+   GamepadHapticActuator* vibrationActuator() const;
++  const FrozenArray<GamepadHapticActuator>& hapticActuators();
+   void SetVibrationActuatorInfo(const device::GamepadHapticActuator&);
+   bool HasVibrationActuator() const { return has_vibration_actuator_; }
+   device::GamepadHapticActuatorType GetVibrationActuatorType() const {
+@@ -138,6 +140,9 @@ class MODULES_EXPORT Gamepad final : public ScriptWrappable {
+   // The type of haptic actuator used for vibration effects.
+   device::GamepadHapticActuatorType vibration_actuator_type_;
+ 
++  // hapticActuators: the vibration actuator it was last built from, if any.
++  Member<FrozenArray<GamepadHapticActuator>> haptic_actuators_;
++
+   // True if the gamepad can provide touch events.
+   bool has_touch_events_ = false;
+ 
+diff --git a/third_party/blink/renderer/modules/gamepad/gamepad.idl b/third_party/blink/renderer/modules/gamepad/gamepad.idl
+index 63d801d4ea..8f31f71ab9 100644
+--- a/third_party/blink/renderer/modules/gamepad/gamepad.idl
++++ b/third_party/blink/renderer/modules/gamepad/gamepad.idl
+@@ -48,6 +48,11 @@ enum GamepadMappingType {
+     // https://github.com/w3c/gamepad/pull/68
+     [MeasureAs=GamepadVibrationActuator] readonly attribute GamepadHapticActuator? vibrationActuator;
+ 
++    // Gamepad Extensions' haptic actuators, as Meta Quest's browser exposes
++    // them to WebXR pages: the vibration actuator, if there is one.
++    // https://w3c.github.io/gamepad/extensions.html#dom-gamepad-hapticactuators
++    readonly attribute FrozenArray<GamepadHapticActuator> hapticActuators;
++
+     // Gamepad vibration is proposed as an extension to the Gamepad API.
+     // https://github.com/w3c/gamepad/pull/168
+     [RuntimeEnabled=GamepadMultitouch, CachedAttribute=IsTouchDataDirty, MeasureAs=GamepadTouchEvents] readonly attribute FrozenArray<GamepadTouch>? touchEvents;
+diff --git a/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.cc b/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.cc
+index 4e23fdaba0..2143565d73 100644
+--- a/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.cc
++++ b/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.cc
+@@ -4,6 +4,8 @@
+ 
+ #include "third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.h"
+ 
++#include <algorithm>
++
+ #include "base/functional/callback_helpers.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "device/gamepad/public/cpp/gamepad.h"
+@@ -129,20 +131,67 @@ ScriptPromise<V8GamepadHapticsResult> GamepadHapticActuator::playEffect(
+   auto callback = BindOnce(&GamepadHapticActuator::OnPlayEffectCompleted,
+                            WrapPersistent(this), WrapPersistent(resolver));
+ 
+-  auto effect_params = device::mojom::blink::GamepadEffectParameters::New(
+-      params->duration(), params->startDelay(), params->strongMagnitude(),
+-      params->weakMagnitude(), params->leftTrigger(), params->rightTrigger());
++  PlayVibrationEffectOnce(
++      EffectTypeFromEnum(type.AsEnum()),
++      device::mojom::blink::GamepadEffectParameters::New(
++          params->duration(), params->startDelay(), params->strongMagnitude(),
++          params->weakMagnitude(), params->leftTrigger(),
++          params->rightTrigger()),
++      std::move(callback));
++
++  return promise;
++}
++
++ScriptPromise<IDLBoolean> GamepadHapticActuator::pulse(
++    ScriptState* script_state,
++    double value,
++    double duration) {
++  auto* resolver =
++      MakeGarbageCollected<ScriptPromiseResolver<IDLBoolean>>(script_state);
++  auto promise = resolver->Promise();
++
++  // Quest's browser clamps rather than rejecting; so do we.
++  value = std::clamp(value, 0.0, 1.0);
++  duration = std::clamp(duration, 0.0,
++                        device::GamepadHapticActuator::kMaxEffectDurationMillis);
++
++  // Like playEffect, a new pulse replaces the effect playing.
++  should_reset_ = false;
++
++  PlayVibrationEffectOnce(
++      GamepadHapticEffectType::GamepadHapticEffectTypeDualRumble,
++      device::mojom::blink::GamepadEffectParameters::New(
++          duration, /*start_delay=*/0, /*strong_magnitude=*/value,
++          /*weak_magnitude=*/value, /*left_trigger=*/0, /*right_trigger=*/0),
++      BindOnce(&GamepadHapticActuator::OnPulseCompleted, WrapPersistent(this),
++               WrapPersistent(resolver)));
++
++  return promise;
++}
++
++void GamepadHapticActuator::PlayVibrationEffectOnce(
++    GamepadHapticEffectType type,
++    device::mojom::blink::GamepadEffectParametersPtr params,
++    ResultCallback callback) {
+   if (delegate_) {
+-    delegate_->PlayVibrationEffectOnce(EffectTypeFromEnum(type.AsEnum()),
+-                                       std::move(effect_params),
++    delegate_->PlayVibrationEffectOnce(type, std::move(params),
+                                        std::move(callback));
+   } else {
+     gamepad_dispatcher_->PlayVibrationEffectOnce(
+-        pad_index_, EffectTypeFromEnum(type.AsEnum()),
+-        std::move(effect_params), std::move(callback));
++        pad_index_, type, std::move(params), std::move(callback));
+   }
++}
+ 
+-  return promise;
++void GamepadHapticActuator::OnPulseCompleted(
++    ScriptPromiseResolver<IDLBoolean>* resolver,
++    device::mojom::GamepadHapticsResult result) {
++  if (result == GamepadHapticsResult::GamepadHapticsResultComplete) {
++    ScheduleResetIfNotPreempted();
++  }
++  // A preempted pulse did play, until the next effect took over.
++  resolver->Resolve(
++      result == GamepadHapticsResult::GamepadHapticsResultComplete ||
++      result == GamepadHapticsResult::GamepadHapticsResultPreempted);
+ }
+ 
+ void GamepadHapticActuator::OnPlayEffectCompleted(
+@@ -152,28 +201,32 @@ void GamepadHapticActuator::OnPlayEffectCompleted(
+     resolver->Reject();
+     return;
+   } else if (result == GamepadHapticsResult::GamepadHapticsResultComplete) {
+-    should_reset_ = true;
+-    ExecutionContext* context = GetExecutionContext();
+-    if (context) {
+-      // Post a delayed task to stop vibration. The task will be run after all
+-      // callbacks have run for the effect Promise, and may be ignored by
+-      // setting |should_reset_| to false. The intention is to only stop
+-      // vibration if the user did not chain another vibration effect in the
+-      // Promise callback.
+-      context->GetTaskRunner(TaskType::kMiscPlatformAPI)
+-          ->PostTask(
+-              FROM_HERE,
+-              BindOnce(&GamepadHapticActuator::ResetVibrationIfNotPreempted,
+-                       WrapPersistent(this)));
+-    } else {
+-      // The execution context is gone, meaning no new effects can be issued by
+-      // the page. Stop vibration without waiting for Promise callbacks.
+-      ResetVibrationIfNotPreempted();
+-    }
++    ScheduleResetIfNotPreempted();
+   }
+   resolver->Resolve(ResultToV8(result));
+ }
+ 
++void GamepadHapticActuator::ScheduleResetIfNotPreempted() {
++  should_reset_ = true;
++  ExecutionContext* context = GetExecutionContext();
++  if (context) {
++    // Post a delayed task to stop vibration. The task will be run after all
++    // callbacks have run for the effect Promise, and may be ignored by
++    // setting |should_reset_| to false. The intention is to only stop
++    // vibration if the user did not chain another vibration effect in the
++    // Promise callback.
++    context->GetTaskRunner(TaskType::kMiscPlatformAPI)
++        ->PostTask(
++            FROM_HERE,
++            BindOnce(&GamepadHapticActuator::ResetVibrationIfNotPreempted,
++                     WrapPersistent(this)));
++  } else {
++    // The execution context is gone, meaning no new effects can be issued by
++    // the page. Stop vibration without waiting for Promise callbacks.
++    ResetVibrationIfNotPreempted();
++  }
++}
++
+ void GamepadHapticActuator::ResetVibrationIfNotPreempted() {
+   if (should_reset_) {
+     should_reset_ = false;
+diff --git a/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.h b/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.h
+index d36ea926d5..5090392f78 100644
+--- a/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.h
++++ b/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.h
+@@ -8,6 +8,7 @@
+ #include "base/functional/callback.h"
+ #include "device/gamepad/public/cpp/gamepad.h"
+ #include "device/gamepad/public/mojom/gamepad.mojom-blink-forward.h"
++#include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
+ #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
+ #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_gamepad_haptic_actuator_type.h"
+@@ -74,13 +75,28 @@ class GamepadHapticActuator final : public ScriptWrappable,
+ 
+   ScriptPromise<V8GamepadHapticsResult> reset(ScriptState*);
+ 
++  ScriptPromise<IDLBoolean> pulse(ScriptState*, double value, double duration);
++
+   void Trace(Visitor*) const override;
+ 
+  private:
++  using ResultCallback =
++      base::OnceCallback<void(device::mojom::GamepadHapticsResult)>;
++
++  // Plays through the delegate or the gamepad service.
++  void PlayVibrationEffectOnce(
++      device::mojom::GamepadHapticEffectType,
++      device::mojom::blink::GamepadEffectParametersPtr,
++      ResultCallback);
+   void OnPlayEffectCompleted(ScriptPromiseResolver<V8GamepadHapticsResult>*,
+                              device::mojom::GamepadHapticsResult);
++  void OnPulseCompleted(ScriptPromiseResolver<IDLBoolean>*,
++                        device::mojom::GamepadHapticsResult);
+   void OnResetCompleted(ScriptPromiseResolver<V8GamepadHapticsResult>*,
+                         device::mojom::GamepadHapticsResult);
++  // After a completed effect: stop vibration unless the page has started
++  // another effect by the time its promise callbacks have run.
++  void ScheduleResetIfNotPreempted();
+   void ResetVibrationIfNotPreempted();
+ 
+   int pad_index_;
+diff --git a/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.idl b/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.idl
+index 9166b0fe47..10fcdc8036 100644
+--- a/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.idl
++++ b/third_party/blink/renderer/modules/gamepad/gamepad_haptic_actuator.idl
+@@ -30,4 +30,9 @@ enum GamepadHapticsResult {
+         GamepadHapticEffectType type,
+         GamepadEffectParameters params);
+     [CallWith=ScriptState] Promise<GamepadHapticsResult> reset();
++
++    // Gamepad Extensions: vibrate at |value| (0 to 1) for |duration| ms, as a
++    // dual-rumble effect. Resolves true once the pulse has played.
++    // https://w3c.github.io/gamepad/extensions.html#dom-gamepadhapticactuator-pulse
++    [CallWith=ScriptState] Promise<boolean> pulse(double value, double duration);
+ };
+-- 
+2.43.0
+

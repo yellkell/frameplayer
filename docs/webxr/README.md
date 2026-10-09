@@ -255,12 +255,18 @@ its OpenXR device had no haptics. Patch 0008 gives each immersive session's
 that hand's `/output/haptic` (`xrApplyHapticFeedback`, unspecified
 frequency); `reset()` stops it. The effect resolves `"complete"` after its
 duration, or `"preempted"` when another effect or `reset()` replaces it.
-`gamepad.hapticActuators[0].pulse()` (the older extension) is not
-implemented. Run with `--vmodule=openxr_input_helper=1` to log each
-`xrApplyHapticFeedback` result. Patch 0012 scales every amplitude by 0.35:
-Frame controllers vibrate much harder than Quest's at the same value, so
-games tuned on Quest felt heavy. `CHROMIUM_XR_HAPTICS_SCALE` (0 to 1) in the
-browser's environment overrides it.
+Patch 0015 adds the older extension too, `gamepad.hapticActuators[0].pulse(value,
+duration)`, which Quest's browser has and many games use alone (Babylon.js,
+many three.js games, Fire Fight 2's Rave Raid): `hapticActuators` holds the
+same actuator, and `pulse()` plays a dual-rumble effect through it. Without
+it, `hapticActuators?.[0]?.pulse?.()` silently does nothing. Run with
+`--vmodule=openxr_input_helper=1` to log each `xrApplyHapticFeedback` result.
+Patch 0012 scales amplitudes down: Frame controllers vibrate much harder than
+Quest's at the same value, so games tuned on Quest felt heavy. Patch 0016
+makes it `0.35 * sqrt(amplitude)` and raises pulses shorter than 100 ms to
+at least 0.35. Measured on the headset (2026-10-09): 40 ms at 0.19 or 0.24
+can't be felt; 40 ms at 0.35 and 150 ms at 0.19 can. `CHROMIUM_XR_HAPTICS_SCALE`
+(0 to 1) in the browser's environment sets the 0.35.
 
 ### Games other than Fish & Chips (2026-10-05): patches 0009-0013
 
@@ -304,8 +310,8 @@ Fire Fight 2 with all of it: a steady 54 fps (half of 108 Hz, p99 frame
 | 1728, 4x AA, Vulkan, 0011 | 19 ms | 47 fps |
 | 1728, 2x AA, Vulkan, 0011 | 15 ms | 54 fps |
 
-Patches 0011, 0012 and 0013 build on 0009, 0008 and 0005 (as 0006 and 0008
-build on 0004), so the build script checks and applies the patches as one
+Patches 0011, 0012, 0013, 0015 and 0016 build on 0009, 0008, 0005, 0008 and
+0012 (as 0006 and 0008 build on 0004), so the build script checks and applies the patches as one
 ordered series.
 
 The launcher reads extra Chromium flags from `~/.config/chromium-xr-frame/flags`

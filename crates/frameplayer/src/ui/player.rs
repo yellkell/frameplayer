@@ -104,8 +104,11 @@ pub fn control_bar(ctx: &egui::Context, v: &mut View) {
                             .truncate(),
                         );
                     });
+                    // Sized to fit the 30-point row: the default spinner
+                    // (44) grew the row, so every stutter bounced the seek
+                    // bar and buttons up and down.
                     if state == PlayerState::Buffering {
-                        ui.spinner();
+                        ui.add(egui::Spinner::new().size(20.0));
                     }
                     if let Some((text, color)) = message {
                         ui.add(

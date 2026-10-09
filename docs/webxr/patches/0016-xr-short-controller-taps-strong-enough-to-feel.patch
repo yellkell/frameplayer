@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Fri, 9 Oct 2026 15:30:00 +0000
+Subject: [PATCH 16/16] xr: short controller taps strong enough to feel
+
+0012 scales every vibration by 0.35. Strong rumble at that scale is
+right, but the short taps Quest games use couldn't be felt. Fire Fight
+2's Rave Raid pulses at 0.28-0.48 for 40 ms, which came out at
+0.10-0.17.
+
+Measured on Steam Frame controllers (2026-10-09): 40 ms at 0.19 or 0.24
+can't be felt; 40 ms at 0.35 and 150 ms at 0.19 can.
+
+OpenXrController::ApplyHapticFeedback now plays scale * sqrt(amplitude)
+(full rumble unchanged at 0.35; 0.7 goes from 0.245 to 0.29), and
+raises pulses shorter than 100 ms to at least 0.35.
+CHROMIUM_XR_HAPTICS_SCALE still sets the scale.
+
+Applies on top of 0012.
+---
+diff --git a/device/vr/openxr/openxr_controller.cc b/device/vr/openxr/openxr_controller.cc
+index 24602bac3d..291ec08b86 100644
+--- a/device/vr/openxr/openxr_controller.cc
++++ b/device/vr/openxr/openxr_controller.cc
+@@ -7,6 +7,7 @@
+ #include <stdint.h>
+ 
+ #include <algorithm>
++#include <cmath>
+ 
+ #include "base/check.h"
+ #include "base/compiler_specific.h"
+@@ -35,6 +36,11 @@ namespace {
+ // CHROMIUM_XR_HAPTICS_SCALE (0 to 1) in the browser's environment overrides.
+ constexpr float kDefaultHapticAmplitudeScale = 0.35f;
+ 
++// Measured on Steam Frame controllers (2026-10-09): 40 ms at 0.19 or 0.24
++// can't be felt; 40 ms at 0.35 and 150 ms at 0.19 can.
++constexpr base::TimeDelta kShortHapticPulse = base::Milliseconds(100);
++constexpr float kShortHapticPulseMinAmplitude = 0.35f;
++
+ float GetHapticAmplitudeScale() {
+   static const float scale = [] {
+     double value = 0;
+@@ -830,10 +836,18 @@ XrResult OpenXrController::ApplyHapticFeedback(float amplitude,
+ 
+   XrHapticActionInfo action_info = {XR_TYPE_HAPTIC_ACTION_INFO};
+   action_info.action = haptic_action_;
+-  amplitude = std::min(amplitude, 1.0f) * GetHapticAmplitudeScale();
++  // Square root: full rumble keeps the scale, gentle rumble less so.
++  amplitude = std::sqrt(std::clamp(amplitude, 0.0f, 1.0f)) *
++              GetHapticAmplitudeScale();
+   if (amplitude <= 0.0f || !duration.is_positive()) {
+     return xrStopHapticFeedback(session_, &action_info);
+   }
++  // On Frame controllers a short pulse below about 0.35 can't be felt,
++  // though a long gentle one can. Quest games tap at 0.2-0.5 for a few tens
++  // of ms, so short taps play at least that strong.
++  if (duration < kShortHapticPulse) {
++    amplitude = std::max(amplitude, kShortHapticPulseMinAmplitude);
++  }
+ 
+   XrHapticVibration vibration = {XR_TYPE_HAPTIC_VIBRATION};
+   vibration.duration = duration.InNanoseconds();
+-- 
+2.43.0
+

@@ -87,7 +87,10 @@ What works on the Frame:
 - The controllers work like Quest Touch controllers in games made for Quest
   (patch 0006), and look like Steam Frame controllers: pages that load the
   Quest Touch models get the Frame's, with trigger, grip and stick moving.
-- Controller vibration (\`gamepad.vibrationActuator\`, patch 0008).
+- Controller vibration, both ways Quest games ask for it:
+  \`gamepad.vibrationActuator\` (patch 0008) and
+  \`gamepad.hapticActuators[0].pulse()\` (patch 0015), tuned for the Frame's
+  controllers (patches 0012, 0016).
 - No "unsupported command-line flag" bar.
 
 ## Install with Frame Control
