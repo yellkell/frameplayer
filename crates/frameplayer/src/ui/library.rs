@@ -18,11 +18,13 @@ const MARGIN: i8 = 28;
 
 /// Main browser panel.
 pub fn browser(ctx: &egui::Context, v: &mut View) {
+    widgets::panel_slab(ctx, 28.0);
+    let room = widgets::SHADOW_ROOM;
     egui::TopBottomPanel::top("nav")
         .exact_height(76.0)
         .frame(
             egui::Frame::new()
-                .fill(theme::BG)
+                .outer_margin(egui::Margin { bottom: 0, ..room })
                 .inner_margin(egui::Margin::symmetric(MARGIN - 6, 0)),
         )
         .show_separator_line(false)
@@ -31,7 +33,7 @@ pub fn browser(ctx: &egui::Context, v: &mut View) {
     egui::CentralPanel::default()
         .frame(
             egui::Frame::new()
-                .fill(theme::BG)
+                .outer_margin(egui::Margin { top: 0, ..room })
                 .inner_margin(egui::Margin {
                     left: MARGIN,
                     right: MARGIN,

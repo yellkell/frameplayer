@@ -151,6 +151,19 @@ fn panel(px: [u32; 2], width_m: f32, ppp: f32) -> Panel {
     Panel::new(px, size, ppp)
 }
 
+/// A panel whose body is `px` pixels and `width_m` wide, floating with
+/// room round it for its shadow (ui::widgets::SHADOW_ROOM) at the same
+/// scale.
+fn floating_panel(px: [u32; 2], width_m: f32, ppp: f32) -> Panel {
+    let room = ui::widgets::SHADOW_ROOM;
+    let extra = [
+        ((room.left + room.right) as f32 * ppp).round() as u32,
+        ((room.top + room.bottom) as f32 * ppp).round() as u32,
+    ];
+    let full = [px[0] + extra[0], px[1] + extra[1]];
+    panel(full, width_m * full[0] as f32 / px[0] as f32, ppp)
+}
+
 impl App {
     pub fn new(settings: Settings, library: Library) -> App {
         let unlocked = settings
@@ -160,13 +173,10 @@ impl App {
         let services = Services::new(&settings, library);
         let thumbs = ui::thumbs::Thumbs::new(services.opener.clone());
         let mut panels = [
-            panel([1600, 1000], 1.8, 1.25),
-            // The bar is 1400 x 268 px at 1.2 m wide; its panel adds room
-            // round it for the shadow it casts (BAR_SHADOW_ROOM), at the
-            // same scale.
-            panel([1450, 320], 1.2 * 1450.0 / 1400.0, 1.25),
-            panel([900, 1020], 0.75, 1.25),
-            panel([1200, 456], 1.0, 1.25),
+            floating_panel([1600, 1000], 1.8, 1.25),
+            floating_panel([1400, 268], 1.2, 1.25),
+            floating_panel([900, 1020], 0.75, 1.25),
+            floating_panel([1200, 456], 1.0, 1.25),
         ];
         panels[BAR].refresh = Some(Duration::from_millis(250));
         panels[ADJUST].refresh = Some(Duration::from_millis(1000));

@@ -261,6 +261,15 @@ impl Sim {
                 self.app.repaint_all();
                 self.run_frames(3)?;
             }
+            // Pauses the open video, so a short test clip doesn't end (and
+            // hide the player's panels) before the shots that follow.
+            Some("pause") => {
+                if let Some(p) = &self.app.playback {
+                    p.player.pause();
+                }
+                self.app.repaint_all();
+                self.run_frames(3)?;
+            }
             // Passthrough videos as if bought (crate::unlock).
             Some("unlocked") => {
                 self.app.unlocked = true;

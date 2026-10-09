@@ -1,7 +1,7 @@
 //! A virtual keyboard panel for text fields (search, addresses, passwords).
 
-use super::icons;
 use super::theme::{self, Weight};
+use super::{icons, widgets};
 use egui::{Align2, Color32, Event, Key, Modifiers, Sense, Vec2};
 
 const ROWS: [&str; 4] = ["1234567890-", "qwertyuiop/", "asdfghjkl:_", "zxcvbnm.@?&"];
@@ -48,17 +48,21 @@ fn key(ui: &mut egui::Ui, label: &str, w: f32, style: Style, icon: bool) -> bool
     } else {
         bg
     };
+    let _ = bg;
+    // Raised keys: Enter is the accent, shift glows while it is on.
+    let kind = if style == Style::Action {
+        widgets::Kind::Primary
+    } else {
+        widgets::Kind::Secondary
+    };
+    let (face, key_fg) = widgets::key_face_kind(ui, &resp, 12.0, style == Style::On, kind);
+    let fg = if style == Style::Char || style == Style::Action {
+        key_fg
+    } else {
+        fg.lerp_to_gamma(key_fg, 0.5)
+    };
+    let rect = face;
     let p = ui.painter();
-    let r = rect.expand(t * 1.0);
-    p.rect_filled(r, egui::CornerRadius::same(12), bg);
-    if t > 0.0 {
-        p.rect_stroke(
-            r,
-            egui::CornerRadius::same(12),
-            egui::Stroke::new(1.5_f32, Color32::from_white_alpha((t * 60.0) as u8)),
-            egui::StrokeKind::Outside,
-        );
-    }
     let font = if icon {
         theme::icon(26.0)
     } else if label.chars().count() > 1 {
@@ -75,10 +79,9 @@ fn key(ui: &mut egui::Ui, label: &str, w: f32, style: Style, icon: bool) -> bool
 pub fn keyboard(ctx: &egui::Context, shift: &mut bool) -> (Vec<Event>, bool) {
     let mut out = Vec::new();
     let mut close = false;
+    widgets::panel_slab(ctx, 24.0);
     let frame = egui::Frame::new()
-        .fill(theme::BG)
-        .stroke(egui::Stroke::new(1.0_f32, theme::STROKE))
-        .corner_radius(24)
+        .outer_margin(widgets::SHADOW_ROOM)
         .inner_margin(egui::Margin::same(14));
     egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
         ui.spacing_mut().item_spacing = Vec2::new(GAP, GAP);

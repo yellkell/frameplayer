@@ -55,15 +55,14 @@ pub fn format_choices() -> Vec<(&'static str, VideoFormat)> {
 pub fn control_bar(ctx: &egui::Context, v: &mut View) {
     // The bar floats in its panel: the outer margin leaves room for its
     // shadow on the video.
-    let inner = egui::Margin::symmetric(28, 18);
+    widgets::panel_slab(ctx, 28.0);
     let frame = egui::Frame::new()
-        .outer_margin(BAR_SHADOW_ROOM)
-        .inner_margin(inner);
+        .outer_margin(widgets::SHADOW_ROOM)
+        .inner_margin(egui::Margin::symmetric(28, 18));
     egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
         let Some(pb) = v.playback.as_deref_mut() else {
             return;
         };
-        bar_body(ui.painter(), ui.max_rect() + inner);
         let duration = pb.player.duration();
         let position = v.state.scrub.unwrap_or_else(|| pb.player.position());
         let state = pb.player.state();
@@ -285,50 +284,6 @@ fn fmt_speed(speed: f64) -> String {
     format!("{}×", s.trim_end_matches('0').trim_end_matches('.'))
 }
 
-/// Room round the bar in its panel for the shadow it casts.
-const BAR_SHADOW_ROOM: egui::Margin = egui::Margin {
-    left: 20,
-    right: 20,
-    top: 8,
-    bottom: 28,
-};
-
-/// The bar itself: a raised slab, lit along its top edge, casting a soft
-/// shadow on the video.
-fn bar_body(p: &egui::Painter, rect: egui::Rect) {
-    let radius = 28.0;
-    p.add(
-        egui::epaint::Shadow {
-            offset: [0, 12],
-            blur: 30,
-            spread: 0,
-            color: Color32::from_black_alpha(140),
-        }
-        .as_shape(rect, egui::CornerRadius::same(radius as u8)),
-    );
-    depth::raised(
-        p,
-        rect,
-        radius,
-        depth::Raised {
-            top: Color32::from_rgb(31, 38, 48),
-            bottom: Color32::from_rgb(15, 19, 25),
-            light: Color32::from_white_alpha(30),
-            lift: 0.6,
-            glow: None,
-        },
-    );
-    depth::edge(
-        p,
-        rect,
-        radius,
-        2.0,
-        Color32::from_black_alpha(140),
-        depth::Side::Bottom,
-        false,
-    );
-}
-
 /// A small raised pill naming the video's format.
 fn format_pill(ui: &mut egui::Ui, text: &str) -> egui::Response {
     let g = ui.painter().layout_no_wrap(
@@ -535,10 +490,9 @@ const TABS: [(&str, &str); 7] = [
 
 /// Format, view adjustments, tracks and haptics for the open video.
 pub fn adjust_panel(ctx: &egui::Context, v: &mut View) {
+    widgets::panel_slab(ctx, 28.0);
     let frame = egui::Frame::new()
-        .fill(theme::BG)
-        .stroke(egui::Stroke::new(1.0_f32, theme::STROKE))
-        .corner_radius(28)
+        .outer_margin(widgets::SHADOW_ROOM)
         .inner_margin(egui::Margin::same(22));
     egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
         let Some(pb) = v.playback.as_deref_mut() else {

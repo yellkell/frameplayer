@@ -77,9 +77,14 @@ fn side_tab(ui: &mut egui::Ui, icon: &str, label: &str, selected: bool) -> egui:
         let s = ui
             .ctx()
             .animate_bool_with_time(resp.id.with("sel"), selected, 0.12);
+        let mut rect = rect;
+        if selected || t > 0.01 {
+            // The chosen category is a raised key; others rise under the
+            // pointer.
+            let (face, _) = widgets::key_face(ui, &resp, 12.0, false);
+            rect = face;
+        }
         let p = ui.painter();
-        let bg = Color32::from_white_alpha((t * 10.0) as u8).lerp_to_gamma(theme::SURFACE_2, s);
-        p.rect_filled(rect, egui::CornerRadius::same(12), bg);
         if s > 0.0 {
             let bar = egui::Rect::from_min_size(
                 rect.left_center() - Vec2::new(0.0, 11.0 * s),

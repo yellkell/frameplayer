@@ -72,12 +72,13 @@ frames 3
 open $home/Videos/Sunset Beach Walk_180_LR.mp4
 wait-playing
 wait 1
+pause
 point bar 0.5 0.5
 frames 8
 panel bar player-bar
 sbs player-scene
 # A hover label: the Hide button.
-point bar 0.896 0.79
+point bar 0.883 0.69
 frames 10
 panel bar player-bar-tip
 # The adjustments panel.

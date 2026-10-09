@@ -40,6 +40,10 @@ fn corner(radius: f32) -> CornerRadius {
 /// Fills a rounded rectangle with a vertical gradient, softened over its
 /// last pixel so the antialiased fill beneath shows the edge.
 pub fn fill_vgradient(p: &Painter, rect: Rect, radius: f32, top: Color32, bottom: Color32) {
+    p.add(Shape::mesh(vgradient_mesh(rect, radius, top, bottom)));
+}
+
+fn vgradient_mesh(rect: Rect, radius: f32, top: Color32, bottom: Color32) -> Mesh {
     let col = |y: f32| {
         let t = ((y - rect.top()) / rect.height().max(1.0)).clamp(0.0, 1.0);
         top.lerp_to_gamma(bottom, t)
@@ -60,7 +64,7 @@ pub fn fill_vgradient(p: &Painter, rect: Rect, radius: f32, top: Color32, bottom
         mesh.add_triangle(1 + i, 1 + n + i, 1 + j);
         mesh.add_triangle(1 + j, 1 + n + i, 1 + n + j);
     }
-    p.add(Shape::mesh(mesh));
+    mesh
 }
 
 /// Which way an edge faces.
@@ -136,33 +140,59 @@ pub struct Raised {
 
 /// A raised rounded rectangle: shadow (and glow), gradient body, lit edge.
 pub fn raised(p: &Painter, rect: Rect, radius: f32, look: Raised) {
+    p.extend(raised_shapes(rect, radius, look));
+}
+
+/// The shapes of [`raised`], for a surface that goes under content laid
+/// out first.
+pub fn raised_shapes(rect: Rect, radius: f32, look: Raised) -> Vec<Shape> {
     let cr = corner(radius);
+    let mut out = Vec::with_capacity(5);
     if look.lift > 0.0 {
         let l = look.lift.clamp(0.0, 1.5);
-        p.add(
+        out.push(
             Shadow {
                 offset: [0, (2.0 + 2.0 * l) as i8],
                 blur: (4.0 + 6.0 * l) as u8,
                 spread: 0,
                 color: Color32::from_black_alpha((130.0 * l.min(1.0)) as u8),
             }
-            .as_shape(rect, cr),
+            .as_shape(rect, cr)
+            .into(),
         );
     }
     if let Some(g) = look.glow {
-        p.add(
+        out.push(
             Shadow {
                 offset: [0, 4],
                 blur: 18,
                 spread: 0,
                 color: g,
             }
-            .as_shape(rect, cr),
+            .as_shape(rect, cr)
+            .into(),
         );
     }
-    p.rect_filled(rect, cr, look.top.lerp_to_gamma(look.bottom, 0.6));
-    fill_vgradient(p, rect, radius, look.top, look.bottom);
-    edge(p, rect, radius, 2.2, look.light, Side::Top, false);
+    out.push(Shape::rect_filled(
+        rect,
+        cr,
+        look.top.lerp_to_gamma(look.bottom, 0.6),
+    ));
+    out.push(Shape::mesh(vgradient_mesh(
+        rect,
+        radius,
+        look.top,
+        look.bottom,
+    )));
+    out.push(Shape::mesh(edge_mesh(
+        rect,
+        radius,
+        2.2,
+        look.light,
+        Side::Top,
+        false,
+    )));
+    out
 }
 
 /// The shapes of a sunken rounded rectangle (a tray or a track): dark
