@@ -183,7 +183,7 @@ pub fn icon_button(ui: &mut Ui, icon: &str, size: f32, selected: bool) -> Respon
     resp
 }
 
-const KEY_TOP: Color32 = Color32::from_rgb(54, 64, 77);
+const KEY_TOP: Color32 = Color32::from_rgb(58, 69, 83);
 const KEY_BOTTOM: Color32 = Color32::from_rgb(35, 42, 51);
 const KEY_TOP_HOVER: Color32 = Color32::from_rgb(72, 84, 98);
 const KEY_BOTTOM_HOVER: Color32 = Color32::from_rgb(45, 54, 65);
@@ -213,7 +213,7 @@ pub fn key_face(ui: &Ui, resp: &Response, radius: f32, selected: bool) -> (Rect,
         top: shade(mix(mix(KEY_TOP, KEY_TOP_HOVER, t), KEY_TOP_ON, s)),
         bottom: shade(mix(mix(KEY_BOTTOM, KEY_BOTTOM_HOVER, t), KEY_BOTTOM_ON, s)),
         light: mix(
-            Color32::from_white_alpha((40.0 + 24.0 * t) as u8),
+            Color32::from_white_alpha((70.0 + 30.0 * t) as u8),
             KEY_FG_ON.gamma_multiply(0.4),
             s,
         ),
