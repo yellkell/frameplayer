@@ -161,7 +161,10 @@ impl App {
         let thumbs = ui::thumbs::Thumbs::new(services.opener.clone());
         let mut panels = [
             panel([1600, 1000], 1.8, 1.25),
-            panel([1400, 268], 1.2, 1.25),
+            // The bar is 1400 x 268 px at 1.2 m wide; its panel adds room
+            // round it for the shadow it casts (BAR_SHADOW_ROOM), at the
+            // same scale.
+            panel([1450, 320], 1.2 * 1450.0 / 1400.0, 1.25),
             panel([900, 1020], 0.75, 1.25),
             panel([1200, 456], 1.0, 1.25),
         ];

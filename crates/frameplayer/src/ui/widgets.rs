@@ -183,6 +183,93 @@ pub fn icon_button(ui: &mut Ui, icon: &str, size: f32, selected: bool) -> Respon
     resp
 }
 
+const KEY_TOP: Color32 = Color32::from_rgb(54, 64, 77);
+const KEY_BOTTOM: Color32 = Color32::from_rgb(35, 42, 51);
+const KEY_TOP_HOVER: Color32 = Color32::from_rgb(72, 84, 98);
+const KEY_BOTTOM_HOVER: Color32 = Color32::from_rgb(45, 54, 65);
+const KEY_TOP_ON: Color32 = Color32::from_rgb(31, 76, 114);
+const KEY_BOTTOM_ON: Color32 = Color32::from_rgb(21, 52, 82);
+const KEY_FG_ON: Color32 = Color32::from_rgb(125, 200, 255);
+/// The sunken trays that hold groups of keys.
+pub const WELL: Color32 = Color32::from_rgb(10, 13, 17);
+
+/// Paints the raised body of a key filling `resp.rect` (less a margin for
+/// its shadow), lifted under the pointer and sunk while pressed; returns
+/// the body's rect and the colour for what goes on it.
+pub fn key_face(ui: &Ui, resp: &Response, radius: f32, selected: bool) -> (Rect, Color32) {
+    let t = anim(ui, resp.id, resp.hovered());
+    let s = anim(ui, resp.id.with("sel"), selected);
+    let down = resp.is_pointer_button_down_on();
+    let dy = if down { 0.5 } else { -1.5 * t };
+    let rect = resp.rect.shrink(3.0).translate(Vec2::new(0.0, dy));
+    let shade = |c: Color32| if down { mix(c, Color32::BLACK, 0.15) } else { c };
+    let look = super::depth::Raised {
+        top: shade(mix(mix(KEY_TOP, KEY_TOP_HOVER, t), KEY_TOP_ON, s)),
+        bottom: shade(mix(mix(KEY_BOTTOM, KEY_BOTTOM_HOVER, t), KEY_BOTTOM_ON, s)),
+        light: mix(
+            Color32::from_white_alpha((40.0 + 24.0 * t) as u8),
+            KEY_FG_ON.gamma_multiply(0.4),
+            s,
+        ),
+        lift: if down { 0.2 } else { 0.6 + 0.6 * t },
+        glow: (s > 0.0).then(|| theme::ACCENT.gamma_multiply(0.35 * s)),
+    };
+    super::depth::raised(ui.painter(), rect, radius.min(rect.height() / 2.0), look);
+    let fg = mix(mix(theme::TEXT, Color32::WHITE, t), KEY_FG_ON, s);
+    (rect, fg)
+}
+
+/// A raised round key, for the control bar. `selected` marks a toggle
+/// that is on.
+pub fn key(ui: &mut Ui, icon: &str, size: f32, selected: bool) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
+    if ui.is_rect_visible(rect) {
+        let (face, fg) = key_face(ui, &resp, size, selected);
+        ui.painter().text(
+            face.center(),
+            Align2::CENTER_CENTER,
+            icon,
+            theme::icon(size * 0.46),
+            fg,
+        );
+    }
+    resp
+}
+
+/// A raised pill key with a short label, for the control bar.
+pub fn pill_key(ui: &mut Ui, label: &str, selected: bool) -> Response {
+    let g = ui.painter().layout_no_wrap(
+        label.to_string(),
+        theme::font(Weight::SemiBold, 17.0),
+        Color32::WHITE,
+    );
+    let size = Vec2::new((g.size().x + 34.0).max(52.0), 46.0);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+    if ui.is_rect_visible(rect) {
+        let (face, fg) = key_face(ui, &resp, size.y, selected);
+        ui.painter()
+            .galley_with_override_text_color(face.center() - g.size() / 2.0, g, fg);
+    }
+    resp
+}
+
+/// A sunken tray holding a group of keys on the control bar.
+pub fn well<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let slot = ui.painter().add(egui::Shape::Noop);
+    let inner = egui::Frame::new()
+        .inner_margin(egui::Margin::same(5))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            add(ui)
+        });
+    let r = inner.response.rect;
+    ui.painter().set(
+        slot,
+        egui::Shape::Vec(super::depth::sunken_shapes(r, r.height() / 2.0, WELL)),
+    );
+    inner.inner
+}
+
 /// A chip: a short choice in a row of choices (filters, formats, tabs).
 pub fn chip(ui: &mut Ui, label: &str, selected: bool) -> Response {
     chip_icon(ui, None, label, selected)
@@ -488,25 +575,57 @@ pub fn slider(
             0.0
         };
         let x = egui::lerp(rail_x.clone(), f);
-        let h = 6.0 + t * 2.0;
+        let h = 7.0 + t * 2.0;
         let y = rect.center().y;
-        let p = ui.painter();
-        let round = CornerRadius::same((h / 2.0) as u8);
-        p.rect_filled(
-            Rect::from_x_y_ranges(rail_x.clone(), (y - h / 2.0)..=(y + h / 2.0)),
-            round,
-            theme::SURFACE_3,
-        );
-        p.rect_filled(
-            Rect::from_x_y_ranges(*rail_x.start()..=x, (y - h / 2.0)..=(y + h / 2.0)),
-            round,
-            theme::ACCENT,
-        );
-        let r = 9.0 + t * 2.0;
-        p.circle_filled(Pos2::new(x, y + 1.5), r, Color32::from_black_alpha(90));
-        p.circle_filled(Pos2::new(x, y), r, Color32::WHITE);
+        let rail = Rect::from_x_y_ranges(rail_x.clone(), (y - h / 2.0)..=(y + h / 2.0));
+        let done = Rect::from_x_y_ranges(*rail_x.start()..=x, rail.y_range());
+        super::depth::sunken(ui.painter(), rail, h / 2.0, WELL);
+        rail_fill(ui.painter(), rail, done);
+        knob(ui.painter(), Pos2::new(x, y), 9.0 + t * 2.0);
     }
     resp
+}
+
+/// The accent fill over the `done` part of a sunken rail (seek bar,
+/// sliders), glowing a little.
+pub fn rail_fill(p: &egui::Painter, rail: Rect, done: Rect) {
+    let r = rail.height() / 2.0;
+    if done.width() > 0.5 {
+        let done = done.intersect(rail);
+        p.add(
+            egui::epaint::Shadow {
+                offset: [0, 0],
+                blur: 10,
+                spread: 0,
+                color: theme::ACCENT.gamma_multiply(0.3),
+            }
+            .as_shape(done, CornerRadius::same(r as u8)),
+        );
+        p.rect_filled(done, CornerRadius::same(r as u8), theme::ACCENT);
+        super::depth::fill_vgradient(
+            p,
+            done,
+            r,
+            Color32::from_rgb(98, 196, 255),
+            Color32::from_rgb(22, 132, 226),
+        );
+    }
+}
+
+/// The white knob on a rail: a raised disc of radius `r` at `c`.
+pub fn knob(p: &egui::Painter, c: Pos2, r: f32) {
+    super::depth::raised(
+        p,
+        Rect::from_center_size(c, Vec2::splat(r * 2.0)),
+        r,
+        super::depth::Raised {
+            top: Color32::WHITE,
+            bottom: Color32::from_rgb(208, 215, 224),
+            light: Color32::WHITE,
+            lift: 0.8,
+            glow: None,
+        },
+    );
 }
 
 /// A row of equal segments, each an icon over a label, one selected;
