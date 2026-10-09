@@ -285,13 +285,13 @@ fn passthrough(ui: &mut egui::Ui, v: &mut View) {
     widgets::rows(ui, |r| {
         if available {
             r.switch(
-                "Passthrough",
-                Some("Show your room around flat videos and the menus."),
+                "Show your room",
+                Some("Around flat videos and the menus."),
                 &mut s.passthrough,
             );
         } else {
             r.row(
-                "Passthrough",
+                "Show your room",
                 Some("This headset's runtime doesn't offer passthrough to apps."),
                 |_| {},
             );

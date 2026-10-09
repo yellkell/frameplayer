@@ -6,6 +6,7 @@
 #![allow(dead_code)]
 
 pub const APERTURE: &str = "\u{E00A}";
+pub const ARMCHAIR: &str = "\u{E012}";
 pub const ARROW_CLOCKWISE: &str = "\u{E036}";
 pub const ARROW_COUNTER_CLOCKWISE: &str = "\u{E038}";
 pub const ARROW_FAT_UP: &str = "\u{E52E}";

@@ -235,9 +235,11 @@ pub fn control_bar(ctx: &egui::Context, v: &mut View) {
         {
             v.actions.push(Action::HideControls);
         }
+        // Your room only shows around flat videos.
         if v.passthrough_available
-            && widgets::icon_button(&mut right, icons::EYEGLASSES, 52.0, v.settings.passthrough)
-                .tip("Passthrough")
+            && pb.format.projection == Projection::Flat
+            && widgets::icon_button(&mut right, icons::ARMCHAIR, 52.0, v.settings.passthrough)
+                .tip("Room")
                 .clicked()
         {
             v.actions.push(Action::TogglePassthrough);

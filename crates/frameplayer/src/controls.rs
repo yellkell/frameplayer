@@ -8,7 +8,7 @@
 //! | Thumbstick up / down | Volume | Tilt the picture |
 //! | Thumbstick press | Mute | Reset the picture |
 //! | A / D-pad down | Play / pause | Play / pause |
-//! | B / D-pad right | Back | Passthrough on / off |
+//! | B / D-pad right | Back | Your room on / off |
 //! | X / D-pad left | Previous video | Adjust panel |
 //! | Y / D-pad up | Next video | Show or hide the controls |
 //! | Menu / View | Library | Recenter |

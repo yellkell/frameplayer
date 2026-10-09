@@ -1236,7 +1236,7 @@ impl App {
                 }
                 Cmd::TogglePassthrough => {
                     if !input.passthrough_available {
-                        self.ui.toast("Passthrough isn't available");
+                        self.ui.toast("This headset can't show your room");
                     } else {
                         self.apply(Action::TogglePassthrough);
                         let flat_or_none = self
@@ -1245,9 +1245,9 @@ impl App {
                             .is_none_or(|p| p.format.projection == Projection::Flat);
                         self.ui
                             .toast(match (self.settings.passthrough, flat_or_none) {
-                                (false, _) => "Passthrough off",
-                                (true, true) => "Passthrough on",
-                                (true, false) => "Passthrough on: shows with flat videos",
+                                (false, _) => "Room off",
+                                (true, true) => "Room on",
+                                (true, false) => "Room on: shows with flat videos",
                             });
                     }
                 }

@@ -105,8 +105,8 @@ fn nav(ui: &mut egui::Ui, v: &mut View) {
                 v.actions.push(Action::Quit);
             }
             if v.passthrough_available
-                && widgets::icon_button(ui, icons::EYEGLASSES, 48.0, v.settings.passthrough)
-                    .tip("Passthrough")
+                && widgets::icon_button(ui, icons::ARMCHAIR, 48.0, v.settings.passthrough)
+                    .tip("Room")
                     .clicked()
             {
                 v.actions.push(Action::TogglePassthrough);
