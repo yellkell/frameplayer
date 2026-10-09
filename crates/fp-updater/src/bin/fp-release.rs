@@ -3,7 +3,7 @@
 //! ```text
 //! fp-release keygen [--out PREFIX]
 //! fp-release sign MANIFEST.json --key PREFIX.key
-//! fp-release verify MANIFEST.json --pub PREFIX.pub
+//! fp-release verify MANIFEST.json [--pub PREFIX.pub]
 //! fp-release manifest --version X --zip PATH --url-base URL [--arch aarch64]
 //!                     [--notes FILE] [--channel stable|beta] [--published RFC3339]
 //!                     [--out manifest.json]
@@ -41,8 +41,9 @@ USAGE:
   fp-release sign MANIFEST.json --key PREFIX.key
       Write MANIFEST.json.sig (base64 ed25519 signature of the exact bytes).
 
-  fp-release verify MANIFEST.json --pub PREFIX.pub
-      Check MANIFEST.json.sig and the manifest contents.
+  fp-release verify MANIFEST.json [--pub PREFIX.pub]
+      Check MANIFEST.json.sig and the manifest contents, against PREFIX.pub
+      or, without --pub, the release key built into FramePlayer.
 
   fp-release manifest --version X --zip PATH --url-base URL [--arch aarch64]
                       [--notes FILE] [--channel stable|beta]
@@ -272,7 +273,11 @@ fn sign(args: &Args) -> CliResult {
 
 fn verify(args: &Args) -> CliResult {
     let manifest_path = PathBuf::from(args.one_positional("manifest file")?);
-    let public = read_key_file(Path::new(args.need("pub")?))?;
+    let public = match args.get("pub") {
+        Some(p) => read_key_file(Path::new(p))?,
+        None => fp_updater::RELEASE_PUBLIC_KEY
+            .ok_or("this build has no release key; pass --pub PREFIX.pub")?,
+    };
     let key = public_key_from_bytes(&public).map_err(|e| e.to_string())?;
     let bytes = fs::read(&manifest_path)
         .map_err(|e| format!("cannot read {}: {e}", manifest_path.display()))?;

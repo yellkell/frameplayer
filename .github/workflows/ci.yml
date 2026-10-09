@@ -130,13 +130,15 @@ jobs:
           FP_RELEASE_KEY: ${{ secrets.FP_RELEASE_KEY }}
         run: |
           if [ -z "$FP_RELEASE_KEY" ]; then
-            echo "::warning::FP_RELEASE_KEY secret not set; manifest.json is unsigned and in-app updates will refuse it"
-            exit 0
+            echo "::error::FP_RELEASE_KEY secret not set; an unsigned manifest.json would be refused by in-app updates"
+            exit 1
           fi
           umask 077
           printf '%s\n' "$FP_RELEASE_KEY" > "$RUNNER_TEMP/release.key"
           cargo run --manifest-path src/Cargo.toml --release -p fp-updater --bin fp-release -- sign dist/manifest.json --key "$RUNNER_TEMP/release.key"
           rm -f "$RUNNER_TEMP/release.key"
+          # The signature must match the key FramePlayer builds carry.
+          cargo run --manifest-path src/Cargo.toml --release -p fp-updater --bin fp-release -- verify dist/manifest.json
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*

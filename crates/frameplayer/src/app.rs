@@ -507,7 +507,10 @@ impl App {
 
     fn check_updates(&mut self) {
         self.ui.update = UpdateStatus::Checking;
-        let channel = if self.settings.update_channel == "beta" {
+        // A prerelease build follows the beta track: on "stable" it would never
+        // see the next alpha and would report up to date forever.
+        let prerelease = env!("CARGO_PKG_VERSION").contains('-');
+        let channel = if self.settings.update_channel == "beta" || prerelease {
             fp_updater::Channel::Beta
         } else {
             fp_updater::Channel::Stable
