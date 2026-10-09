@@ -130,7 +130,7 @@ impl Spot {
         }
     }
 
-    fn centre(self, hand: usize) -> (f32, f32) {
+    fn centre(self) -> (f32, f32) {
         match self {
             Spot::Round(x, y, ..)
             | Spot::Pill(x, y, _)
@@ -146,7 +146,7 @@ impl Spot {
         match self {
             Spot::Bumper if hand == RIGHT => 1.0,
             Spot::Bumper => -1.0,
-            _ => self.centre(hand).0,
+            _ => self.centre().0,
         }
     }
 
@@ -257,7 +257,7 @@ fn draw_hand(ui: &mut egui::Ui, v: &mut View, hand: usize, c: Pos2, r: f32, t: f
     let open = v.state.remap_open;
     let mut labels: Vec<(f32, Pos2, Vec<String>, f32)> = Vec::new();
     for (k, spot) in spots(hand).into_iter().enumerate() {
-        let (sx, sy) = spot.centre(hand);
+        let (sx, sy) = spot.centre();
         let pos = at(sx, sy);
         let hit = match spot {
             Spot::Round(_, _, rad, ..) => {
