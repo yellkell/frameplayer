@@ -367,7 +367,7 @@ fn play_button(ui: &mut egui::Ui, paused: bool) -> egui::Response {
             .animate_bool_with_time(resp.id, resp.hovered(), 0.12);
         let down = resp.is_pointer_button_down_on();
         let r = 34.0 + t * 2.0 - if down { 2.0 } else { 0.0 };
-        let c = rect.center() + Vec2::new(0.0, if down { 0.5 } else { -1.0 * t });
+        let c = rect.center() + Vec2::new(0.0, if down { 0.5 } else { -t });
         let dome = egui::Rect::from_center_size(c, Vec2::splat(r * 2.0));
         let lit = |a: Color32, b: Color32| a.lerp_to_gamma(b, t);
         depth::raised(
