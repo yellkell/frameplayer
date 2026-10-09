@@ -229,6 +229,16 @@ fn facts(r: &MediaRecord) -> String {
 /// Paints a thumbnail (or a placeholder) into `rect` with rounded corners.
 fn thumbnail(ui: &egui::Ui, v: &mut View, r: &MediaRecord, rect: egui::Rect, radius: u8) {
     let painter = ui.painter();
+    // The picture sits a little above the page.
+    painter.add(
+        egui::Shadow {
+            offset: [0, 6],
+            blur: 16,
+            spread: 0,
+            color: Color32::from_black_alpha(130),
+        }
+        .as_shape(rect, egui::CornerRadius::same(radius)),
+    );
     match thumb_key(r).and_then(|k| v.thumbs.get(&k)) {
         Some(tex) => paint_cover_rounded(painter, rect, &tex, radius),
         None => {
@@ -617,9 +627,9 @@ fn home(ui: &mut egui::Ui, v: &mut View) {
 /// The search field: a rounded box with a magnifying glass.
 fn search_field(ui: &mut egui::Ui, text: &mut String) -> bool {
     let mut changed = false;
-    egui::Frame::new()
-        .fill(theme::SURFACE_2)
-        .corner_radius(12)
+    // A sunken box, like the trays and tracks.
+    let slot = ui.painter().add(egui::Shape::Noop);
+    let field = egui::Frame::new()
         .inner_margin(egui::Margin::symmetric(14, 0))
         .show(ui, |ui| {
             ui.set_height(44.0);
@@ -647,6 +657,11 @@ fn search_field(ui: &mut egui::Ui, text: &mut String) -> bool {
                 }
             });
         });
+    let r = field.response.rect;
+    ui.painter().set(
+        slot,
+        egui::Shape::Vec(super::depth::sunken_shapes(r, 12.0, widgets::WELL)),
+    );
     changed
 }
 
