@@ -3,9 +3,11 @@
 //! button and pulling the trigger opens its choices below.
 //!
 //! The pictures are Blender renders of Valve's controller models as SteamVR
-//! ships them (assets/controllers, credited in packaging/licenses). Part
+//! ships them (assets/controllers, credited in packaging/licenses), seen
+//! from 35° above face-on so the bumper on top of the head shows. Part
 //! centres come from the same renders, in units of the round head's radius
-//! from its centre.
+//! from its centre; the tilt squashes the face's round parts vertically by
+//! [`SQUASH`].
 
 use super::theme::{self, Weight};
 use super::widgets;
@@ -14,8 +16,6 @@ use crate::bindings::{Axis, AxisAction, Button, ButtonAction, HandBindings, LEFT
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2};
 use std::time::Duration;
 
-/// The bumper band's colour: the controllers' light grey.
-const KEY: Color32 = Color32::from_rgb(150, 154, 160);
 const LABEL_W: f32 = 170.0;
 const GAP: f32 = 14.0;
 
@@ -32,31 +32,33 @@ enum Spot {
     Bumper,
 }
 
+/// cos 35°: how much the tilted view squashes round parts vertically.
+const SQUASH: f32 = 0.82;
 /// The D-pad's centre and how far each arm's centre is from it.
-const DPAD: (f32, f32, f32) = (-0.427, -0.094, 0.235);
+const DPAD: (f32, f32, f32) = (-0.426, 0.021, 0.235);
 
 /// The right controller has A/B/X/Y, the left a D-pad in their place.
 fn spots(hand: usize) -> Vec<Spot> {
     if hand == RIGHT {
         vec![
             Spot::Bumper,
-            Spot::Pill(-0.065, -0.384, Button::Menu),
-            Spot::Round(0.378, -0.352, 0.132, Button::North),
-            Spot::Round(0.180, -0.072, 0.132, Button::West),
-            Spot::Round(0.659, -0.155, 0.132, Button::East),
-            Spot::Round(0.461, 0.126, 0.132, Button::South),
-            Spot::Stick(-0.288, 0.222),
+            Spot::Pill(-0.066, -0.174, Button::Menu),
+            Spot::Round(0.378, -0.161, 0.132, Button::North),
+            Spot::Round(0.180, 0.067, 0.132, Button::West),
+            Spot::Round(0.659, 0.011, 0.132, Button::East),
+            Spot::Round(0.461, 0.240, 0.132, Button::South),
+            Spot::Stick(-0.289, 0.316),
         ]
     } else {
         let (cx, cy, d) = DPAD;
         vec![
             Spot::Bumper,
-            Spot::Pill(0.068, -0.377, Button::Menu),
-            Spot::Arm(cx, cy - d, Button::North),
+            Spot::Pill(0.070, -0.212, Button::Menu),
+            Spot::Arm(cx, cy - d * SQUASH, Button::North),
             Spot::Arm(cx - d, cy, Button::West),
             Spot::Arm(cx + d, cy, Button::East),
-            Spot::Arm(cx, cy + d, Button::South),
-            Spot::Stick(0.300, 0.226),
+            Spot::Arm(cx, cy + d * SQUASH, Button::South),
+            Spot::Stick(0.304, 0.284),
         ]
     }
 }
@@ -65,31 +67,39 @@ fn spots(hand: usize) -> Vec<Spot> {
 /// left, top, right, bottom.
 fn picture_rect(hand: usize) -> [f32; 4] {
     if hand == RIGHT {
-        [-1.028, -1.096, 1.033, 2.452]
+        [-1.023, -1.122, 1.026, 1.338]
     } else {
-        [-1.029, -1.088, 1.033, 2.511]
+        [-1.02, -1.139, 1.03, 1.379]
     }
 }
 
-/// The controller's picture, loaded into `ctx` on first use.
-fn picture(ctx: &egui::Context, hand: usize) -> Option<egui::TextureHandle> {
-    let id = egui::Id::new(("controller-picture", hand));
+/// Where the bumper shows along the head's top edge: left, top, right,
+/// bottom in head radii.
+fn bumper_rect(hand: usize) -> [f32; 4] {
+    if hand == RIGHT {
+        [-0.456, -0.866, 0.375, -0.727]
+    } else {
+        [-0.354, -0.893, 0.411, -0.776]
+    }
+}
+
+/// A picture of the controller, or (`glow`) the bumper's glow mask over the
+/// same area; loaded into `ctx` on first use.
+fn picture(ctx: &egui::Context, hand: usize, glow: bool) -> Option<egui::TextureHandle> {
+    let id = egui::Id::new(("controller-picture", hand, glow));
     if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
         return Some(t);
     }
-    let bytes: &[u8] = if hand == RIGHT {
-        include_bytes!("../../assets/controllers/right.png")
-    } else {
-        include_bytes!("../../assets/controllers/left.png")
+    let bytes: &[u8] = match (hand == RIGHT, glow) {
+        (true, false) => include_bytes!("../../assets/controllers/right.png"),
+        (false, false) => include_bytes!("../../assets/controllers/left.png"),
+        (true, true) => include_bytes!("../../assets/controllers/right-bumper.png"),
+        (false, true) => include_bytes!("../../assets/controllers/left-bumper.png"),
     };
     let img = image::load_from_memory(bytes).ok()?.to_rgba8();
     let size = [img.width() as usize, img.height() as usize];
     let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
-    let name = if hand == RIGHT {
-        "right-controller"
-    } else {
-        "left-controller"
-    };
+    let name = format!("controller-{hand}-{glow}");
     let t = ctx.load_texture(name, color, egui::TextureOptions::LINEAR);
     ctx.data_mut(|d| d.insert_temp(id, t.clone()));
     Some(t)
@@ -122,7 +132,20 @@ impl Spot {
             | Spot::Pill(x, y, _)
             | Spot::Arm(x, y, _)
             | Spot::Stick(x, y) => (x, y),
-            Spot::Bumper => (if hand == RIGHT { 0.05 } else { -0.05 }, -1.12),
+            Spot::Bumper => {
+                let [l, t, r, b] = bumper_rect(hand);
+                ((l + r) / 2.0, (t + b) / 2.0)
+            }
+        }
+    }
+
+    /// Which label column the spot's label goes in: negative is left. The
+    /// bumper's goes on the controller's outer side.
+    fn side(self, hand: usize) -> f32 {
+        match self {
+            Spot::Bumper if hand == RIGHT => 1.0,
+            Spot::Bumper => -1.0,
+            _ => self.centre(hand).0,
         }
     }
 
@@ -175,7 +198,7 @@ pub fn controller_map(ui: &mut egui::Ui, v: &mut View) {
         let map = v.settings.controls.hand(hand);
         let mut w = [0.0_f32; 2];
         for spot in spots(hand) {
-            let col = (spot.centre(hand).0 >= 0.0) as usize;
+            let col = (spot.side(hand) >= 0.0) as usize;
             w[col] = w[col].max(label_width(ui, &spot.lines(map)));
         }
         w
@@ -184,8 +207,8 @@ pub fn controller_map(ui: &mut egui::Ui, v: &mut View) {
         .iter()
         .map(|w| (each - w[0] - w[1] - 2.0 * GAP) / 2.0)
         .fold(f32::MAX, f32::min)
-        .clamp(54.0, 125.0);
-    let h = r * 3.6 + 64.0;
+        .clamp(54.0, 140.0);
+    let h = r * 2.55 + 64.0;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(avail, h), Sense::hover());
     let t = ui.input(|i| i.time) as f32;
     for (i, hand) in [LEFT, RIGHT].into_iter().enumerate() {
@@ -198,7 +221,7 @@ pub fn controller_map(ui: &mut egui::Ui, v: &mut View) {
         } else {
             (lo + hi) / 2.0
         };
-        let centre = Pos2::new(cx, rect.top() + 20.0 + r * 1.12);
+        let centre = Pos2::new(cx, rect.top() + 20.0 + r * 1.14);
         draw_hand(ui, v, hand, centre, r, t);
         ui.painter().text(
             Pos2::new(centre.x, rect.bottom()),
@@ -219,7 +242,7 @@ fn draw_hand(ui: &mut egui::Ui, v: &mut View, hand: usize, c: Pos2, r: f32, t: f
     let at = |x: f32, y: f32| Pos2::new(c.x + x * r, c.y + y * r);
     let p = ui.painter().clone();
 
-    if let Some(tex) = picture(ui.ctx(), hand) {
+    if let Some(tex) = picture(ui.ctx(), hand, false) {
         let [l, t_, rr, b] = picture_rect(hand);
         p.image(
             tex.id(),
@@ -236,13 +259,17 @@ fn draw_hand(ui: &mut egui::Ui, v: &mut View, hand: usize, c: Pos2, r: f32, t: f
         let (sx, sy) = spot.centre(hand);
         let pos = at(sx, sy);
         let hit = match spot {
-            Spot::Round(_, _, rad, ..) => {
-                Rect::from_center_size(pos, Vec2::splat(2.0 * rad * r + 10.0))
-            }
+            Spot::Round(_, _, rad, ..) => Rect::from_center_size(
+                pos,
+                Vec2::new(2.0, 2.0 * SQUASH) * rad * r + Vec2::splat(10.0),
+            ),
             Spot::Pill(..) => Rect::from_center_size(pos, Vec2::new(0.34 * r, 0.2 * r + 8.0)),
             Spot::Arm(..) => Rect::from_center_size(pos, Vec2::splat(0.25 * r)),
             Spot::Stick(..) => Rect::from_center_size(pos, Vec2::splat(0.66 * r)),
-            Spot::Bumper => Rect::from_center_size(pos, Vec2::new(0.9 * r, 0.3 * r)),
+            Spot::Bumper => {
+                let [l, t, rr, b] = bumper_rect(hand);
+                Rect::from_min_max(at(l, t), at(rr, b)).expand(6.0)
+            }
         };
         let resp = ui.interact(hit, ui.id().with(("remap", hand, k)), Sense::click());
         let hover = ui
@@ -254,7 +281,16 @@ fn draw_hand(ui: &mut egui::Ui, v: &mut View, hand: usize, c: Pos2, r: f32, t: f
             .animate_bool_with_time(resp.id.with("sel"), selected, 0.15);
         let pulse = 0.55 + 0.45 * (t * 2.2 + k as f32 * 0.9).sin();
         let strength = (0.5 + 0.3 * pulse + 0.4 * hover).min(1.0).max(sel);
-        draw_spot(&p, spot, pos, r, strength, sel, hand);
+        draw_spot(
+            &p,
+            spot,
+            pos,
+            r,
+            strength,
+            sel,
+            hand,
+            picture_at(ui.ctx(), hand, c, r),
+        );
         if resp.clicked() {
             v.state.remap_open = if selected {
                 None
@@ -262,7 +298,7 @@ fn draw_hand(ui: &mut egui::Ui, v: &mut View, hand: usize, c: Pos2, r: f32, t: f
                 Some(spot.slot(hand))
             };
         }
-        labels.push((sx, pos, spot.lines(&map), hover.max(sel)));
+        labels.push((spot.side(hand), pos, spot.lines(&map), hover.max(sel)));
     }
 
     // Labels in a column on each side, nudged apart, with leader lines.
@@ -321,8 +357,26 @@ fn draw_hand(ui: &mut egui::Ui, v: &mut View, hand: usize, c: Pos2, r: f32, t: f
     }
 }
 
+/// The bumper's glow texture and the rect the picture fills, for
+/// [`draw_spot`].
+fn picture_at(
+    ctx: &egui::Context,
+    hand: usize,
+    c: Pos2,
+    r: f32,
+) -> Option<(egui::TextureHandle, Rect)> {
+    let [l, t, rr, b] = picture_rect(hand);
+    let rect = Rect::from_min_max(
+        Pos2::new(c.x + l * r, c.y + t * r),
+        Pos2::new(c.x + rr * r, c.y + b * r),
+    );
+    picture(ctx, hand, true).map(|t| (t, rect))
+}
+
 /// One hotspot: a halo round the real button in the picture, filled with
-/// the accent while its choices are open.
+/// the accent while its choices are open; the bumper glows through its
+/// own mask.
+#[allow(clippy::too_many_arguments)]
 fn draw_spot(
     p: &egui::Painter,
     spot: Spot,
@@ -331,6 +385,7 @@ fn draw_spot(
     strength: f32,
     sel: f32,
     _hand: usize,
+    bumper_glow: Option<(egui::TextureHandle, Rect)>,
 ) {
     let glow = |a: f32| theme::ACCENT.gamma_multiply((a * strength).clamp(0.0, 1.0));
     let fill = theme::ACCENT.gamma_multiply(0.45 * sel);
@@ -338,6 +393,7 @@ fn draw_spot(
         2.0_f32,
         theme::ACCENT_HOVER.gamma_multiply(strength.max(sel)),
     );
+    let oval = |rad: f32| Vec2::new(rad, rad * SQUASH);
     match spot {
         Spot::Round(..) | Spot::Stick(..) => {
             let rr = match spot {
@@ -345,19 +401,24 @@ fn draw_spot(
                 _ => 0.33,
             } * r;
             for (k, a) in [0.1, 0.2, 0.35].into_iter().enumerate() {
-                p.circle_stroke(
+                let e = 2.0 + (3 - k) as f32 * 2.5;
+                p.add(Shape::ellipse_stroke(
                     pos,
-                    rr + 2.0 + (3 - k) as f32 * 2.5,
+                    oval(rr) + Vec2::splat(e),
                     Stroke::new(3.0_f32, glow(a)),
-                );
+                ));
             }
-            p.circle_filled(pos, rr, fill);
-            p.circle_stroke(pos, rr + 1.5, ring);
+            p.add(Shape::ellipse_filled(pos, oval(rr), fill));
+            p.add(Shape::ellipse_stroke(
+                pos,
+                oval(rr) + Vec2::splat(1.5),
+                ring,
+            ));
         }
         Spot::Pill(..) | Spot::Arm(..) => {
             let (size, round) = match spot {
-                Spot::Pill(..) => (Vec2::new(0.3 * r, 0.15 * r), 0.075 * r),
-                _ => (Vec2::splat(0.2 * r), 0.04 * r),
+                Spot::Pill(..) => (Vec2::new(0.3 * r, 0.15 * r * SQUASH), 0.06 * r),
+                _ => (Vec2::new(0.2 * r, 0.2 * r * SQUASH), 0.04 * r),
             };
             let rect = Rect::from_center_size(pos, size);
             for (k, a) in [0.1, 0.2, 0.35].into_iter().enumerate() {
@@ -378,23 +439,15 @@ fn draw_spot(
             );
         }
         Spot::Bumper => {
-            // The bumper is on top of the head, out of sight face-on: a
-            // band just outside the head's top edge stands for it.
-            let c = pos + Vec2::new(0.0, 1.12 * r);
-            let arc: Vec<Pos2> = (0..=24)
-                .map(|k| {
-                    let a = (-125.0 + 70.0 * k as f32 / 24.0).to_radians();
-                    c + Vec2::angled(a) * (r + 0.13 * r)
-                })
-                .collect();
-            p.add(Shape::line(
-                arc.clone(),
-                Stroke::new(0.16 * r + 8.0 * strength, glow(0.3)),
-            ));
-            p.add(Shape::line(
-                arc,
-                Stroke::new(0.1 * r, KEY.lerp_to_gamma(theme::ACCENT, sel)),
-            ));
+            if let Some((tex, rect)) = bumper_glow {
+                let tint = theme::ACCENT.gamma_multiply((0.55 * strength).max(0.9 * sel));
+                p.image(
+                    tex.id(),
+                    rect,
+                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                    tint,
+                );
+            }
         }
     }
 }
