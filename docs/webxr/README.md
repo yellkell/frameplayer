@@ -376,6 +376,37 @@ decoder is still closing or Steam holds one (FramePlayer's primer frame works
 around this; not ported). MSE, WebCodecs (8K H.264/HEVC/VP9) and
 `requestVideoFrameCallback` work; Widevine and WebXR media layers don't.
 
+### Controllers across the Steam menu, and DeoVR (2026-10-11): patch 0017
+
+SteamVR briefly reports no interaction profile, and makes the controllers'
+actions inactive, when a session starts and when the Steam menu takes the
+controllers. Chromium followed every step: a controller was described with no
+profiles, re-described when the profile came back, and dropped while its
+trigger action was inactive. Blink treats each as an input source removed and
+a new one added, so WebXR video players that build models per input source
+drew a second set next to a stale first one; pausing and opening the Steam menu
+left models frozen across the view.
+
+0017 reports a controller only once its profile is known, keeps the last
+profile when it goes away, and keeps a reported controller (unpressed) for up
+to 2 s while its actions are inactive. At session start the page now gets one
+`inputsourceschange` adding both controllers with
+`valve-frame`/`oculus-touch-v3`/...; opening the Steam menu no longer drops
+them. Not solved: Blink still replaces each controller once as the menu
+opens, because its gamepad goes away while the actions are inactive.
+
+DeoVR's web player (deovr.com) only opens in VR on browsers it recognises as a
+headset; it takes a Linux Chrome with WebXR and exactly two touch points for
+Galaxy XR. frame-browsing's `deovr.js` reports two touch points on deovr.com
+only, and leaves `hand-tracking` out of its session request: the Frame has no
+camera hand tracking (the joints come from the controllers' finger sensors),
+and without it the player shows controllers, which frame-models makes the
+Steam Frame's own.
+
+`launch.sh` takes `CHROMIUM_XR_NAME` (default `chromium-xr-frame`): a second
+copy, e.g. a test build, gets its own profile, config folder (`flags`,
+`home-url`) and log.
+
 ## 9. What this does not solve
 
 - Anything SteamVR needs beyond these two items will only show up once the

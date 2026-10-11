@@ -10,9 +10,13 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
 sandboxed=${CHROMIUM_XR_SANDBOXED:-0}
-name=chromium-xr-frame
-[[ $sandboxed == 1 ]] && name=chromium-xr-frame-sandboxed
-logs=$HOME/.local/state/chromium-xr-frame
+# CHROMIUM_XR_NAME runs a second copy (a test build) side by side: its own
+# profile, config folder (flags, home-url) and log, nothing shared.
+base=${CHROMIUM_XR_NAME:-chromium-xr-frame}
+name=$base
+[[ $sandboxed == 1 ]] && name=$base-sandboxed
+conf=$HOME/.config/$base
+logs=$HOME/.local/state/$base
 mkdir -p "$logs"
 log=$logs/$name.log
 [[ -f $log ]] && mv -f "$log" "$log.1"
@@ -39,7 +43,7 @@ fi
 # The page to open when started without one (from the Steam library or by
 # FramePlayer through Steam). A running browser opens it in a new tab.
 home_url=https://yellkell.com/fac
-home_file=$HOME/.config/chromium-xr-frame/home-url
+home_file=$conf/home-url
 if [[ -s $home_file ]]; then
   read -r saved <"$home_file" || true
   [[ $saved == http://* || $saved == https://* ]] && home_url=$saved
@@ -59,7 +63,7 @@ vrcmd=/opt/steamvr/bin/linuxarm64/vrcmd
 vrsettings=$HOME/.config/openvr/config/steamvr.vrsettings
 app_default() { # KEY TYPE VALUE [EARLIER-LAUNCHER-DEFAULT]
   [[ -n ${SteamAppId:-} && $3 != 0 && -x $vrcmd ]] || return 0
-  local replaced=$HOME/.config/chromium-xr-frame/.replaced-$1-${4:-}
+  local replaced=$conf/.replaced-$1-${4:-}
   python3 -c 'import json, os, sys
 v = json.load(open(sys.argv[1])).get("steam.app." + sys.argv[2], {}).get(sys.argv[3])
 if v is None or (sys.argv[4] and float(v) == float(sys.argv[4]) and not os.path.exists(sys.argv[5])):
@@ -125,7 +129,7 @@ fi
 # DevTools on loopback only while ~/.config/chromium-xr-frame-devtools exists,
 # for remote debugging over SSH (ssh -L 9223:127.0.0.1:9223). It has no
 # authentication, so remove the file when done.
-[[ -f $HOME/.config/chromium-xr-frame-devtools ]] && flags+=(--remote-debugging-port=9223)
+[[ -f $conf-devtools ]] && flags+=(--remote-debugging-port=9223)
 # Extra flags for experiments, one per line (# starts a comment), from
 # ~/.config/chromium-xr-frame/flags; later flags win over the ones above, and
 # a later --enable-features or --disable-features replaces the earlier one, so
@@ -133,7 +137,7 @@ fi
 # AcceleratedVideoDecoder,PreferV4L2VideoAcceleration;
 # DisableLoadExtensionCommandLineSwitch). --use-angle=gl and
 # --enable-features=OpenXR go back to OpenGL on zink.
-flags_file=$HOME/.config/chromium-xr-frame/flags
+flags_file=$conf/flags
 if [[ -f $flags_file ]]; then
   while read -r flag; do
     [[ -z $flag || $flag == \#* ]] || flags+=("$flag")

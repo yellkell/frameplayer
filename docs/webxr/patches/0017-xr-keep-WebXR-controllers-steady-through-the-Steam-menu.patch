@@ -1,0 +1,133 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Sun, 11 Oct 2026 14:00:00 +0000
+Subject: [PATCH 17/17] xr: keep WebXR controllers steady through the Steam
+ menu
+
+SteamVR on the Steam Frame briefly reports no interaction profile, and
+makes the controllers' actions inactive, when a session starts and when
+the Steam menu takes the controllers (just before the session loses
+focus). Chromium followed every step: a controller was described with
+no profiles, re-described when the profile came back, and dropped as
+"not connected" while its trigger action was inactive. Blink sees each
+of those as an input source removed and a new one added.
+
+WebXR video players that build hand / controller models per input source
+then drew a second set next to a stale first one; opening the Steam
+menu while paused left models frozen across the view.
+
+- GetDescription() reports a controller only once its profile is known,
+  so pages never get one without profiles.
+- When a reported controller's profile goes away, it keeps the last one
+  instead of changing the description.
+- A reported controller whose actions go inactive stays (unpressed) for
+  up to 2 s instead of being dropped; one that's really gone still
+  disappears. While the session is blurred Blink ignores input anyway.
+
+Checked on the Steam Frame (2026-10-11) with an inputsourceschange
+logger: at session start one addition with the valve-frame /
+oculus-touch-v3 profiles (before: added without profiles, then removed
+and added again). Opening the Steam menu no longer reports a controller
+without profiles or drops it, and DeoVR's web player keeps its models
+in place. Not solved: Blink still replaces each controller once as the
+menu opens, because its gamepad goes away while the actions are
+inactive (XRInputSource::InvalidatesSameObject).
+---
+diff --git a/device/vr/openxr/openxr_controller.cc b/device/vr/openxr/openxr_controller.cc
+--- a/device/vr/openxr/openxr_controller.cc
++++ b/device/vr/openxr/openxr_controller.cc
+@@ -488,6 +488,15 @@ mojom::XRInputSourceDescriptionPtr OpenXrController::GetDescription(
+     if (XR_FAILED(UpdateInteractionProfile())) {
+       return nullptr;
+     }
++    // Until the runtime reports an interaction profile (at session start, and
++    // after the session loses focus to a system menu) the source would have
++    // no profiles. Pages build their hand / controller models from the
++    // profiles: a source announced without them and re-announced a moment
++    // later with them made pages build a second set of models next to a
++    // stale first one. Report the source only once its profile is known.
++    if (interaction_profile_ == mojom::OpenXrInteractionProfileType::kInvalid) {
++      return nullptr;
++    }
+     description_ = device::mojom::XRInputSourceDescription::New();
+     description_->handedness = GetHandness();
+     description_->target_ray_mode = GetTargetRayMode();
+@@ -695,8 +704,19 @@ XrResult OpenXrController::UpdateInteractionProfile() {
+   }
+ 
+   if (description_) {
+-    description_->profiles = path_helper_->GetInputProfiles(
+-        interaction_profile_, hand_joints_enabled_);
++    if (interaction_profile_ == mojom::OpenXrInteractionProfileType::kInvalid &&
++        old_interaction_profile !=
++            mojom::OpenXrInteractionProfileType::kInvalid) {
++      // SteamVR drops the profile for a moment when its menu takes the
++      // controllers. Keep the source exactly as it was: a changed (or
++      // dropped) description is a new input source to the page, which then
++      // builds a second set of hand / controller models next to the first.
++      // Poses aren't reported while the session is blurred anyway.
++      interaction_profile_ = old_interaction_profile;
++    } else {
++      description_->profiles = path_helper_->GetInputProfiles(
++          interaction_profile_, hand_joints_enabled_);
++    }
+   }
+ 
+   DVLOG(1) << __func__ << ": controller type=" << GetStringFromType(type_)
+diff --git a/device/vr/openxr/openxr_controller.h b/device/vr/openxr/openxr_controller.h
+--- a/device/vr/openxr/openxr_controller.h
++++ b/device/vr/openxr/openxr_controller.h
+@@ -57,6 +57,9 @@ class OpenXrController {
+   mojom::XRHandedness GetHandness() const;
+   std::optional<GamepadButton> GetButton(OpenXrButtonType type) const;
+   std::optional<Gamepad> GetWebXRGamepad() const;
++  // True once the controller has been reported to the page.
++  bool has_description() const { return !!description_; }
++
+   mojom::OpenXrInteractionProfileType interaction_profile() const {
+     return interaction_profile_;
+   }
+diff --git a/device/vr/openxr/openxr_input_helper.cc b/device/vr/openxr/openxr_input_helper.cc
+--- a/device/vr/openxr/openxr_input_helper.cc
++++ b/device/vr/openxr/openxr_input_helper.cc
+@@ -181,8 +181,24 @@ std::vector<mojom::XRInputSourceStatePtr> OpenXRInputHelper::GetInputState(
+ 
+     // Having a trigger button is the minimum for an webxr input.
+     // No trigger button indicates input is not connected.
++    // SteamVR makes a controller's actions inactive for a moment when its
++    // menu takes the controllers, just before the session loses focus. A
++    // controller the page already has stays for up to 2 s (unpressed), so
++    // the page doesn't see it removed and re-added (a second set of models);
++    // while the session is blurred Blink ignores input anyway.
+     if (!primary_button) {
+-      continue;
++      OpenXrControllerState& cs = controller_states_[i];
++      const base::TimeTicks now = base::TimeTicks::Now();
++      if (cs.inactive_since.is_null()) {
++        cs.inactive_since = now;
++      }
++      if (!controller->has_description() ||
++          now - cs.inactive_since > base::Seconds(2)) {
++        continue;
++      }
++      primary_button = GamepadButton();
++    } else {
++      controller_states_[i].inactive_since = base::TimeTicks();
+     }
+ 
+     device::mojom::XRInputSourceStatePtr state =
+diff --git a/device/vr/openxr/openxr_input_helper.h b/device/vr/openxr/openxr_input_helper.h
+--- a/device/vr/openxr/openxr_input_helper.h
++++ b/device/vr/openxr/openxr_input_helper.h
+@@ -90,6 +90,8 @@ class OpenXRInputHelper {
+     OpenXrController controller;
+     bool primary_button_pressed;
+     bool squeeze_button_pressed;
++    // When a reported controller's actions went inactive (null when active).
++    base::TimeTicks inactive_since;
+   };
+   std::array<OpenXrControllerState,
+              static_cast<size_t>(OpenXrHandednessType::kCount)>
+-- 
+2.43.0
+
