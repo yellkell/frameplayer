@@ -403,6 +403,12 @@ camera hand tracking (the joints come from the controllers' finger sensors),
 and without it the player shows controllers, which frame-models makes the
 Steam Frame's own.
 
+Other VR video players get the same treatment: frame-browsing's
+`video-controllers.js` leaves optional `hand-tracking` out of a session request
+when the page has a `<video>`, so players show the Frame's controllers instead
+of generic hands drawn from the finger sensors. Pages without video (games) and
+pages that require hand tracking keep it.
+
 `launch.sh` takes `CHROMIUM_XR_NAME` (default `chromium-xr-frame`): a second
 copy, e.g. a test build, gets its own profile, config folder (`flags`,
 `home-url`) and log.
