@@ -1188,7 +1188,7 @@ dependencies = [
 
 [[package]]
 name = "frameplayer"
-version = "0.3.0-alpha.10"
+version = "0.3.0-alpha.11"
 dependencies = [
  "ash",
  "crossbeam-channel",
