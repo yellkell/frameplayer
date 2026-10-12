@@ -1395,6 +1395,14 @@ impl App {
     }
 
     fn open_request(&mut self, req: OpenRequest) {
+        // Close the current video first: it holds a hardware decoder session,
+        // and with Steam holding others the new video could not get one, fell
+        // back to software and stuttered ("Hardware decoder busy").
+        if let Some(p) = self.playback.take() {
+            p.close(&self.services.library);
+            self.services.haptics.clear();
+            self.ui.invalidate();
+        }
         self.open_seq += 1;
         let lib = self.services.library.clone();
         let seq = self.open_seq;
