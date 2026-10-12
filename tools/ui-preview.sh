@@ -66,6 +66,13 @@ point main 0.12 0.15
 click
 frames 8
 panel keyboard keyboard
+# Its symbols page (the #+= key), then back to letters.
+point keyboard 0.195 0.80
+click
+frames 8
+panel keyboard keyboard-symbols
+click
+frames 3
 button secondary
 frames 3
 # The player.

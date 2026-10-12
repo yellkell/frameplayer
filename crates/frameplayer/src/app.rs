@@ -1574,9 +1574,10 @@ impl App {
             let mut events = Vec::new();
             let mut close = false;
             let shift = &mut self.ui.keyboard_shift;
+            let symbols = &mut self.ui.keyboard_symbols;
             if self.panels[KEYBOARD].needs_paint() {
                 let _ = self.panels[KEYBOARD].paint(renderer, input.time, |ctx| {
-                    let (e, c) = ui::keyboard::keyboard(ctx, shift);
+                    let (e, c) = ui::keyboard::keyboard(ctx, shift, symbols);
                     events = e;
                     close = c;
                 });

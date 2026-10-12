@@ -243,6 +243,8 @@ pub struct UiState {
     /// The volume before muting from the control bar.
     pub unmute_volume: Option<f32>,
     pub keyboard_shift: bool,
+    /// The keyboard shows its symbols page.
+    pub keyboard_symbols: bool,
     /// Facts for the About tab (runtime, GPU, decoder...).
     pub about: Vec<(String, String)>,
 }
@@ -288,6 +290,7 @@ impl Default for UiState {
             scrub: None,
             unmute_volume: None,
             keyboard_shift: false,
+            keyboard_symbols: false,
             about: Vec::new(),
         }
     }

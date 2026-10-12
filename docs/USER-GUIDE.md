@@ -132,8 +132,9 @@ fixed.
 Drags, turns, tilts and zoom count as adjustments: save them for that video
 under ⚙, or press the left thumbstick to undo them.
 
-Text fields bring up a keyboard in front of you; you can also type on your
-phone through the web remote.
+Text fields bring up a keyboard in front of you; **#+=** switches it to
+symbols (`! # $ % ( ) [ ] { }` and the rest) and **abc** back. You can also
+type on your phone through the web remote.
 
 ## Passthrough videos
 

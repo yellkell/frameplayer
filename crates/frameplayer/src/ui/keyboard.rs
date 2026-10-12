@@ -5,6 +5,9 @@ use super::{icons, widgets};
 use egui::{Align2, Event, Key, Modifiers, Sense, Vec2};
 
 const ROWS: [&str; 4] = ["1234567890-", "qwertyuiop/", "asdfghjkl:_", "zxcvbnm.@?&"];
+/// The "#+=" page: every ASCII symbol (`-` stays on the number row), for
+/// passwords.
+const SYMBOL_ROWS: [&str; 4] = ["1234567890-", "!@#$%^&*()+", "=[]{}\\|;:'\"", "<>,.?/_~`€£"];
 const KEY_H: f32 = 60.0;
 const GAP: f32 = 7.0;
 
@@ -50,8 +53,8 @@ fn key(ui: &mut egui::Ui, label: &str, w: f32, style: Style, icon: bool) -> bool
 }
 
 /// Draws the keyboard; returns the events to send to the focused panel and
-/// whether the keyboard should close.
-pub fn keyboard(ctx: &egui::Context, shift: &mut bool) -> (Vec<Event>, bool) {
+/// whether the keyboard should close. `symbols` shows the symbols page.
+pub fn keyboard(ctx: &egui::Context, shift: &mut bool, symbols: &mut bool) -> (Vec<Event>, bool) {
     let mut out = Vec::new();
     let mut close = false;
     widgets::panel_slab(ctx, 24.0);
@@ -62,7 +65,8 @@ pub fn keyboard(ctx: &egui::Context, shift: &mut bool) -> (Vec<Event>, bool) {
         ui.spacing_mut().item_spacing = Vec2::new(GAP, GAP);
         // 11 keys plus a 1.4-wide function key on the widest row.
         let key_w = (ui.available_width() - GAP * 12.0) / 12.4;
-        for (i, row) in ROWS.iter().enumerate() {
+        let rows = if *symbols { &SYMBOL_ROWS } else { &ROWS };
+        for (i, row) in rows.iter().enumerate() {
             ui.horizontal(|ui| {
                 ui.add_space(i as f32 * key_w * 0.2);
                 for c in row.chars() {
@@ -90,13 +94,17 @@ pub fn keyboard(ctx: &egui::Context, shift: &mut bool) -> (Vec<Event>, bool) {
             if key(ui, icons::ARROW_FAT_UP, key_w * 1.5, shift_style, true) {
                 *shift = !*shift;
             }
+            let page = if *symbols { "abc" } else { "#+=" };
+            if key(ui, page, key_w * 1.5, Style::Function, false) {
+                *symbols = !*symbols;
+            }
             if key(ui, icons::CARET_LEFT, key_w, Style::Function, true) {
                 out.push(key_event(Key::ArrowLeft));
             }
             if key(ui, icons::CARET_RIGHT, key_w, Style::Function, true) {
                 out.push(key_event(Key::ArrowRight));
             }
-            if key(ui, "space", key_w * 4.4, Style::Char, false) {
+            if key(ui, "space", key_w * 2.9, Style::Char, false) {
                 out.push(Event::Text(" ".into()));
             }
             if key(ui, ".com", key_w * 1.5, Style::Function, false) {
