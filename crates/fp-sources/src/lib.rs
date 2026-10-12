@@ -53,6 +53,7 @@ pub use smb::SmbSource;
 pub use webdav::WebDavSource;
 
 use fp_core::source::{ByteSource, Entry, EntryKind, is_video_name};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// A place media can be browsed and read from.
@@ -165,10 +166,53 @@ pub fn dir_entry(
 
 /// Sorts folders first, then names in natural order (`ep2` before `ep10`).
 pub fn sort_entries(entries: &mut [Entry]) {
+    sort_entries_by(entries, EntrySort::Name);
+}
+
+/// How a folder listing is ordered when browsing a source.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EntrySort {
+    /// Natural name order (`ep2` before `ep10`).
+    #[default]
+    Name,
+    /// Most recently modified first.
+    Newest,
+    /// Least recently modified first.
+    Oldest,
+    /// Biggest files first.
+    Largest,
+    /// Smallest files first.
+    Smallest,
+}
+
+/// Sorts folders first, then by `sort`. Entries the source gave no date or
+/// size for go after the rest; ties (and folders, which have no size when
+/// sorting by size) fall back to natural name order.
+pub fn sort_entries_by(entries: &mut [Entry], sort: EntrySort) {
+    use std::cmp::Ordering;
+    // Known values first, in the given direction; unknown ones last.
+    fn known_first<T: Ord>(a: Option<T>, b: Option<T>, descending: bool) -> Ordering {
+        match (a, b) {
+            (Some(a), Some(b)) if descending => b.cmp(&a),
+            (Some(a), Some(b)) => a.cmp(&b),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => Ordering::Equal,
+        }
+    }
     entries.sort_by(|a, b| {
         let da = a.kind != EntryKind::Directory;
         let db = b.kind != EntryKind::Directory;
+        let by = match sort {
+            EntrySort::Name => Ordering::Equal,
+            EntrySort::Newest => known_first(a.modified, b.modified, true),
+            EntrySort::Oldest => known_first(a.modified, b.modified, false),
+            EntrySort::Largest => known_first(a.size, b.size, true),
+            EntrySort::Smallest => known_first(a.size, b.size, false),
+        };
         da.cmp(&db)
+            .then(by)
             .then_with(|| urlutil::natural_cmp(&a.name, &b.name))
     });
 }
@@ -205,5 +249,30 @@ mod tests {
         sort_entries(&mut v);
         let names: Vec<_> = v.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, ["Alpha", "zeta", "B2.mp4", "b10.mp4"]);
+    }
+
+    #[test]
+    fn sorting_by_date_and_size() {
+        let mut v = vec![
+            file_entry("a.mp4", "x", Some(30), Some(100)),
+            file_entry("b.mp4", "x", None, None),
+            dir_entry("old", "o", Some(1)),
+            file_entry("c.mp4", "x", Some(10), Some(300)),
+            dir_entry("new", "n", Some(500)),
+            file_entry("d.mp4", "x", Some(20), Some(200)),
+        ];
+        let order = |v: &mut Vec<Entry>, s| {
+            sort_entries_by(v, s);
+            v.iter().map(|e| e.name.clone()).collect::<Vec<_>>()
+        };
+        let newest = ["new", "old", "c.mp4", "d.mp4", "a.mp4", "b.mp4"];
+        assert_eq!(order(&mut v, EntrySort::Newest), newest);
+        let oldest = ["old", "new", "a.mp4", "d.mp4", "c.mp4", "b.mp4"];
+        assert_eq!(order(&mut v, EntrySort::Oldest), oldest);
+        // Folders have no size: they stay first, by name.
+        let largest = ["new", "old", "a.mp4", "d.mp4", "c.mp4", "b.mp4"];
+        assert_eq!(order(&mut v, EntrySort::Largest), largest);
+        let smallest = ["new", "old", "c.mp4", "d.mp4", "a.mp4", "b.mp4"];
+        assert_eq!(order(&mut v, EntrySort::Smallest), smallest);
     }
 }

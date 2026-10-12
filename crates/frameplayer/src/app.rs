@@ -429,7 +429,7 @@ impl App {
         });
     }
 
-    fn browse(&mut self, source: String, location: Option<String>) {
+    pub fn browse(&mut self, source: String, location: Option<String>) {
         let Some(src) = self.services.opener.source(&source) else {
             self.ui.toast("That source is not available");
             return;
@@ -447,7 +447,6 @@ impl App {
         let lib = self.services.library.clone();
         self.jobs.spawn("list", move || {
             let result = src.list(location.as_deref()).map(|mut e| {
-                fp_sources::sort_entries(&mut e);
                 // Thumbnails the library already made for these videos.
                 for entry in e.iter_mut().filter(|e| {
                     e.thumbnail_url.is_none() && e.kind == fp_core::source::EntryKind::Video
@@ -639,7 +638,8 @@ impl App {
                     {
                         b.loading = false;
                         match result {
-                            Ok(e) => {
+                            Ok(mut e) => {
+                                fp_sources::sort_entries_by(&mut e, self.settings.browse_sort);
                                 b.entries = e;
                                 b.error = None;
                             }

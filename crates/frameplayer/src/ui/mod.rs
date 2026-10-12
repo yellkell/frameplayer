@@ -45,6 +45,15 @@ pub fn fmt_size(bytes: u64) -> String {
     }
 }
 
+/// A Unix time as a short date ("12 Oct 2026").
+pub fn fmt_date(unix: i64) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let (y, m, d) = fp_sources::timeutil::civil_from_days(unix.div_euclid(86_400));
+    format!("{d} {} {y}", MONTHS[(m - 1) as usize])
+}
+
 /// Something the UI asks the app to do.
 #[derive(Clone, Debug)]
 pub enum Action {
@@ -358,5 +367,7 @@ mod tests {
         assert_eq!(fmt_time(3600.0 + 61.0), "1:01:01");
         assert_eq!(fmt_time(f64::NAN), "0:00");
         assert_eq!(fmt_size(1_500_000_000), "1.5 GB");
+        assert_eq!(fmt_date(0), "1 Jan 1970");
+        assert_eq!(fmt_date(1_791_763_200), "12 Oct 2026");
     }
 }

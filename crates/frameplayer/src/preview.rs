@@ -378,6 +378,31 @@ impl Sim {
                     ..Default::default()
                 });
             }
+            // Browses a folder of a source, as the Sources screen does:
+            // `browse SOURCE [LOCATION]` (the location may contain spaces).
+            Some("browse") => {
+                let source = parts.get(1).ok_or("browse needs a source")?.to_string();
+                let rest = line.trim().strip_prefix("browse").unwrap_or("").trim();
+                let location = rest.strip_prefix(source.as_str()).unwrap_or("").trim();
+                self.app.ui.screen = crate::ui::Screen::Sources;
+                self.app.ui.details = None;
+                self.app
+                    .browse(source, (!location.is_empty()).then(|| location.to_string()));
+                self.app.repaint_all();
+                self.run_frames(3)?;
+            }
+            // The order of the folder being browsed: `browse-sort newest`.
+            Some("browse-sort") => {
+                let name = parts.get(1).ok_or("browse-sort needs an order")?;
+                let sort: fp_sources::EntrySort = serde_json::from_str(&format!("\"{name}\""))
+                    .map_err(|_| format!("no browse order {name:?}"))?;
+                self.app.settings.browse_sort = sort;
+                if let Some(b) = self.app.ui.browse.as_mut() {
+                    fp_sources::sort_entries_by(&mut b.entries, sort);
+                }
+                self.app.repaint_all();
+                self.run_frames(3)?;
+            }
             Some("shot") => self.save(parts.get(1).copied().unwrap_or("shot"), false)?,
             Some("sbs") => self.save(parts.get(1).copied().unwrap_or("sbs"), true)?,
             Some(c) => return Err(format!("unknown script command {c:?}").into()),

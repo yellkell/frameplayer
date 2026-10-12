@@ -18,6 +18,13 @@ cp "$data/camera_clip.mp4" "$home/Videos/Garden Party.mp4"
 cp "$data/vp9.webm" "$home/Videos/Mountain Lake_360.webm"
 cp "$data/av1_opus.webm" "$home/Videos/City Lights_180_SBS.webm"
 cp "$data/hevc10_tb.mkv" "$home/Videos/Aurora Timelapse_360_TB.mkv"
+# Different dates, and a folder, for the browse shots' sort orders.
+mkdir -p "$home/Videos/Holidays"
+touch -d 2026-03-14 "$home/Videos/Sunset Beach Walk_180_LR.mp4"
+touch -d 2026-09-02 "$home/Videos/Garden Party.mp4"
+touch -d 2025-11-20 "$home/Videos/Mountain Lake_360.webm"
+touch -d 2026-06-30 "$home/Videos/City Lights_180_SBS.webm"
+touch -d 2026-01-08 "$home/Videos/Aurora Timelapse_360_TB.mkv"
 
 script="$home/ui.fps"
 cat >"$script" <<EOF
@@ -29,6 +36,13 @@ wait 1
 panel main library
 screen sources
 panel main sources
+# Browsing a folder of the home source, by name and then newest first.
+browse device-home $home/Videos
+wait 1
+panel main browse
+browse-sort newest
+panel main browse-newest
+browse-sort name
 screen settings playback
 panel main settings-playback
 screen settings passthrough

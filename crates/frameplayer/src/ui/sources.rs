@@ -2,7 +2,7 @@
 
 use super::theme::{self, Weight};
 use super::widgets::{self, Kind, Tip};
-use super::{Action, SourceForm, View, fmt_size, fmt_time, icons};
+use super::{Action, SourceForm, View, fmt_date, fmt_size, fmt_time, icons};
 use crate::playback::OpenRequest;
 use egui::{Align, Align2, Color32, Layout, RichText, Sense, Vec2};
 use fp_core::source::EntryKind;
@@ -241,7 +241,9 @@ fn browse(ui: &mut egui::Ui, v: &mut View) {
             }
         });
     });
-    ui.add_space(12.0);
+    ui.add_space(8.0);
+    sort_row(ui, v);
+    ui.add_space(6.0);
     let Some(b) = v.state.browse.as_ref() else {
         return;
     };
@@ -330,6 +332,9 @@ fn browse(ui: &mut egui::Ui, v: &mut View) {
             if let Some(s) = e.size {
                 facts.push(fmt_size(s));
             }
+            if let Some(t) = e.modified {
+                facts.push(fmt_date(t));
+            }
             if !e.scripts.is_empty() {
                 facts.push("haptics".into());
             }
@@ -390,6 +395,69 @@ fn browse(ui: &mut egui::Ui, v: &mut View) {
             location: Some(loc),
         });
     }
+}
+
+/// Name / date / size order for the folder being browsed, remembered in
+/// settings, with the folder's counts on the right.
+fn sort_row(ui: &mut egui::Ui, v: &mut View) {
+    use fp_sources::EntrySort;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        ui.label(
+            RichText::new(icons::SORT_ASCENDING)
+                .font(theme::icon(20.0))
+                .color(theme::TEXT_3),
+        );
+        ui.add_space(4.0);
+        for (s, label) in [
+            (EntrySort::Name, "Name"),
+            (EntrySort::Newest, "Newest"),
+            (EntrySort::Oldest, "Oldest"),
+            (EntrySort::Largest, "Largest"),
+            (EntrySort::Smallest, "Smallest"),
+        ] {
+            let r = widgets::button_sized(ui, None, label, Kind::Ghost, 38.0);
+            if v.settings.browse_sort == s {
+                let bar = egui::Rect::from_center_size(
+                    egui::pos2(r.rect.center().x, r.rect.bottom() - 2.0),
+                    Vec2::new(r.rect.width() - 28.0, 2.5),
+                );
+                ui.painter()
+                    .rect_filled(bar, egui::CornerRadius::same(1), theme::ACCENT);
+            }
+            if r.clicked() && v.settings.browse_sort != s {
+                v.settings.browse_sort = s;
+                if let Some(b) = v.state.browse.as_mut() {
+                    fp_sources::sort_entries_by(&mut b.entries, s);
+                }
+            }
+        }
+        let Some(b) = v.state.browse.as_ref() else {
+            return;
+        };
+        let count = |k| b.entries.iter().filter(|e| e.kind == k).count();
+        let (folders, videos) = (count(EntryKind::Directory), count(EntryKind::Video));
+        let mut parts = Vec::new();
+        if folders > 0 {
+            parts.push(format!(
+                "{folders} folder{}",
+                if folders == 1 { "" } else { "s" }
+            ));
+        }
+        if videos > 0 {
+            parts.push(format!(
+                "{videos} video{}",
+                if videos == 1 { "" } else { "s" }
+            ));
+        }
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.label(
+                RichText::new(parts.join("  ·  "))
+                    .font(theme::font(Weight::Medium, 15.0))
+                    .color(theme::TEXT_3),
+            );
+        });
+    });
 }
 
 fn short_location(l: &str) -> String {

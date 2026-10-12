@@ -69,6 +69,8 @@ pub struct Settings {
     /// Where the library and adjust panels were moved to: yaw and pitch in
     /// degrees from their usual places (left and up positive).
     pub panel_offsets: PanelOffsets,
+    /// How folders are ordered when browsing a source.
+    pub browse_sort: fp_sources::EntrySort,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -109,6 +111,7 @@ impl Default for Settings {
             controls: crate::bindings::Bindings::default(),
             unlock: None,
             panel_offsets: PanelOffsets::default(),
+            browse_sort: fp_sources::EntrySort::default(),
         }
     }
 }
