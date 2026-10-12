@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Steam Frame browsing",
-  "version": "1.2",
-  "description": "Scrolls what the pointer is over with a controller's thumbstick, shows controllers instead of generic hands in VR video players, and lets DeoVR's web player open in VR.",
+  "version": "1.4",
+  "description": "Scrolls what the pointer is over with a controller's thumbstick, shows controllers instead of generic hands in VR video players, lets DeoVR's web player open in VR, and plays YouTube's 360-degree and VR180 videos in VR (with VP9 instead of AV1).",
   "content_scripts": [
     {
       "matches": [
@@ -46,6 +46,40 @@
       "world": "MAIN",
       "js": [
         "deovr.js"
+      ]
+    },
+    {
+      "matches": [
+        "*://www.youtube.com/*",
+        "*://m.youtube.com/*"
+      ],
+      "all_frames": true,
+      "run_at": "document_start",
+      "world": "MAIN",
+      "js": [
+        "youtube.js",
+        "youtube-vr.js"
+      ]
+    },
+    {
+      "matches": [
+        "*://www.youtube.com/*",
+        "*://m.youtube.com/*"
+      ],
+      "run_at": "document_start",
+      "js": [
+        "youtube-fonts.js"
+      ]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "fonts/*"
+      ],
+      "matches": [
+        "*://www.youtube.com/*",
+        "*://m.youtube.com/*"
       ]
     }
   ]

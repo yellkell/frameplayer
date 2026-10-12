@@ -145,7 +145,29 @@ if [[ -f $flags_file ]]; then
 fi
 
 echo "flags: ${flags[*]} $*"
+
+# Back to the page when a WebXR session ends: SteamVR only shows the
+# dashboard (where the browser window is) 10 s after a scene app stops, so
+# until then you see nothing. Show it as soon as SteamVR logs the session
+# ending. CHROMIUM_XR_EXIT_DASHBOARD=0 leaves SteamVR's delay.
+watcher=
+vrlog=$HOME/.local/share/Steam/logs/vrserver.txt
+if [[ ${CHROMIUM_XR_EXIT_DASHBOARD:-1} != 0 && -x $vrcmd && -f $vrlog ]]; then
+  (
+    tail -n 0 -F "$vrlog" 2>/dev/null | while read -r line; do
+      if [[ $line == *"chrome: Transition from VRApplication_OpenXRScene to VRApplication_OpenXRInstance"* ]]; then
+        LD_LIBRARY_PATH=${vrcmd%/*} timeout 5 "$vrcmd" --showdashboard >/dev/null 2>&1 || true
+      fi
+    done
+  ) &
+  watcher=$!
+fi
+
 status=0
 "$here/chrome" "${flags[@]}" "$@" || status=$?
+if [[ -n $watcher ]]; then
+  pkill -P "$watcher" 2>/dev/null || true
+  kill "$watcher" 2>/dev/null || true
+fi
 echo "$(date -Is) exit $status"
 exit "$status"

@@ -413,6 +413,57 @@ pages that require hand tracking keep it.
 copy, e.g. a test build, gets its own profile, config folder (`flags`,
 `home-url`) and log.
 
+### YouTube, and VP9 on the iris decoder (2026-10-12): patch 0018
+
+The Frame's decoder (driver `iris_driver`) takes H.264, HEVC and VP9. With
+0014, YouTube's VP9 played 4K60 in hardware, but closing a decoder session
+mid-decode crashed the video firmware (`received system error of type
+0x5000003`), taking down every decoder session; once it was followed by over a
+million `Bad swap offset entry` kernel messages (page-table corruption) and a
+stuck process, and the headset needed a reboot. Chromium closed sessions
+mid-decode on every seek (`Reset()` destroyed the queues and the device) and on
+every new video or ad.
+
+0018, on iris only:
+
+- seeks keep the session and both queues streaming; frames decoded from
+  bitstream queued before the seek are dropped by timestamp, as FramePlayer
+  does (22 seeks on 4K VP9, no crash; before, one seek crashed it);
+- VP9 is left out of the decoder's supported configurations, so Chromium
+  decodes it in software. Closing a VP9 session still crashed the firmware
+  whatever the stop order, while H.264 closed cleanly (six video switches).
+  Software VP9 keeps up with 4K60 (YouTube: 1 dropped frame of 1715, about 1.8
+  of 8 cores). H.264 and HEVC stay in hardware.
+
+frame-browsing's `youtube.js` and `youtube-vr.js` (youtube.com only):
+
+- AV1 is reported unsupported, so YouTube sends VP9 (AV1 in software doesn't
+  keep up at high resolutions, and the Frame's hardware has no AV1).
+- 360° and VR180 videos get a VR button in the player. The VR view draws the
+  page's own `<video>` around you, one ray per pixel as FramePlayer's scene
+  shader: desktop YouTube sends 360° videos as a mono equi-angular cubemap
+  (3x2) and VR180 as one eye, about 180°x135° equirectangular (no 3D for
+  browsers; the projection metadata is stripped from the stream). Frames are
+  uploaded when the decoder has a new one (`requestVideoFrameCallback` runs
+  at the page's rate, a few per second behind a VR session). 4K 360° in VR:
+  84 fps, 27 uploads/s, no dropped frames; the picture is soft because desktop
+  YouTube sends 360° at 4K.
+- It looks and works like FramePlayer: its control bar and adjust panel
+  (Format, Position with height and forward, Picture; saved per video), drawn
+  on canvases the way its widgets draw, with its fonts (Inter, Phosphor, in
+  `fonts/`; `youtube-fonts.js` tells the page where they are). Controller
+  lasers click and drag; grip on a panel moves it (kept across sessions);
+  grip + trigger drags the picture; the buttons are FramePlayer's
+  (docs/USER-GUIDE.md). Leaving VR pauses the video.
+
+Behind a slow proxy or VPN YouTube runs dry and the video stops (seen at about
+4.5 Mbit/s; 4K 360° needs about 20).
+
+Leaving any WebXR session showed nothing for 10 s: SteamVR shows the dashboard,
+where the browser window is, only 10 s after a scene app stops. `launch.sh`
+watches SteamVR's log and runs `vrcmd --showdashboard` as soon as the session
+ends (`CHROMIUM_XR_EXIT_DASHBOARD=0` turns that off).
+
 ## 9. What this does not solve
 
 - Anything SteamVR needs beyond these two items will only show up once the

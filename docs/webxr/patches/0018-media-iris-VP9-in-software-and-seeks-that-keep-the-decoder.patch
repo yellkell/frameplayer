@@ -1,0 +1,153 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Mon, 12 Oct 2026 17:00:00 +0000
+Subject: [PATCH 18/18] media: iris VP9 in software, and seeks that keep the
+ decoder
+
+On the Steam Frame (Qualcomm iris, driver "iris_driver"), closing a
+decoder session mid-decode crashed the video firmware ("received system
+error of type 0x5000003"), which takes down every decoder session; on
+2026-10-12 one such crash was followed by over a million "Bad swap offset
+entry" kernel messages (page-table corruption) and a stuck process.
+
+Two things closed sessions mid-decode:
+
+- Reset(), on every seek, destroyed both queues and closed the device;
+  the next Decode() opened a new session at once. On iris it now keeps
+  the session, both queues streaming and the event monitoring as they
+  are: pending work is aborted, a drain in progress completes (decoding
+  resumes on its LAST buffer as before), and frames decoded from
+  bitstream queued before the Reset() are dropped by timestamp, as
+  FramePlayer does on this hardware. Before: one seek on 4K VP9 crashed
+  the firmware; after: 22 seeks, no crash, and the first frame shown is
+  the seek target.
+- Closing the decoder (a new video, an ad ending) still crashes the
+  firmware for VP9 sessions, whatever the stop order (H.264: six video
+  switches, about twelve closes, no crash). So VP9 is left out of the
+  configurations GetSupportedV4L2DecoderConfigs() reports for iris, and
+  Chromium decodes it in software, which keeps up with 4K60 VP9 on the
+  Frame (YouTube: 1 dropped frame of 1715, about 1.8 cores). H.264 and
+  HEVC stay on the hardware decoder.
+---
+diff --git a/media/gpu/v4l2/v4l2_stateful_video_decoder.h b/media/gpu/v4l2/v4l2_stateful_video_decoder.h
+--- a/media/gpu/v4l2/v4l2_stateful_video_decoder.h
++++ b/media/gpu/v4l2/v4l2_stateful_video_decoder.h
+@@ -9,6 +9,7 @@
+ 
+ #include "base/atomic_ref_count.h"
+ #include "base/containers/flat_map.h"
++#include "base/containers/flat_set.h"
+ #include "base/containers/queue.h"
+ #include "base/memory/scoped_refptr.h"
+ #include "base/sequence_checker.h"
+@@ -162,6 +163,14 @@
+   DecodeCB flush_cb_ GUARDED_BY_CONTEXT(sequence_checker_);
+   // Set to true when the driver identifies itself as a Mediatek 8173.
+   bool is_mtk8173_ GUARDED_BY_CONTEXT(sequence_checker_) = false;
++  // Set to true for Qualcomm's iris driver (Steam Frame). Its firmware
++  // crashes, taking down every decoder session, when a session is closed
++  // mid-decode and a new one opened right away, as Reset() does on a seek.
++  bool is_iris_ GUARDED_BY_CONTEXT(sequence_checker_) = false;
++  // Timestamps (ms) of bitstream queued before a Reset() that kept the
++  // session (iris); their decoded frames are dropped.
++  base::flat_set<int64_t> stale_timestamps_
++      GUARDED_BY_CONTEXT(sequence_checker_);
+ 
+   // Used only on V4L2_MEMORY_MMAP queues (e.g. Hana MT8173) to grab the visible
+   // rectangle upon |CAPTURE_queue_| configuration in InitializeCAPTUREQueue().
+diff --git a/media/gpu/v4l2/v4l2_stateful_video_decoder.cc b/media/gpu/v4l2/v4l2_stateful_video_decoder.cc
+--- a/media/gpu/v4l2/v4l2_stateful_video_decoder.cc
++++ b/media/gpu/v4l2/v4l2_stateful_video_decoder.cc
+@@ -339,6 +339,8 @@
+     is_mtk8173_ =
+         std::string(reinterpret_cast<const char*>(caps.card)).contains("8173");
+     DVLOGF_IF(1, is_mtk8173_) << "This is an MTK8173 device (Hana, Oak)";
++    is_iris_ =
++        std::string(reinterpret_cast<const char*>(caps.driver)).contains("iris");
+   }
+ 
+   if (IsInitialized()) {
+@@ -560,6 +562,38 @@
+         FROM_HERE, std::move(closure));
+   };
+ 
++  if (is_iris_ && IsInitialized()) {
++    // Qualcomm iris (Steam Frame): keep the session, both queues streaming and
++    // the event monitoring as they are. Closing the session and opening a new
++    // one right away, as below, crashes the video firmware. Bitstream already
++    // queued still decodes and its frames are dropped by timestamp, as
++    // FramePlayer does on this hardware; a drain in progress completes and
++    // decoding resumes (V4L2_DEC_CMD_START) on its LAST buffer.
++    if (h264_frame_reassembler_) {
++      h264_frame_reassembler_ = std::make_unique<H264FrameReassembler>();
++    }
++    while (!decoder_buffer_and_callbacks_.empty()) {
++      auto media_decode_cb =
++          std::move(decoder_buffer_and_callbacks_.front().second);
++      decoder_buffer_and_callbacks_.pop();
++      std::move(media_decode_cb).Run(DecoderStatus::Codes::kAborted);
++    }
++    // |encoding_timestamps_| also keeps entries of frames the driver never
++    // returned; only recent ones can still come out.
++    const base::TimeTicks recent = base::TimeTicks::Now() - base::Seconds(5);
++    stale_timestamps_.clear();
++    for (const auto& [timestamp, enqueued] : encoding_timestamps_) {
++      if (enqueued > recent) {
++        stale_timestamps_.insert(timestamp);
++      }
++    }
++    encoding_timestamps_.clear();
++    if (flush_cb_) {
++      std::move(flush_cb_).Run(DecoderStatus::Codes::kAborted);
++    }
++    return;
++  }
++
+   // Invalidate pointers from and cancel all hypothetical in-flight requests
+   // to the WaitOnceForEvents() routine.
+   weak_ptr_factory_for_events_.InvalidateWeakPtrs();
+@@ -988,6 +1022,19 @@
+       }
+       return;
+     } else if (!dequeued_buffer->IsError()) {
++      if (!stale_timestamps_.empty()) {
++        if (stale_timestamps_.erase(flat_timespec)) {
++          // Decoded from bitstream queued before a Reset() (iris): drop it;
++          // |dequeued_buffer| goes back to |CAPTURE_queue_|.
++          if (!DrainOUTPUTQueue()) {
++            LOG(ERROR) << "Failed to drain resources from |OUTPUT_queue_|.";
++          }
++          continue;
++        }
++        // Everything from before the Reset() comes out first: any stale
++        // frames left never will.
++        stale_timestamps_.clear();
++      }
+       // IsError() doesn't flag a fatal error, but more a discard-this-buffer
+       // marker. This is seen -seldom- from venus driver (QC) when entering a
+       // dynamic resolution mode: the driver flushes the queue with errored
+diff --git a/media/gpu/v4l2/v4l2_utils.cc b/media/gpu/v4l2/v4l2_utils.cc
+--- a/media/gpu/v4l2/v4l2_utils.cc
++++ b/media/gpu/v4l2/v4l2_utils.cc
+@@ -606,8 +606,18 @@
+     std::vector<uint32_t> v4l2_codecs = EnumerateSupportedPixFmts(
+         base::BindRepeating(&HandledIoctl, device_fd.get()),
+         V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE);
++    const bool is_iris =
++        GetDriverName(base::BindRepeating(&HandledIoctl, device_fd.get()))
++            .contains("iris");
+ 
+     for (const uint32_t v4l2_codec : v4l2_codecs) {
++      // Qualcomm iris (Steam Frame): closing a VP9 session mid-decode (a new
++      // video, an ad ending) crashes the video firmware, and the crash
++      // corrupts kernel memory. VP9 is left to the software decoder, which
++      // keeps up with 4K60 on the Frame.
++      if (is_iris && v4l2_codec == V4L2_PIX_FMT_VP9) {
++        continue;
++      }
+       const std::vector<VideoCodecProfile> media_codec_profiles =
+           EnumerateSupportedProfilesForV4L2Codec(
+               base::BindRepeating(&HandledIoctl, device_fd.get()), v4l2_codec);
+-- 
+2.43.0
+
