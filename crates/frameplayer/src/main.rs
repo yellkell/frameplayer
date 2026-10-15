@@ -16,6 +16,7 @@ mod pin;
 mod playback;
 mod preview;
 mod prober;
+mod seektest;
 mod services;
 mod settings;
 mod ui;
@@ -41,6 +42,8 @@ struct Args {
     info: Option<String>,
     bench: Option<String>,
     bench_opts: fp_media::bench::BenchOptions,
+    seek_test: Option<String>,
+    seek_opts: seektest::SeekTestOptions,
     verbose: bool,
     open: Option<String>,
 }
@@ -50,6 +53,9 @@ const USAGE: &str = "usage: frameplayer [--verbose] [--exit-after SECONDS] [FILE
        frameplayer --info FILE      (print what FramePlayer detects about a video)
        frameplayer --decode-bench FILE [--frames N] [--sw] [--seek SECONDS]
                    [--checksum N,N,...]  (decode only; print decoder and fps)
+       frameplayer --seek-test FILE|URL [--seeks N] [--step SECONDS] [--rounds N] [--sw]
+                   (skip through a video headless; checks buffering and that
+                   hardware decoders are given back)
        frameplayer --version";
 
 fn parse_args() -> Result<Args, String> {
@@ -81,7 +87,31 @@ fn parse_args() -> Result<Args, String> {
                     .and_then(|s| s.parse().ok())
                     .ok_or("--frames needs a number")?
             }
-            "--sw" => a.bench_opts.hw = fp_media::HwDecode::Off,
+            "--sw" => {
+                a.bench_opts.hw = fp_media::HwDecode::Off;
+                a.seek_opts.hw = fp_media::HwDecode::Off;
+            }
+            "--seek-test" => {
+                a.seek_test = Some(it.next().ok_or("--seek-test needs a file or URL")?)
+            }
+            "--seeks" => {
+                a.seek_opts.seeks = it
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .ok_or("--seeks needs a number")?
+            }
+            "--step" => {
+                a.seek_opts.step = it
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .ok_or("--step needs seconds")?
+            }
+            "--rounds" => {
+                a.seek_opts.rounds = it
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .ok_or("--rounds needs a number")?
+            }
             "--seek" => {
                 a.bench_opts.seek = Some(
                     it.next()
@@ -142,6 +172,15 @@ fn main() {
     log::info!("FramePlayer {} starting", env!("CARGO_PKG_VERSION"));
     if let Some(f) = &args.bench {
         std::process::exit(match bench(f, &args.bench_opts) {
+            Ok(()) => 0,
+            Err(e) => {
+                eprintln!("{e}");
+                1
+            }
+        });
+    }
+    if let Some(l) = &args.seek_test {
+        std::process::exit(match seektest::run(&location(l), &args.seek_opts) {
             Ok(()) => 0,
             Err(e) => {
                 eprintln!("{e}");
