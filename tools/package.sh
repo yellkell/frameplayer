@@ -62,7 +62,8 @@ while todo:
     if i in seen: continue
     seen.add(i)
     todo += [d["pkg"] for d in nodes[i]["deps"] if any(k["kind"] in (None, "normal") for k in d["dep_kinds"])]
-for p in sorted((pkgs[i] for i in seen if pkgs[i]["source"]), key=lambda p: p["name"]):
+ours = set(m["workspace_members"])  # vendored crates (vendor/) are listed
+for p in sorted((pkgs[i] for i in seen if i not in ours), key=lambda p: p["name"]):
     print("%s %s: %s" % (p["name"], p["version"], p.get("license") or "see crate"))
 ' > "$stage/licenses/rust-crates.txt"
 

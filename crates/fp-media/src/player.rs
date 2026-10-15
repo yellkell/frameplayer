@@ -605,6 +605,10 @@ impl Player {
         s.frames_cv.notify_all();
         s.vpkts.cv.notify_all();
         s.apkts.cv.notify_all();
+        // Frames can hold the hardware decoder's own buffers; one blocked
+        // waiting for a free buffer only returns once they are given back.
+        s.frames().clear();
+        s.current.lock().unwrap_or_else(|e| e.into_inner()).take();
         for t in self.threads.drain(..) {
             let _ = t.join();
         }

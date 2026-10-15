@@ -12,3 +12,7 @@ license = "MIT OR Apache-2.0"
 lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
+
+[patch.crates-io]
+# smb-rs 0.12.1 with interim-response credits counted (vendor/smb/PATCHED.md).
+smb = { path = "vendor/smb" }

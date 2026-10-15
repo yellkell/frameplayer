@@ -125,8 +125,10 @@ pub struct SmbSource {
     name: String,
     config: SmbConfig,
     root: String,
+    /// The connection, shared by everything opened from this source until a
+    /// failure drops it.
     #[cfg(feature = "smb")]
-    client: std::sync::Mutex<Option<Arc<imp::Session>>>,
+    client: Arc<std::sync::Mutex<Option<Arc<imp::Session>>>>,
 }
 
 impl std::fmt::Debug for SmbSource {
@@ -156,7 +158,7 @@ impl SmbSource {
             root: smb_url(&config.host, config.port, &config.share, &config.path),
             config: config.clone(),
             #[cfg(feature = "smb")]
-            client: std::sync::Mutex::new(None),
+            client: Default::default(),
         })
     }
 
@@ -271,7 +273,7 @@ mod imp {
     };
     use std::io;
     use std::str::FromStr;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex, Weak};
     use std::time::Duration;
 
     /// Seconds between 1601-01-01 and 1970-01-01.
@@ -361,7 +363,7 @@ mod imp {
 
         /// Runs `op` with a session; after a connection-level failure the
         /// session is dropped so the next call reconnects.
-        fn with_session<T>(&self, op: impl Fn(&Session) -> Result<T>) -> Result<T> {
+        fn with_session<T>(&self, op: impl Fn(&Arc<Session>) -> Result<T>) -> Result<T> {
             let session = self.session()?;
             let r = op(&session);
             if let Err(Error::Smb(_)) = &r {
@@ -413,7 +415,7 @@ mod imp {
         pub(super) fn open_file(&self, loc: &SmbLocation) -> Result<Arc<dyn ByteSource>> {
             let path = unc(loc)?;
             let url = loc.to_url();
-            let (file, max_read) = self.with_session(|s| {
+            let (file, session) = self.with_session(|s| {
                 let args = FileCreateArgs::make_open_existing(
                     FileAccessMask::new().with_generic_read(true),
                 );
@@ -422,7 +424,7 @@ mod imp {
                     .create_file(&path, &args)
                     .map_err(|e| map_err(e, &url))?;
                 match res {
-                    smb::Resource::File(f) => Ok((f, s.max_read)),
+                    smb::Resource::File(f) => Ok((f, s.clone())),
                     _ => Err(Error::invalid(&url, "not a file")),
                 }
             })?;
@@ -430,8 +432,10 @@ mod imp {
             let fetcher = SmbFetcher {
                 file,
                 size,
-                max_read,
+                max_read: session.max_read,
                 url,
+                client: Arc::downgrade(&self.client),
+                session,
             };
             Ok(Arc::new(CachedSource::new(
                 fetcher,
@@ -446,6 +450,28 @@ mod imp {
         size: u64,
         max_read: usize,
         url: String,
+        /// The source's connection slot, and the session this file was
+        /// opened on: a failed read drops that session, so the next video
+        /// opened from the share reconnects instead of reusing a broken
+        /// connection (until now only a restart recovered it).
+        client: Weak<Mutex<Option<Arc<Session>>>>,
+        session: Arc<Session>,
+    }
+
+    impl SmbFetcher {
+        fn forget_session(&self) {
+            let Some(client) = self.client.upgrade() else {
+                return;
+            };
+            let mut slot = lock(&client);
+            if slot.as_ref().is_some_and(|s| Arc::ptr_eq(s, &self.session)) {
+                log::info!(
+                    "{}: dropping the SMB connection after a failed read",
+                    self.url
+                );
+                *slot = None;
+            }
+        }
     }
 
     impl RangeFetch for SmbFetcher {
@@ -461,7 +487,10 @@ mod imp {
                 let n = self
                     .file
                     .read_at(&mut out[done..done + chunk], offset + done as u64)
-                    .map_err(|e| io::Error::other(format!("{}: {e}", self.url)))?;
+                    .map_err(|e| {
+                        self.forget_session();
+                        io::Error::other(format!("{}: {e}", self.url))
+                    })?;
                 if n == 0 {
                     break;
                 }
