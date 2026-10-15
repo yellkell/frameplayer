@@ -547,6 +547,8 @@ mod linux {
     use std::collections::VecDeque;
     use std::ffi::c_void;
     use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant};
 
     const NV12: u32 = fourcc(b"NV12");
@@ -676,6 +678,8 @@ mod linux {
             ff::AVColorPrimaries,
         ),
         pub frames: u64,
+        /// Set when the player closes: waits for the device stop early.
+        interrupt: Option<Arc<AtomicBool>>,
     }
 
     // SAFETY: one thread drives a decoder at a time; the raw pointers are
@@ -684,6 +688,7 @@ mod linux {
 
     impl Drop for V4l2Decoder {
         fn drop(&mut self) {
+            crate::decode::HW_SESSIONS.fetch_sub(1, Ordering::Relaxed);
             for t in [BUF_TYPE_OUTPUT_MPLANE, BUF_TYPE_CAPTURE_MPLANE] {
                 let mut t = t as i32;
                 let _ = ioctl(&self.fd, VIDIOC_STREAMOFF, &mut t);
@@ -834,7 +839,9 @@ mod linux {
                 pool_size: 0,
                 color: (p.color_range, p.color_space, p.color_trc, p.color_primaries),
                 frames: 0,
+                interrupt: None,
             };
+            crate::decode::HW_SESSIONS.fetch_add(1, Ordering::Relaxed); // until Drop
             dec.init_bsf(par, time_base)?;
             for t in [EVENT_SOURCE_CHANGE, EVENT_EOS] {
                 let mut s = EventSubscription {
@@ -1445,6 +1452,9 @@ mod linux {
                 if !waiting {
                     return Ok(None);
                 }
+                if self.interrupted() {
+                    return Ok(None);
+                }
                 let since = *idle_since.get_or_insert_with(Instant::now);
                 if since.elapsed() > STALL {
                     if self.eos_input {
@@ -1456,6 +1466,16 @@ mod linux {
                 }
                 self.wait(50);
             }
+        }
+
+        pub(crate) fn set_interrupt(&mut self, flag: Arc<AtomicBool>) {
+            self.interrupt = Some(flag);
+        }
+
+        fn interrupted(&self) -> bool {
+            self.interrupt
+                .as_ref()
+                .is_some_and(|f| f.load(Ordering::Acquire))
         }
 
         fn wait(&self, ms: i32) {
@@ -1495,7 +1515,10 @@ mod linux {
             if !self.finished {
                 // Let the drain finish so decoding can be restarted.
                 let start = Instant::now();
-                while !self.finished && start.elapsed() < Duration::from_secs(2) {
+                while !self.finished
+                    && start.elapsed() < Duration::from_secs(2)
+                    && !self.interrupted()
+                {
                     match self.dequeue_capture() {
                         Ok(Some(d)) if d.flags & BUF_FLAG_LAST != 0 => {
                             if let Some(c) = self.cap.as_mut() {

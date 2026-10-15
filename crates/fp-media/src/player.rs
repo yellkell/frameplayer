@@ -784,6 +784,7 @@ fn demux_thread(
 }
 
 fn video_thread(sh: Arc<Shared>, mut dec: Decoder, cap: usize) {
+    dec.set_interrupt(sh.quit.clone());
     let mut serial = 0u64;
     let mut frame = Frame::new();
     let mut conv = FrameConverter::default();

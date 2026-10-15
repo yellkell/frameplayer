@@ -25,7 +25,7 @@ pub mod subtitle;
 pub mod thumb;
 pub(crate) mod v4l2;
 
-pub use decode::HwDecode;
+pub use decode::{HwDecode, hardware_sessions};
 pub use frame::{ColorInfo, PixelLayout, VideoFrame};
 pub use info::{MediaInfo, StreamInfo, StreamKind};
 pub use player::{Player, PlayerConfig, PlayerState, Stats};

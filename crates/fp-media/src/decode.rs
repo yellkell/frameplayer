@@ -3,6 +3,19 @@
 use crate::{Error, Result, check};
 use fp_ffmpeg_sys as ff;
 use std::ffi::{CStr, CString};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+/// Hardware decoder sessions this process holds (native V4L2 decoders and
+/// FFmpeg hardware decoders). The driver admits only a few at a time, Steam
+/// holding some, so one a closed video never gave back leaves later videos
+/// in software ("Hardware decoder busy").
+pub(crate) static HW_SESSIONS: AtomicUsize = AtomicUsize::new(0);
+
+/// See [`HW_SESSIONS`].
+pub fn hardware_sessions() -> usize {
+    HW_SESSIONS.load(Ordering::Relaxed)
+}
 
 /// An owned `AVPacket`.
 pub struct Packet(pub(crate) *mut ff::AVPacket);
@@ -237,6 +250,9 @@ unsafe impl Send for Decoder {}
 
 impl Drop for Decoder {
     fn drop(&mut self) {
+        if self.hardware && !self.ctx.is_null() {
+            HW_SESSIONS.fetch_sub(1, Ordering::Relaxed);
+        }
         // SAFETY: we own the context (null-safe).
         unsafe { ff::avcodec_free_context(&mut self.ctx) };
     }
@@ -354,6 +370,9 @@ impl Decoder {
                 hardware,
                 time_base,
             };
+            if hardware {
+                HW_SESSIONS.fetch_add(1, Ordering::Relaxed); // until Drop
+            }
             check(
                 ff::avcodec_parameters_to_context(ctx, par),
                 "decoder parameters",
@@ -525,6 +544,17 @@ impl Decoder {
         Ok(Some(true))
     }
 
+    /// A flag that, once set, cuts the native decoder's waits for the
+    /// device short (the player sets it when closing).
+    pub(crate) fn set_interrupt(&mut self, flag: Arc<AtomicBool>) {
+        #[cfg(target_os = "linux")]
+        if let Some(n) = self.native.as_mut() {
+            n.dec.set_interrupt(flag);
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = flag;
+    }
+
     pub fn flush(&mut self) {
         #[cfg(target_os = "linux")]
         if let Some(n) = self.native.as_mut() {
@@ -665,6 +695,20 @@ mod tests {
             .iter()
             .fold((255u8, 0u8), |(a, b), &v| (a.min(v), b.max(v)));
         assert!(mx - mn > 100);
+    }
+
+    #[test]
+    fn failed_hardware_opens_hold_no_session() {
+        // No V4L2 device here: FFmpeg's hardware decoder is tried and fails,
+        // and software decodes. Nothing may stay counted afterwards (other
+        // tests open decoders at the same time, so allow them to finish).
+        let (name, _) = decode_all("h264_aac_180_LR.mp4", 5);
+        assert_eq!(name, "h264");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while hardware_sessions() != 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(hardware_sessions(), 0);
     }
 
     #[test]
