@@ -212,6 +212,12 @@ Web XR tab writes it), else Fire Fight 2 (https://ff2.web.app). The
 WebXR check page is in the title's `chromium/start/` folder. Logs go to
 `~/.local/state/chromium-xr-frame/`.
 
+**Launcher-only releases** need no Chromium build: pushing an annotated tag
+`chromium-xr-frame-<version>-<n>` (same `<version>` as the latest release,
+the tag message as the notes) runs `.github/workflows/chromium-xr-repack.yml`,
+which republishes the latest release's zip with this repository's
+`tools/webxr/frame-title` files and new manifests, then starts the smoke test.
+
 **Install over SSH** instead, with saphid's installer and a test run:
 `tools/webxr/frame-install.sh chromium-xr-arm64.tar.xz [tests.tar.xz]`.
 

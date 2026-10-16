@@ -1,0 +1,140 @@
+name: chromium-xr-repack
+
+# Publishes a Chromium XR for Steam Frame release without rebuilding
+# Chromium: the latest chromium-xr-frame-* release's zip, with the title
+# files (tools/webxr/frame-title: launchers, frame-browsing, Steam artwork)
+# replaced by the tagged commit's, new install manifests, and the same
+# Chromium and unit tests. For launcher-only changes; anything in Chromium
+# itself still goes through build-frame-chromium.sh and
+# package-frame-title.sh. Runs on pushing an annotated tag
+#
+#   git tag -a chromium-xr-frame-<version>-<n> -m '<what changed, as markdown>'
+#
+# whose <version> matches the release it repacks; the tag message heads the
+# release notes. A tag that already has a release (package-frame-title.sh's)
+# is left alone.
+on:
+  push:
+    tags: ['chromium-xr-frame-*']
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  repack:
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pick the release to repack
+        id: src
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already has a release; nothing to repack"
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          from=$(gh release list --limit 100 --json tagName,publishedAt,isDraft \
+            -q "[.[] | select(.isDraft | not) | select(.tagName | startswith(\"chromium-xr-frame-\")) | select(.tagName != \"$TAG\")] | sort_by(.publishedAt) | last | .tagName")
+          [ -n "$from" ] || { echo "::error::no chromium-xr-frame-* release to repack"; exit 1; }
+          if [ "${from%-*}" != "${TAG%-*}" ]; then
+            echo "::error::$TAG repacks $from, so its Chromium version must be ${from#chromium-xr-frame-}, not ${TAG#chromium-xr-frame-} (minus the build number)"
+            exit 1
+          fi
+          echo "Repacking $from as $TAG"
+          echo "from=$from" >> "$GITHUB_OUTPUT"
+      - name: Download it
+        if: steps.src.outputs.skip != '1'
+        run: |
+          mkdir -p "$RUNNER_TEMP/src"
+          gh release download "${{ steps.src.outputs.from }}" -D "$RUNNER_TEMP/src" \
+            -p ChromiumXR-Frame-arm64.zip -p chromium-xr-arm64.tar.xz -p chromium-xr-tests-arm64.tar.xz
+          gh release view "${{ steps.src.outputs.from }}" --json name,body,isPrerelease > "$RUNNER_TEMP/src/release.json"
+      - name: Replace the title files
+        if: steps.src.outputs.skip != '1'
+        run: |
+          stage=$RUNNER_TEMP/title
+          mkdir -p "$stage"
+          unzip -q "$RUNNER_TEMP/src/ChromiumXR-Frame-arm64.zip" -d "$stage"
+          for f in chromium-xr.sh chromium-xr-sandboxed.sh chromium/launch.sh chromium/chrome chromium/BUILD-INFO.txt frame-models/manifest.json frame-browsing/manifest.json; do
+            [ -e "$stage/$f" ] || { echo "::error::$f missing from the zip: not a package-frame-title.sh layout"; exit 1; }
+          done
+          [ -x "$stage/chromium/chrome" ] || { echo "::error::chromium/chrome lost its executable bit in unzip"; exit 1; }
+          t=tools/webxr/frame-title
+          install -m 755 "$t/chromium-xr.sh" "$t/chromium-xr-sandboxed.sh" "$stage/"
+          install -m 755 "$t/launch.sh" "$stage/chromium/"
+          rm -rf "$stage/frame-browsing"
+          cp -r "$t/frame-browsing" "$stage/frame-browsing"
+          mkdir -p "$stage/assets/steam"
+          cp "$t"/steam/*.png "$stage/assets/steam/"
+          mkdir -p "$RUNNER_TEMP/out"
+          # As package-frame-title.sh: files at the zip root.
+          (cd "$stage" && zip -q -r -X "$RUNNER_TEMP/out/ChromiumXR-Frame-arm64.zip" .)
+          mv "$RUNNER_TEMP/src/chromium-xr-arm64.tar.xz" "$RUNNER_TEMP/src/chromium-xr-tests-arm64.tar.xz" "$RUNNER_TEMP/out/"
+      - name: Manifests and release notes
+        if: steps.src.outputs.skip != '1'
+        env:
+          FROM: ${{ steps.src.outputs.from }}
+        run: |
+          git fetch -q --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          : > "$RUNNER_TEMP/tag-message.md"
+          # Only an annotated tag's message (a lightweight one's is the commit's).
+          if [ "$(git cat-file -t "$TAG")" = tag ]; then
+            git tag -l --format='%(contents)' "$TAG" | sed '/^-----BEGIN PGP SIGNATURE-----$/,$d' > "$RUNNER_TEMP/tag-message.md"
+          fi
+          python3 - <<'P'
+          import hashlib, json, os, re
+          tag, src, repo = os.environ['TAG'], os.environ['FROM'], os.environ['GITHUB_REPOSITORY']
+          tmp = os.environ['RUNNER_TEMP']
+          out = f'{tmp}/out'
+          zip_path = f'{out}/ChromiumXR-Frame-arm64.zip'
+          h = hashlib.sha256()
+          with open(zip_path, 'rb') as f:
+              for block in iter(lambda: f.read(1 << 20), b''):
+                  h.update(block)
+          sha, size = h.hexdigest(), os.path.getsize(zip_path)
+          url = f'https://github.com/{repo}/releases/download/{tag}/ChromiumXR-Frame-arm64.zip'
+          for name, exe, file in [('Chromium XR', 'chromium-xr.sh', 'chromium-xr.json'),
+                                  ('Chromium XR Sandboxed', 'chromium-xr-sandboxed.sh', 'chromium-xr-sandboxed.json')]:
+              with open(f'{out}/{file}', 'w') as f:
+                  f.write(json.dumps({'schema': 'frame-control.install/v1', 'name': name,
+                      'files': [{'url': url, 'sha256': sha, 'size': size, 'exe': exe}]}, indent=2) + '\n')
+
+          rel = json.load(open(f'{tmp}/src/release.json'))
+          n, m = tag.rsplit('-', 1)[1], src.rsplit('-', 1)[1]
+          title = re.sub(r'\(test build \d+\)', f'(test build {n})', rel['name'])
+          if title == rel['name']:
+              title = f"Chromium XR for Steam Frame {tag.removeprefix('chromium-xr-frame-').rsplit('-', 1)[0]} (test build {n})"
+          # The earlier notes, pointing at this release's zip.
+          body = rel['body'].replace(src, tag)
+          body = re.sub(r'sha256 `[0-9a-f]{64}`, \d+ bytes', f'sha256 `{sha}`, {size} bytes', body)
+          message = open(f'{tmp}/tag-message.md').read().strip()
+          head = f'Test build {m}\'s Chromium, unchanged, with the launcher from ' \
+                 f'{os.environ["GITHUB_SHA"][:12]}.'
+          if message:
+              head += f'\n\nNew since test build {m}:\n\n{message}'
+          notes = f'{head}\n\n---\n\n{body}'
+          open(f'{tmp}/notes.md', 'w').write(notes)
+          open(f'{tmp}/title.txt', 'w').write(title)
+          open(f'{tmp}/prerelease.txt', 'w').write('1' if rel['isPrerelease'] else '')
+          print(title, sha, size, sep='\n')
+          P
+      - name: Publish
+        if: steps.src.outputs.skip != '1'
+        run: |
+          pre=()
+          [ -s "$RUNNER_TEMP/prerelease.txt" ] && pre=(--prerelease)
+          cd "$RUNNER_TEMP/out"
+          gh release create "$TAG" --verify-tag "${pre[@]}" \
+            --title "$(cat "$RUNNER_TEMP/title.txt")" --notes-file "$RUNNER_TEMP/notes.md" \
+            ChromiumXR-Frame-arm64.zip chromium-xr.json chromium-xr-sandboxed.json \
+            chromium-xr-arm64.tar.xz chromium-xr-tests-arm64.tar.xz
+      # A release made with this workflow's token doesn't start other
+      # workflows, so start the hardware smoke test on it directly.
+      - name: Smoke test it
+        if: steps.src.outputs.skip != '1'
+        run: gh workflow run frame-chromium-smoke.yml --ref "$TAG" -f tag="$TAG"
