@@ -2,7 +2,7 @@
 # Starts Chromium XR from the Frame Control / Steam devkit title. The title's
 # top-level chromium-xr.sh and chromium-xr-sandboxed.sh call this with
 # CHROMIUM_XR_SANDBOXED=0 or 1. Steam passes no arguments, so it opens the
-# page in ~/.config/chromium-xr-frame/home-url, else Fish & Chips.
+# page in ~/.config/chromium-xr-frame/home-url, else Fire Fight 2.
 # Arguments, if any, go to Chromium: `chromium-xr.sh URL`.
 #
 # Based on saphid/chromium-webxr-steam-frame frame/chromium-xr (BSD-3).
@@ -42,7 +42,7 @@ fi
 
 # The page to open when started without one (from the Steam library or by
 # FramePlayer through Steam). A running browser opens it in a new tab.
-home_url=https://yellkell.com/fac
+home_url=https://ff2.web.app
 home_file=$conf/home-url
 if [[ -s $home_file ]]; then
   read -r saved <"$home_file" || true

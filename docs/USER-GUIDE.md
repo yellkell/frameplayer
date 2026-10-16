@@ -264,8 +264,8 @@ Settings again.
 WebXR pages run in **Chromium XR for Steam Frame**, a separate app from this
 repository's releases (`ChromiumXR-Frame-arm64.zip`, unpacked into
 `~/chromium-xr-frame` with its Steam library entry; see
-[docs/webxr](webxr/README.md)). Start it from your library: it opens Fish &
-Chips (`https://yellkell.com/fac`) at 90 Hz, both eyes render, and the Frame
+[docs/webxr](webxr/README.md)). Start it from your library: it opens Fire
+Fight 2 (`https://ff2.web.app`) at 90 Hz, both eyes render, and the Frame
 controllers work like Quest Touch controllers in Quest-made games. Its
 address bar goes anywhere else; to change the page it starts on, put an
 address in `~/.config/chromium-xr-frame/home-url`.
