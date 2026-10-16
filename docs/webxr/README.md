@@ -208,7 +208,7 @@ the `frame-control://install?manifest=…` links. Both titles share the zip:
   configuration §5 step 4 tests.
 
 Each opens the page in `~/.config/chromium-xr-frame/home-url` (FramePlayer's
-Web XR tab writes it), else Fish & Chips (https://yellkell.com/fac). The
+Web XR tab writes it), else Fire Fight 2 (https://ff2.web.app). The
 WebXR check page is in the title's `chromium/start/` folder. Logs go to
 `~/.local/state/chromium-xr-frame/`.
 

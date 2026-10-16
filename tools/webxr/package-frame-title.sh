@@ -80,7 +80,7 @@ Unofficial and experimental; based on
 
 What works on the Frame:
 
-- Opens Fish & Chips (https://yellkell.com/fac) at 90 Hz and 2160 pixels per eye
+- Opens Fire Fight 2 (https://ff2.web.app) at 90 Hz and 2160 pixels per eye
   (SteamVR per-app settings, unless you chose your own). To start on another
   page, put its address in \`~/.config/chromium-xr-frame/home-url\`.
 - Both eyes render (patch 0005; WebXR layers are off, they render black).
