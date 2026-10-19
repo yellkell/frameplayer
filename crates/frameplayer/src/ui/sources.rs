@@ -438,7 +438,9 @@ fn browse(ui: &mut egui::Ui, v: &mut View) {
         ui.label(RichText::new(format!("{}  {e}", icons::WARNING_CIRCLE)).color(theme::ERROR));
     }
     let entries = b.entries.clone();
+    let shown = b.shown();
     let mut go: Option<String> = None;
+    let mut more = false;
     egui::ScrollArea::vertical().show(ui, |ui| {
         if entries.is_empty() && !b.loading && b.error.is_none() {
             ui.add_space(30.0);
@@ -446,10 +448,11 @@ fn browse(ui: &mut egui::Ui, v: &mut View) {
                 ui.label(RichText::new("No videos or folders here.").color(theme::TEXT_2));
             });
         }
-        for e in &entries {
-            if e.kind == EntryKind::Other {
-                continue;
-            }
+        let rows: Vec<&fp_core::source::Entry> = entries
+            .iter()
+            .filter(|e| e.kind != EntryKind::Other)
+            .collect();
+        for e in rows.iter().take(shown).copied() {
             let (rect, resp) =
                 ui.allocate_exact_size(Vec2::new(ui.available_width(), 88.0), Sense::click());
             let t = ui
@@ -474,7 +477,13 @@ fn browse(ui: &mut egui::Ui, v: &mut View) {
                         theme::WARN,
                     );
                 }
-                _ => match e.thumbnail_url.as_deref().and_then(|u| v.thumbs.get(u)) {
+                // Only rows on screen ask for their picture.
+                _ => match e
+                    .thumbnail_url
+                    .as_deref()
+                    .filter(|_| ui.is_rect_visible(rect))
+                    .and_then(|u| v.thumbs.get(u))
+                {
                     Some(tex) => super::thumbs::paint_cover_rounded(&painter, thumb, &tex, 10),
                     None => {
                         painter.rect_filled(thumb, egui::CornerRadius::same(10), theme::SURFACE_2);
@@ -564,7 +573,17 @@ fn browse(ui: &mut egui::Ui, v: &mut View) {
                 }
             }
         }
+        if rows.len() > shown {
+            ui.add_space(12.0);
+            ui.vertical_centered(|ui| {
+                more = widgets::button(ui, None, "Show more", Kind::Secondary).clicked();
+            });
+            ui.add_space(20.0);
+        }
     });
+    if more && let Some(b) = v.state.browse.as_mut() {
+        b.more_pages += 1;
+    }
     if let Some(loc) = go {
         if let Some(b) = v.state.browse.as_mut() {
             b.stack.push(b.location.clone());

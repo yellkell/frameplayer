@@ -173,20 +173,32 @@ pub struct Browse {
     pub listed: Vec<Entry>,
     /// `listed` in the chosen order.
     pub entries: Vec<Entry>,
+    /// Pages of rows drawn after the first ("Show more").
+    pub more_pages: usize,
     pub loading: bool,
     pub error: Option<String>,
 }
 
 impl Browse {
-    /// Takes a new listing from the source.
+    /// Rows drawn per page, so a feed of hundreds of videos does not fetch
+    /// every thumbnail at once.
+    pub const PAGE: usize = 35;
+
+    /// Takes a new listing and starts again from its first page.
     pub fn set_listing(&mut self, listed: Vec<Entry>, sort: fp_sources::EntrySort) {
         self.listed = listed;
+        self.more_pages = 0;
         self.sort(sort);
     }
 
     pub fn sort(&mut self, sort: fp_sources::EntrySort) {
         self.entries = self.listed.clone();
         fp_sources::sort_entries_by(&mut self.entries, sort);
+    }
+
+    /// How many rows are drawn.
+    pub fn shown(&self) -> usize {
+        Self::PAGE * (self.more_pages + 1)
     }
 }
 
