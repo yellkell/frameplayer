@@ -1098,11 +1098,15 @@ impl Library {
         })
     }
 
-    /// Deletes the whole watch history (resume positions and play counts are
-    /// kept).
+    /// Deletes the whole watch history with every resume position, play
+    /// count and last-played time, so Home's Continue watching is empty too.
     pub fn clear_history(&self) -> Result<()> {
-        self.with(|c| {
+        self.in_tx(|c| {
             c.execute("DELETE FROM history", [])?;
+            c.execute(
+                "UPDATE media SET resume_position = 0, play_count = 0, last_played = NULL",
+                [],
+            )?;
             Ok(())
         })
     }
@@ -1584,8 +1588,17 @@ mod tests {
         assert_eq!(h[0].id, s2);
         assert!(h.iter().all(|e| e.completed));
         assert!(lib.update_playback(SessionId(999), 1.0, false).is_err());
+        let s3 = lib.start_playback(a).unwrap();
+        lib.update_playback(s3, 10.0, false).unwrap();
+        assert_eq!(lib.continue_watching(10).unwrap().len(), 1);
         lib.clear_history().unwrap();
         assert!(lib.history(10).unwrap().is_empty());
+        assert!(lib.continue_watching(10).unwrap().is_empty());
+        let r = lib.get(a).unwrap().unwrap();
+        assert_eq!(
+            (r.resume_position, r.play_count, r.last_played),
+            (0.0, 0, None)
+        );
     }
 
     #[test]
