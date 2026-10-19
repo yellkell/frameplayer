@@ -88,6 +88,14 @@ screen settings updates
 panel main settings-updates
 screen settings about
 panel main settings-about
+# Clear watch history: its button ticks, then Home is all caught up.
+screen settings library
+clear-history
+wait 0.6
+panel main settings-library-cleared
+screen home
+frames 4
+panel main home-cleared
 # Hover state on the first library card.
 screen library
 point main 0.12 0.32

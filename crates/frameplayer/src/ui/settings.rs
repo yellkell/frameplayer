@@ -452,9 +452,14 @@ fn library(ui: &mut egui::Ui, v: &mut View) {
         });
         r.row(
             "Clear watch history",
-            Some("Positions and play counts."),
+            Some("Positions, play counts and Recently added on Home."),
             |ui| {
-                if widgets::button_sized(ui, None, "Clear", Kind::Danger, 44.0).clicked() {
+                let done = v
+                    .state
+                    .history_cleared_at
+                    .map(|t| t.elapsed().as_secs_f32());
+                if widgets::tick_button(ui, "Clear", "Cleared", Kind::Danger, 44.0, done).clicked()
+                {
                     v.actions.push(Action::ClearHistory);
                 }
             },

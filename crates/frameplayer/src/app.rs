@@ -1074,7 +1074,17 @@ impl App {
                 self.ui.toast(format!("Retrying {n} videos"));
             }
             Action::ClearHistory => {
-                let _ = lib.clear_history();
+                if let Err(e) = lib.clear_history() {
+                    log::warn!("clearing watch history: {e}");
+                    self.ui.toast("Could not clear the watch history");
+                } else {
+                    // Recently added on Home starts again from now.
+                    self.settings.recent_after = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .ok()
+                        .map(|d| d.as_secs() as i64);
+                    self.ui.history_cleared_at = Some(Instant::now());
+                }
                 self.ui.invalidate();
             }
             Action::AddFolder(p) => {

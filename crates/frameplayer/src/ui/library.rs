@@ -558,10 +558,22 @@ fn home(ui: &mut egui::Ui, v: &mut View) {
                 ..Default::default()
             })
             .unwrap_or_default();
+        let recent = lib
+            .recently_added_after(30, v.settings.recent_after)
+            .unwrap_or_default();
+        let has_videos = !recent.is_empty()
+            || lib
+                .count(&fp_library::Query {
+                    limit: None,
+                    ..Default::default()
+                })
+                .unwrap_or(0)
+                > 0;
         v.state.home = Some(HomeRows {
             continue_watching: lib.continue_watching(20).unwrap_or_default(),
-            recent: lib.recently_added(30).unwrap_or_default(),
+            recent,
             favorites,
+            has_videos,
         });
     }
     let Some(rows) = v.state.home.take() else {
@@ -569,7 +581,31 @@ fn home(ui: &mut egui::Ui, v: &mut View) {
     };
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.add_space(14.0);
-        if rows.continue_watching.is_empty() && rows.recent.is_empty() {
+        let quiet = rows.continue_watching.is_empty() && rows.recent.is_empty();
+        if quiet && rows.has_videos {
+            // After Clear watch history: nothing new or half-watched.
+            empty_state(
+                ui,
+                icons::CHECK_CIRCLE,
+                "All caught up",
+                "Videos you add or start watching show up here.",
+                |ui| {
+                    ui.horizontal(|ui| {
+                        ui.add_space((ui.available_width() - 200.0).max(0.0) / 2.0);
+                        if widgets::button(
+                            ui,
+                            Some(icons::FILM_STRIP),
+                            "Open Library",
+                            Kind::Primary,
+                        )
+                        .clicked()
+                        {
+                            v.state.screen = Screen::Library;
+                        }
+                    });
+                },
+            );
+        } else if quiet {
             let folders: Vec<String> = v
                 .settings
                 .library_folders

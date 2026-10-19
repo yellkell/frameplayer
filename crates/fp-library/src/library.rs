@@ -749,12 +749,26 @@ impl Library {
 
     /// Newest videos first, missing ones excluded.
     pub fn recently_added(&self, limit: usize) -> Result<Vec<MediaRecord>> {
+        self.recently_added_after(limit, None)
+    }
+
+    /// [`Library::recently_added`], only videos added after `after` (Unix
+    /// seconds).
+    pub fn recently_added_after(
+        &self,
+        limit: usize,
+        after: Option<i64>,
+    ) -> Result<Vec<MediaRecord>> {
         let (hide, mut args) = self.hidden_and();
+        args.push(Value::Integer(after.unwrap_or(i64::MIN)));
         args.push(Value::Integer(limit_i64(limit)));
         self.with(|c| {
             query_records(
                 c,
-                &format!("WHERE {hide} m.missing = 0 ORDER BY m.added_at DESC, m.id DESC LIMIT ?"),
+                &format!(
+                    "WHERE {hide} m.missing = 0 AND m.added_at > ?
+                     ORDER BY m.added_at DESC, m.id DESC LIMIT ?"
+                ),
                 params_from_iter(args),
             )
         })
@@ -1710,6 +1724,16 @@ mod tests {
             .map(|r| r.id)
             .collect();
         assert_eq!(recent, vec![c, b]);
+        let added = lib.get(c).unwrap().unwrap().added_at;
+        assert_eq!(
+            lib.recently_added_after(10, Some(added - 1)).unwrap().len(),
+            3
+        );
+        assert!(
+            lib.recently_added_after(10, Some(added))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

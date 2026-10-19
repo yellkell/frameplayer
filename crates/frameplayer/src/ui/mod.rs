@@ -273,6 +273,8 @@ pub struct UiState {
     pub settings_tab: SettingsTab,
     /// When passthrough videos were unlocked this session (the header celebrates).
     pub unlocked_at: Option<std::time::Instant>,
+    /// When Clear watch history was pressed (its button ticks).
+    pub history_cleared_at: Option<std::time::Instant>,
     /// The controller input whose choices are open in Settings > Controller.
     pub remap_open: Option<RemapSlot>,
     pub search: String,
@@ -320,6 +322,8 @@ pub struct HomeRows {
     pub continue_watching: Vec<fp_library::MediaRecord>,
     pub recent: Vec<fp_library::MediaRecord>,
     pub favorites: Vec<fp_library::MediaRecord>,
+    /// The library has videos even when every row is empty.
+    pub has_videos: bool,
 }
 
 impl Default for UiState {
@@ -328,6 +332,7 @@ impl Default for UiState {
             screen: Screen::Home,
             settings_tab: SettingsTab::Playback,
             unlocked_at: None,
+            history_cleared_at: None,
             remap_open: None,
             search: String::new(),
             sort: fp_library::Sort::Added,

@@ -222,6 +222,81 @@ pub fn button_sized(
     resp
 }
 
+/// How long [`tick_button`] shows its tick.
+pub const TICK_SECS: f32 = 1.8;
+
+/// [`button_sized`], except for [`TICK_SECS`] after its action ran (`done`
+/// is the seconds since): a green disc pops in, a tick draws itself on it
+/// and `done_label` fades in, then it fades back to the button.
+pub fn tick_button(
+    ui: &mut Ui,
+    label: &str,
+    done_label: &str,
+    kind: Kind,
+    height: f32,
+    done: Option<f32>,
+) -> Response {
+    let Some(t) = done.filter(|t| (0.0..TICK_SECS).contains(t)) else {
+        return button_sized(ui, None, label, kind, height);
+    };
+    ui.ctx().request_repaint();
+    let ease_out = |x: f32| 1.0 - (1.0 - x.clamp(0.0, 1.0)).powi(3);
+    // Overshoots a little before settling at 1.
+    let ease_out_back = |x: f32| {
+        let x = x.clamp(0.0, 1.0) - 1.0;
+        1.0 + 2.70158 * x.powi(3) + 1.70158 * x.powi(2)
+    };
+    let font = theme::font(Weight::SemiBold, (height * 0.375).max(15.0));
+    let text = ui
+        .painter()
+        .layout_no_wrap(done_label.to_string(), font, Color32::WHITE);
+    let r = height * 0.3;
+    let pad = height * 0.32;
+    let size = Vec2::new(pad * 2.0 + r * 2.0 + 10.0 + text.size().x, height);
+    let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
+    if !ui.is_rect_visible(rect) {
+        return resp;
+    }
+    let alpha = ((TICK_SECS - t) / 0.3).clamp(0.0, 1.0);
+    let p = ui.painter();
+    p.rect_filled(
+        rect,
+        CornerRadius::same((height * 0.25) as u8),
+        theme::OK.gamma_multiply(0.16 * alpha),
+    );
+    let c = Pos2::new(rect.left() + pad + r, rect.center().y);
+    p.circle_filled(
+        c,
+        r * ease_out_back(t / 0.25),
+        theme::OK.gamma_multiply(alpha),
+    );
+    // The tick: down to the corner, then up, drawn as time goes on.
+    let pts = [
+        c + Vec2::new(-0.45, 0.02) * r,
+        c + Vec2::new(-0.12, 0.34) * r,
+        c + Vec2::new(0.46, -0.3) * r,
+    ];
+    let (l1, l2) = ((pts[1] - pts[0]).length(), (pts[2] - pts[1]).length());
+    let drawn = ease_out((t - 0.15) / 0.3) * (l1 + l2);
+    if drawn > 0.0 {
+        let mut line = vec![pts[0], pts[0] + (pts[1] - pts[0]) * (drawn / l1).min(1.0)];
+        if drawn > l1 {
+            line.push(pts[1] + (pts[2] - pts[1]) * ((drawn - l1) / l2));
+        }
+        p.add(egui::Shape::line(
+            line,
+            Stroke::new(r * 0.24, Color32::WHITE.gamma_multiply(alpha)),
+        ));
+    }
+    let y = rect.center().y - text.size().y / 2.0;
+    p.galley_with_override_text_color(
+        Pos2::new(c.x + r + 10.0, y),
+        text,
+        theme::OK.gamma_multiply(ease_out((t - 0.1) / 0.25) * alpha),
+    );
+    resp
+}
+
 /// A round icon-only button. `selected` marks a toggle that is on.
 pub fn icon_button(ui: &mut Ui, icon: &str, size: f32, selected: bool) -> Response {
     if dimensional(ui) {
@@ -1148,3 +1223,4 @@ mod tests {
         assert_eq!(display_title("Top 360 Moments_LR"), "Top 360 Moments");
     }
 }
+// x

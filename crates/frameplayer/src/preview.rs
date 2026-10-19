@@ -411,6 +411,12 @@ impl Sim {
                 self.app
                     .apply(crate::ui::Action::ImportFolder { source, location });
             }
+            // Settings > Library's Clear watch history button.
+            Some("clear-history") => {
+                self.app.apply(crate::ui::Action::ClearHistory);
+                self.app.repaint_all();
+                self.run_frames(3)?;
+            }
             // Gives a source a PIN, which locks it: `lock SOURCE PIN`.
             Some("lock") => {
                 let source = parts.get(1).ok_or("lock needs a source")?.to_string();
