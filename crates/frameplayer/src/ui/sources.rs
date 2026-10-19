@@ -609,7 +609,7 @@ fn sort_row(ui: &mut egui::Ui, v: &mut View) {
             if r.clicked() && v.settings.browse_sort != s {
                 v.settings.browse_sort = s;
                 if let Some(b) = v.state.browse.as_mut() {
-                    fp_sources::sort_entries_by(&mut b.entries, s);
+                    b.sort(s);
                 }
             }
         }

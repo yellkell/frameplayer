@@ -169,9 +169,25 @@ pub struct Browse {
     pub location: Option<String>,
     /// Parent locations, for the back button.
     pub stack: Vec<Option<String>>,
+    /// The listing in the order the source gave it.
+    pub listed: Vec<Entry>,
+    /// `listed` in the chosen order.
     pub entries: Vec<Entry>,
     pub loading: bool,
     pub error: Option<String>,
+}
+
+impl Browse {
+    /// Takes a new listing from the source.
+    pub fn set_listing(&mut self, listed: Vec<Entry>, sort: fp_sources::EntrySort) {
+        self.listed = listed;
+        self.sort(sort);
+    }
+
+    pub fn sort(&mut self, sort: fp_sources::EntrySort) {
+        self.entries = self.listed.clone();
+        fp_sources::sort_entries_by(&mut self.entries, sort);
+    }
 }
 
 /// The PIN form of the Sources page.

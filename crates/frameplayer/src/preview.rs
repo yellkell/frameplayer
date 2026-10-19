@@ -399,7 +399,7 @@ impl Sim {
                     .map_err(|_| format!("no browse order {name:?}"))?;
                 self.app.settings.browse_sort = sort;
                 if let Some(b) = self.app.ui.browse.as_mut() {
-                    fp_sources::sort_entries_by(&mut b.entries, sort);
+                    b.sort(sort);
                 }
                 self.app.repaint_all();
                 self.run_frames(3)?;

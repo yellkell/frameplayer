@@ -189,8 +189,24 @@ pub enum EntrySort {
 /// Sorts folders first, then by `sort`. Entries the source gave no date or
 /// size for go after the rest; ties (and folders, which have no size when
 /// sorting by size) fall back to natural name order.
+///
+/// A listing with no dates (or no sizes) at all, such as a DeoVR or
+/// HereSphere feed, keeps the source's own order instead, which feeds give
+/// newest first; `Oldest` reverses it.
 pub fn sort_entries_by(entries: &mut [Entry], sort: EntrySort) {
     use std::cmp::Ordering;
+    let source_order = match sort {
+        EntrySort::Name => false,
+        EntrySort::Newest | EntrySort::Oldest => entries.iter().all(|e| e.modified.is_none()),
+        EntrySort::Largest | EntrySort::Smallest => entries.iter().all(|e| e.size.is_none()),
+    };
+    if source_order {
+        if sort == EntrySort::Oldest {
+            entries.reverse();
+        }
+        entries.sort_by_key(|e| e.kind != EntryKind::Directory);
+        return;
+    }
     // Known values first, in the given direction; unknown ones last.
     fn known_first<T: Ord>(a: Option<T>, b: Option<T>, descending: bool) -> Ordering {
         match (a, b) {
@@ -274,5 +290,37 @@ mod tests {
         assert_eq!(order(&mut v, EntrySort::Largest), largest);
         let smallest = ["new", "old", "c.mp4", "d.mp4", "a.mp4", "b.mp4"];
         assert_eq!(order(&mut v, EntrySort::Smallest), smallest);
+    }
+
+    #[test]
+    fn listings_without_dates_keep_the_source_order() {
+        let listed = vec![
+            file_entry("b.mp4", "x", None, None),
+            dir_entry("z", "z", None),
+            file_entry("c.mp4", "x", None, None),
+            dir_entry("y", "y", None),
+            file_entry("a.mp4", "x", None, None),
+        ];
+        let order = |s| {
+            let mut v = listed.clone();
+            sort_entries_by(&mut v, s);
+            v.iter().map(|e| e.name.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            order(EntrySort::Name),
+            ["y", "z", "a.mp4", "b.mp4", "c.mp4"]
+        );
+        assert_eq!(
+            order(EntrySort::Newest),
+            ["z", "y", "b.mp4", "c.mp4", "a.mp4"]
+        );
+        assert_eq!(
+            order(EntrySort::Oldest),
+            ["y", "z", "a.mp4", "c.mp4", "b.mp4"]
+        );
+        assert_eq!(
+            order(EntrySort::Largest),
+            ["z", "y", "b.mp4", "c.mp4", "a.mp4"]
+        );
     }
 }
