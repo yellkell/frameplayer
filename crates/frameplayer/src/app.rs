@@ -459,9 +459,17 @@ impl App {
         crate::pin::locked(&self.settings.source_pins, &self.ui.unlocked_sources, id)
     }
 
+    /// Sources a PIN can lock: removable drives and the ones added.
+    fn lockable_sources(&self) -> Vec<fp_sources::SourceConfig> {
+        crate::services::builtin_sources()
+            .into_iter()
+            .filter(|c| c.id() == crate::services::REMOVABLE_SOURCE)
+            .chain(self.services.source_configs.iter().cloned())
+            .collect()
+    }
+
     pub(crate) fn source_name(&self, id: &str) -> String {
-        self.services
-            .source_configs
+        self.lockable_sources()
             .iter()
             .find(|c| c.id() == id)
             .map(|c| c.name().to_string())
@@ -483,8 +491,7 @@ impl App {
 
     /// The locked source whose folder or address `location` is under.
     fn locked_by(&self, location: &str) -> Option<String> {
-        self.services
-            .source_configs
+        self.lockable_sources()
             .iter()
             .filter(|c| self.source_locked(c.id()))
             .find(|c| crate::pin::source_contains(c, location))
@@ -499,8 +506,7 @@ impl App {
             return Some(source.to_string());
         }
         let root = self
-            .services
-            .source_configs
+            .lockable_sources()
             .iter()
             .find(|c| c.id() == source)
             .map(crate::pin::source_root)?;
@@ -533,8 +539,7 @@ impl App {
     fn locked_hidden(&self) -> fp_library::Hidden {
         let sources = crate::pin::locked_ids(&self.settings.source_pins, &self.ui.unlocked_sources);
         let locations = self
-            .services
-            .source_configs
+            .lockable_sources()
             .iter()
             .filter(|c| sources.iter().any(|s| s == c.id()))
             .map(crate::pin::source_root)

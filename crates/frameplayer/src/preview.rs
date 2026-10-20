@@ -210,6 +210,8 @@ impl Sim {
                 };
                 let ui = &mut self.app.ui;
                 ui.screen = screen;
+                // The sources list, not the folder last browsed.
+                ui.browse = None;
                 ui.details = None;
                 ui.remap_open = None;
                 if let Some(tab) = parts.get(2) {

@@ -50,8 +50,10 @@ panel main browse
 browse-sort newest
 panel main browse-newest
 browse-sort name
-# A source locked with a PIN: its row, the unlock form, its PIN settings.
+# Sources locked with a PIN (one added, and microSD and USB drives): their
+# rows, the unlock form, its PIN settings.
 lock private 2468
+lock device-removable 1357
 screen sources
 panel main sources-locked
 pin-form private

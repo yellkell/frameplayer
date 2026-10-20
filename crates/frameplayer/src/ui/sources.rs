@@ -100,18 +100,24 @@ pub fn sources(ui: &mut egui::Ui, v: &mut View) {
             crate::services::builtin_sources()
                 .iter()
                 .map(|c| {
-                    let icon = if c.id() == crate::services::REMOVABLE_SOURCE {
-                        icons::USB
+                    // Removable drives can be locked, the home folder can't.
+                    let (icon, lock) = if c.id() == crate::services::REMOVABLE_SOURCE {
+                        (icons::USB, lock(c.id()))
                     } else {
-                        icons::HARD_DRIVE
+                        (icons::HARD_DRIVE, Lock::None)
+                    };
+                    let desc = if lock == Lock::Locked {
+                        format!("{} · Locked with a PIN", c.kind().label())
+                    } else {
+                        c.describe()
                     };
                     (
                         c.id().to_string(),
                         c.name().to_string(),
-                        c.describe(),
+                        desc,
                         icon,
                         true,
-                        Lock::None,
+                        lock,
                     )
                 })
                 .chain(v.services.source_configs.iter().map(|c| {
@@ -190,7 +196,7 @@ pub fn sources(ui: &mut egui::Ui, v: &mut View) {
                                 {
                                     v.actions.push(Action::RemoveSource(id.clone()));
                                 }
-                                if !builtin {
+                                if !builtin || id == crate::services::REMOVABLE_SOURCE {
                                     let (icon, tip) = if lock == Lock::Unlocked {
                                         (icons::LOCK, "Lock, or change the PIN")
                                     } else {

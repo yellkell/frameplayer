@@ -58,6 +58,7 @@ FramePlayer then updates itself from the Settings › Updates page.
 
 To keep a share or folder private when someone else uses the headset, press
 the padlock next to it under **Sources** and choose a PIN (4 to 8 digits).
+**microSD and USB drives** has a padlock too; it locks every card and drive.
 While it is locked it can't be browsed, and its videos are left out of the
 library, continue watching, history, search and the phone remote; opening
 one asks for the PIN. **Unlock** opens it until FramePlayer restarts; the
