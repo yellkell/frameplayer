@@ -583,7 +583,7 @@ fn home(ui: &mut egui::Ui, v: &mut View) {
         ui.add_space(14.0);
         let quiet = rows.continue_watching.is_empty() && rows.recent.is_empty();
         if quiet && rows.has_videos {
-            // After Clear watch history: nothing new or half-watched.
+            // After Clear history and library: nothing new or half-watched.
             empty_state(
                 ui,
                 icons::CHECK_CIRCLE,

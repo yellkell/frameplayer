@@ -273,7 +273,7 @@ pub struct UiState {
     pub settings_tab: SettingsTab,
     /// When passthrough videos were unlocked this session (the header celebrates).
     pub unlocked_at: Option<std::time::Instant>,
-    /// When Clear watch history was pressed (its button ticks).
+    /// When Clear history and library was pressed (its button ticks).
     pub history_cleared_at: Option<std::time::Instant>,
     /// The controller input whose choices are open in Settings > Controller.
     pub remap_open: Option<RemapSlot>,

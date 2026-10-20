@@ -374,6 +374,13 @@ impl Playback {
         self.current_settings().with_global_key(global)
     }
 
+    /// Stops saving to the video's library record, which is gone (Clear
+    /// history and library).
+    pub fn forget_record(&mut self) {
+        self.record_id = None;
+        self.session = None;
+    }
+
     /// Saves progress every few seconds and at the end.
     pub fn save_progress(&mut self, library: &Library, force: bool) {
         if !force && self.last_save.elapsed().as_secs_f64() < 5.0 {

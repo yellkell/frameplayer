@@ -128,6 +128,10 @@ pub struct App {
     mounts_checked: Instant,
     /// Drives FramePlayer has tried to mount since they were inserted.
     mount_tried: Vec<String>,
+    /// The rescan after Clear history and library is running; when it ends
+    /// Home's Recently added starts again from then, so the videos it found
+    /// again are not new.
+    rescan_clears_recent: bool,
     quit: bool,
     /// Passthrough videos are unlocked (a valid licence in the settings).
     pub unlocked: bool,
@@ -144,6 +148,14 @@ struct PanelDrag {
     hand: usize,
     start: (f32, f32),
     from: [f32; 2],
+}
+
+/// Now as Unix seconds.
+fn unix_now() -> Option<i64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs() as i64)
 }
 
 fn panel(px: [u32; 2], width_m: f32, ppp: f32) -> Panel {
@@ -219,6 +231,7 @@ impl App {
                 .checked_sub(Duration::from_secs(60))
                 .unwrap_or_else(Instant::now),
             mount_tried: Vec::new(),
+            rescan_clears_recent: false,
             quit: false,
             unlocked,
             purchase: None,
@@ -797,6 +810,9 @@ impl App {
                 Job::Status(s) => self.ui.scan_status = Some(s),
                 Job::ScanDone(s) => {
                     log::info!("{s}");
+                    if std::mem::take(&mut self.rescan_clears_recent) {
+                        self.settings.recent_after = unix_now();
+                    }
                     self.ui.scan_status = Some(s);
                     self.ui.invalidate();
                     self.services.wake_worker();
@@ -1079,16 +1095,21 @@ impl App {
                 self.ui.toast(format!("Retrying {n} videos"));
             }
             Action::ClearHistory => {
-                if let Err(e) = lib.clear_history() {
-                    log::warn!("clearing watch history: {e}");
-                    self.ui.toast("Could not clear the watch history");
+                // Every video goes with its history; the rescan brings back
+                // those in library folders and on drives, as new records.
+                if let Err(e) = lib.clear_library() {
+                    log::warn!("clearing the library: {e}");
+                    self.ui.toast("Could not clear the library");
                 } else {
                     // Recently added on Home starts again from now.
-                    self.settings.recent_after = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .ok()
-                        .map(|d| d.as_secs() as i64);
+                    self.settings.recent_after = unix_now();
                     self.ui.history_cleared_at = Some(Instant::now());
+                    self.thumbs.clear();
+                    if let Some(p) = &mut self.playback {
+                        p.forget_record();
+                    }
+                    self.rescan_clears_recent = true;
+                    self.rescan(false);
                 }
                 self.ui.invalidate();
             }

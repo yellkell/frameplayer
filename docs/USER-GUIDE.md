@@ -99,6 +99,20 @@ videos onto it and put it in the Frame. exFAT has no 4 GB file limit, so
   the format once under ⚙ › Format; it is remembered for that file.
 - Large high-bitrate 8K files play best from a fast card (A2/V30 or better).
 
+### Starting over: Clear history and library
+
+**Settings › Library › Clear history and library** empties the library:
+every video goes, with its resume point, play count, rating, favourite,
+tags, bookmarks, adjustments and thumbnails, and Home's Continue watching
+and Recently added are emptied too. Playlists stay, without their videos.
+It doesn't ask first, and it can't be undone.
+
+The videos themselves are not touched. FramePlayer then scans your library
+folders and inserted drives again, so their videos come straight back (with
+fresh thumbnails, not shown as new on Home). Videos from network sources
+come back when you play them again or add their folder to the library; a
+card that isn't inserted is scanned again when you put it back.
+
 ## Video formats
 
 The format is picked automatically from, in order: your own choice for that

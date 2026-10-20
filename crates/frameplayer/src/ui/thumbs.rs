@@ -15,6 +15,8 @@ pub struct Thumbs {
     order: VecDeque<String>,
     pending: HashSet<String>,
     failed: HashSet<String>,
+    /// Decodes requested before [`Thumbs::clear`], dropped when they arrive.
+    stale: HashSet<String>,
     req: Sender<String>,
     done: Receiver<(String, Option<ColorImage>)>,
 }
@@ -63,6 +65,7 @@ impl Thumbs {
             order: VecDeque::new(),
             pending: HashSet::new(),
             failed: HashSet::new(),
+            stale: HashSet::new(),
             req,
             done,
         }
@@ -73,6 +76,9 @@ impl Thumbs {
         let mut any = false;
         for (key, img) in self.done.try_iter() {
             self.pending.remove(&key);
+            if self.stale.remove(&key) {
+                continue;
+            }
             match img {
                 Some(img) => {
                     let tex = ctx.load_texture(&key, img, TextureOptions::LINEAR);
@@ -115,6 +121,15 @@ impl Thumbs {
     /// Forget failures (e.g. after the library re-thumbnailed).
     pub fn retry_failed(&mut self) {
         self.failed.clear();
+    }
+
+    /// Forgets every texture: the library was cleared, and its new records
+    /// reuse the old ids and so the same thumbnail paths.
+    pub fn clear(&mut self) {
+        self.textures.clear();
+        self.order.clear();
+        self.failed.clear();
+        self.stale.extend(self.pending.drain());
     }
 }
 

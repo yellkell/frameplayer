@@ -451,8 +451,8 @@ fn library(ui: &mut egui::Ui, v: &mut View) {
             }
         });
         r.row(
-            "Clear watch history",
-            Some("Positions, play counts and Recently added on Home."),
+            "Clear history and library",
+            Some("Every video, rating and tag. Folders and drives are scanned again."),
             |ui| {
                 let done = v
                     .state

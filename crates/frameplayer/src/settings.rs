@@ -75,7 +75,7 @@ pub struct Settings {
     /// How folders are ordered when browsing a source.
     pub browse_sort: fp_sources::EntrySort,
     /// Home's Recently added only lists videos added after this (Unix
-    /// seconds); Clear watch history sets it.
+    /// seconds); Clear history and library sets it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recent_after: Option<i64>,
     /// Sources locked with a PIN: source id to the PIN's hash (see

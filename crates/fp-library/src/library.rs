@@ -1125,6 +1125,33 @@ impl Library {
         })
     }
 
+    /// Deletes every video with everything attached to it (history, tags,
+    /// markers, playlist entries; playlists stay, emptied) and their
+    /// thumbnail and preview strip files. Videos come back when a scan
+    /// finds them or when they are played again. Returns how many were
+    /// removed. Explicit user action only.
+    pub fn clear_library(&self) -> Result<usize> {
+        let (n, files) = self.in_tx(|c| {
+            let files: Vec<PathBuf> = query_records(c, "", [])?
+                .into_iter()
+                .flat_map(|r| {
+                    r.thumbnail
+                        .into_iter()
+                        .chain(r.preview_strip.map(|s| s.path))
+                })
+                .collect();
+            let n = c.execute("DELETE FROM media", [])?;
+            prune_tags(c)?;
+            Ok((n, files))
+        })?;
+        // Best effort: a file left behind is overwritten when its id is
+        // used again.
+        for f in files {
+            let _ = std::fs::remove_file(f);
+        }
+        Ok(n)
+    }
+
     // -- metadata worker support ---------------------------------------------
 
     /// Videos the metadata worker still has to process: not missing, not
@@ -1613,6 +1640,87 @@ mod tests {
             (r.resume_position, r.play_count, r.last_played),
             (0.0, 0, None)
         );
+    }
+
+    #[test]
+    fn clear_library_removes_every_video_and_its_thumbnails() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = lib();
+        let local = add(&lib, "/v/local.mp4");
+        let nas = lib
+            .upsert(&MediaUpsert::new("smb://nas/v/x.mp4", "nas"))
+            .unwrap()
+            .id;
+        let detected = DetectedFormat {
+            format: VideoFormat::new(Projection::EQUIRECT_360, StereoLayout::Mono),
+            evidence: Evidence::Metadata,
+        };
+        let (thumb, strip) = (dir.path().join("1.jpg"), dir.path().join("1_strip.jpg"));
+        std::fs::write(&thumb, b"jpg").unwrap();
+        std::fs::write(&strip, b"jpg").unwrap();
+        lib.store_probe(
+            local,
+            &StoredProbe {
+                duration: Some(60.0),
+                width: None,
+                height: None,
+                video_codec: None,
+                detected,
+                thumbnail: Some(thumb.clone()),
+                preview_strip: Some(PreviewStrip {
+                    path: strip.clone(),
+                    frames: 1,
+                    columns: 1,
+                    cell_width: 1,
+                    cell_height: 1,
+                    interval: 1.0,
+                }),
+                error: None,
+            },
+        )
+        .unwrap();
+        // A thumbnail already gone is no error.
+        lib.store_probe(
+            nas,
+            &StoredProbe {
+                duration: None,
+                width: None,
+                height: None,
+                video_codec: None,
+                detected,
+                thumbnail: Some(dir.path().join("gone.jpg")),
+                preview_strip: None,
+                error: None,
+            },
+        )
+        .unwrap();
+        lib.add_tag(local, "beach").unwrap();
+        lib.add_marker(local, 5.0, "here").unwrap();
+        let s = lib.start_playback(nas).unwrap();
+        lib.update_playback(s, 5.0, false).unwrap();
+        let list = lib.create_playlist("Mine").unwrap();
+        lib.add_to_playlist(list, local).unwrap();
+
+        assert_eq!(lib.clear_library().unwrap(), 2);
+        assert_eq!(lib.count(&crate::Query::default()).unwrap(), 0);
+        assert!(lib.get(local).unwrap().is_none());
+        assert!(lib.history(10).unwrap().is_empty());
+        assert!(lib.continue_watching(10).unwrap().is_empty());
+        assert!(lib.recently_added(10).unwrap().is_empty());
+        assert!(lib.all_tags().unwrap().is_empty());
+        assert!(lib.sources().unwrap().is_empty());
+        assert!(!thumb.exists() && !strip.exists());
+        // Playlists stay, emptied.
+        assert!(lib.playlist_items(list).unwrap().is_empty());
+        assert_eq!(lib.playlists().unwrap().len(), 1);
+        // A scan or play adds the video again, with nothing carried over.
+        let again = add(&lib, "/v/local.mp4");
+        let r = lib.get(again).unwrap().unwrap();
+        assert_eq!((r.thumbnail, r.play_count, r.rating), (None, 0, 0));
+        assert!(r.tags.is_empty());
+        assert!(lib.markers(again).unwrap().is_empty());
+        assert_eq!(lib.clear_library().unwrap(), 1);
+        assert_eq!(lib.clear_library().unwrap(), 0);
     }
 
     #[test]

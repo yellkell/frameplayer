@@ -413,7 +413,7 @@ impl Sim {
                 self.app
                     .apply(crate::ui::Action::ImportFolder { source, location });
             }
-            // Settings > Library's Clear watch history button.
+            // Settings > Library's Clear history and library button.
             Some("clear-history") => {
                 self.app.apply(crate::ui::Action::ClearHistory);
                 self.app.repaint_all();
