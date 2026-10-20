@@ -105,7 +105,11 @@ videos onto it and put it in the Frame. exFAT has no 4 GB file limit, so
 every video goes, with its resume point, play count, rating, favourite,
 tags, bookmarks, adjustments and thumbnails, and Home's Continue watching
 and Recently added are emptied too. Playlists stay, without their videos.
-It doesn't ask first, and it can't be undone.
+The button asks **Clear all?** first: press it again within a few seconds
+to clear. It can't be undone.
+
+Sources locked with a PIN keep their PIN, and their videos are left as they
+are while locked (to clear those too, unlock them first).
 
 The videos themselves are not touched. FramePlayer then scans your library
 folders and inserted drives again, so their videos come straight back (with

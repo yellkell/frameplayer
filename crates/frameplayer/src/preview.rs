@@ -413,6 +413,12 @@ impl Sim {
                 self.app
                     .apply(crate::ui::Action::ImportFolder { source, location });
             }
+            // Its first press, which asks for a second.
+            Some("clear-arm") => {
+                self.app.ui.clear_armed_at = Some(Instant::now());
+                self.app.repaint_all();
+                self.run_frames(3)?;
+            }
             // Settings > Library's Clear history and library button.
             Some("clear-history") => {
                 self.app.apply(crate::ui::Action::ClearHistory);

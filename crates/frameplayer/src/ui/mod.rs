@@ -275,6 +275,9 @@ pub struct UiState {
     pub unlocked_at: Option<std::time::Instant>,
     /// When Clear history and library was pressed (its button ticks).
     pub history_cleared_at: Option<std::time::Instant>,
+    /// When Clear history and library was first pressed: it clears on a
+    /// second press soon after.
+    pub clear_armed_at: Option<std::time::Instant>,
     /// The controller input whose choices are open in Settings > Controller.
     pub remap_open: Option<RemapSlot>,
     pub search: String,
@@ -333,6 +336,7 @@ impl Default for UiState {
             settings_tab: SettingsTab::Playback,
             unlocked_at: None,
             history_cleared_at: None,
+            clear_armed_at: None,
             remap_open: None,
             search: String::new(),
             sort: fp_library::Sort::Added,

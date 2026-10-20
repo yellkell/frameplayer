@@ -450,17 +450,42 @@ fn library(ui: &mut egui::Ui, v: &mut View) {
                 v.actions.push(Action::RetryFailed);
             }
         });
+        // The first press arms the button, a second one within
+        // CLEAR_CONFIRM_SECS clears.
+        let armed = v
+            .state
+            .clear_armed_at
+            .map(|t| CLEAR_CONFIRM_SECS - t.elapsed().as_secs_f32())
+            .filter(|left| *left > 0.0);
         r.row(
             "Clear history and library",
-            Some("Every video, rating and tag. Folders and drives are scanned again."),
+            Some(if armed.is_some() {
+                "Press again to remove every video, rating and tag. Locked sources stay."
+            } else {
+                "Every video, rating and tag. Folders and drives are scanned again."
+            }),
             |ui| {
                 let done = v
                     .state
                     .history_cleared_at
                     .map(|t| t.elapsed().as_secs_f32());
-                if widgets::tick_button(ui, "Clear", "Cleared", Kind::Danger, 44.0, done).clicked()
-                {
-                    v.actions.push(Action::ClearHistory);
+                // Back to Clear when the time is up.
+                if let Some(left) = armed {
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_secs_f32(left));
+                }
+                let label = if armed.is_some() {
+                    "Clear all?"
+                } else {
+                    "Clear"
+                };
+                if widgets::tick_button(ui, label, "Cleared", Kind::Danger, 44.0, done).clicked() {
+                    if armed.is_some() {
+                        v.state.clear_armed_at = None;
+                        v.actions.push(Action::ClearHistory);
+                    } else {
+                        v.state.clear_armed_at = Some(std::time::Instant::now());
+                    }
                 }
             },
         );
@@ -473,6 +498,9 @@ fn library(ui: &mut egui::Ui, v: &mut View) {
         ),
     );
 }
+
+/// How long Clear history and library waits for its second press.
+pub const CLEAR_CONFIRM_SECS: f32 = 4.0;
 
 const DEVICE_KINDS: [(&str, &str); 3] = [
     ("Intiface Central", "ws://192.168.1.20:12345"),

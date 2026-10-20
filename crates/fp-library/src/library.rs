@@ -1127,20 +1127,29 @@ impl Library {
 
     /// Deletes every video with everything attached to it (history, tags,
     /// markers, playlist entries; playlists stay, emptied) and their
-    /// thumbnail and preview strip files. Videos come back when a scan
-    /// finds them or when they are played again. Returns how many were
-    /// removed. Explicit user action only.
+    /// thumbnail and preview strip files. Videos [hidden](Self::set_hidden)
+    /// now (locked with a PIN) are left as they are. Videos come back when
+    /// a scan finds them or when they are played again. Returns how many
+    /// were removed. Explicit user action only.
     pub fn clear_library(&self) -> Result<usize> {
+        let (keep, args) = hidden_sql("", &self.hidden()).unwrap_or(("1".into(), Vec::new()));
         let (n, files) = self.in_tx(|c| {
-            let files: Vec<PathBuf> = query_records(c, "", [])?
-                .into_iter()
-                .flat_map(|r| {
-                    r.thumbnail
-                        .into_iter()
-                        .chain(r.preview_strip.map(|s| s.path))
-                })
-                .collect();
-            let n = c.execute("DELETE FROM media", [])?;
+            let files: Vec<PathBuf> = query_records(
+                c,
+                &format!("WHERE m.id IN (SELECT id FROM media WHERE {keep})"),
+                params_from_iter(args.iter()),
+            )?
+            .into_iter()
+            .flat_map(|r| {
+                r.thumbnail
+                    .into_iter()
+                    .chain(r.preview_strip.map(|s| s.path))
+            })
+            .collect();
+            let n = c.execute(
+                &format!("DELETE FROM media WHERE {keep}"),
+                params_from_iter(args.iter()),
+            )?;
             prune_tags(c)?;
             Ok((n, files))
         })?;
@@ -1721,6 +1730,34 @@ mod tests {
         assert!(lib.markers(again).unwrap().is_empty());
         assert_eq!(lib.clear_library().unwrap(), 1);
         assert_eq!(lib.clear_library().unwrap(), 0);
+    }
+
+    #[test]
+    fn clear_library_keeps_locked_videos() {
+        let lib = lib();
+        let mine = add(&lib, "/v/mine.mp4");
+        let nas = lib
+            .upsert(&MediaUpsert::new("smb://nas/v/x.mp4", "nas"))
+            .unwrap()
+            .id;
+        let private = add(&lib, "/media/card/Private/y.mp4");
+        lib.set_rating(nas, 5).unwrap();
+        let s = lib.start_playback(private).unwrap();
+        lib.update_playback(s, 5.0, false).unwrap();
+        lib.set_hidden(Hidden {
+            sources: vec!["nas".into()],
+            locations: vec!["/media/card/Private".into()],
+        });
+
+        assert_eq!(lib.clear_library().unwrap(), 1);
+        assert!(lib.get(mine).unwrap().is_none());
+        assert_eq!(lib.get(nas).unwrap().unwrap().rating, 5);
+        assert_eq!(lib.get(private).unwrap().unwrap().resume_position, 5.0);
+        // Unlocked, they show again as they were; clearing then takes them.
+        lib.set_hidden(Hidden::default());
+        assert_eq!(lib.history(10).unwrap().len(), 1);
+        assert_eq!(lib.clear_library().unwrap(), 2);
+        assert_eq!(lib.count(&crate::Query::default()).unwrap(), 0);
     }
 
     #[test]

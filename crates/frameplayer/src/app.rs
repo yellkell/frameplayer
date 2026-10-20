@@ -1095,6 +1095,7 @@ impl App {
                 self.ui.toast(format!("Retrying {n} videos"));
             }
             Action::ClearHistory => {
+                self.ui.clear_armed_at = None;
                 // Every video goes with its history; the rescan brings back
                 // those in library folders and on drives, as new records.
                 if let Err(e) = lib.clear_library() {

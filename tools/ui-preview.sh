@@ -90,9 +90,12 @@ screen settings updates
 panel main settings-updates
 screen settings about
 panel main settings-about
-# Clear history and library: its button ticks, the rescan finds the
-# videos again (with new thumbnails), and Home is all caught up.
+# Clear history and library: the first press asks for a second, then its
+# button ticks, the rescan finds the videos again (with new thumbnails),
+# and Home is all caught up.
 screen settings library
+clear-arm
+panel main settings-library-confirm
 clear-history
 wait 0.6
 panel main settings-library-cleared
