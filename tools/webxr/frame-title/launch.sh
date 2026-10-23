@@ -46,6 +46,9 @@ home_url=https://ff2.web.app
 home_file=$conf/home-url
 if [[ -s $home_file ]]; then
   read -r saved <"$home_file" || true
+  # Early FramePlayer builds wrote the old default (Fish & Chips) here
+  # themselves; that isn't a choice, so it doesn't override the default.
+  [[ $saved == https://yellkell.com/fac ]] && saved=
   [[ $saved == http://* || $saved == https://* ]] && home_url=$saved
 fi
 (( $# )) || set -- "$home_url"
