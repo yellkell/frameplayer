@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Steam Frame browsing",
-  "version": "1.4",
-  "description": "Scrolls what the pointer is over with a controller's thumbstick, shows controllers instead of generic hands in VR video players, lets DeoVR's web player open in VR, and plays YouTube's 360-degree and VR180 videos in VR (with VP9 instead of AV1).",
+  "version": "1.5",
+  "description": "Scrolls what the pointer is over with a controller's thumbstick, shows controllers instead of generic hands in VR video players, lets DeoVR's web player open in VR, and plays YouTube's 360-degree and VR180 videos in VR, VR180 in 3D (with VP9 instead of AV1).",
   "content_scripts": [
     {
       "matches": [

@@ -442,8 +442,26 @@ frame-browsing's `youtube.js` and `youtube-vr.js` (youtube.com only):
 - 360° and VR180 videos get a VR button in the player. The VR view draws the
   page's own `<video>` around you, one ray per pixel as FramePlayer's scene
   shader: desktop YouTube sends 360° videos as a mono equi-angular cubemap
-  (3x2) and VR180 as one eye, about 180°x135° equirectangular (no 3D for
-  browsers; the projection metadata is stripped from the stream). Frames are
+  (3x2) and VR180 as the left eye, 180°x180° equirectangular stretched to
+  16:9 (`vlayout=mono` streams, no projection metadata).
+- VR180 in 3D: YouTube's visionOS client gets the same itags side by side
+  (180°x180° per eye). On a VR180 video `youtube.js` asks the player API as
+  visionOS and puts those streams (lastModified, xtags, sizes) and their
+  streaming session (`serverAbrStreamingUrl`, ustreamer config) into the
+  page's player response: the page's `ytInitialPlayerResponse` (synchronous
+  request) and in-page navigation (`player` / `get_watch` fetches). YouTube's
+  own player then plays 3D, Premium and all; the VR view draws each eye from
+  its half. If the swap fails the video stays 2D. The flat page shows the
+  side-by-side frame.
+- VR180 streams aren't all equirectangular: YouTube's 4K ones are, the lower
+  qualities put more pixels in the middle (30° off centre at u 0.226, not
+  0.333). Each stream's mesh is in its own header (WebM ProjectionPrivate,
+  MP4 `ytmp`), stripped from the page's stream; `youtube.js` reads the first
+  16 KB of the visionOS stream (CORS allows youtube.com), inflates and
+  decodes the mesh into longitude -> u and latitude -> v tables (YouTube's
+  VR180 meshes are separable), and the VR view looks them up for the itag
+  playing.
+- Frames are
   uploaded when the decoder has a new one (`requestVideoFrameCallback` runs
   at the page's rate, a few per second behind a VR session). 4K 360° in VR:
   84 fps, 27 uploads/s, no dropped frames; the picture is soft because desktop

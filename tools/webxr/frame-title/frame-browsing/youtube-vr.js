@@ -6,7 +6,10 @@
 // The VR view draws the page's own <video> around you, one ray per pixel as
 // FramePlayer's scene shader (crates/fp-render/shaders/scene.wgsl). Desktop
 // YouTube sends one view only (no 3D): 360° videos as an equi-angular
-// cubemap (3x2), VR180 as about 180°x135° equirectangular.
+// cubemap (3x2), VR180 as the left eye's 180°x180° equirectangular
+// stretched to fill the 16:9 frame (the stream's own mesh says so).
+// youtube.js swaps VR180 for its visionOS streams, which are side by side:
+// 180°x180° per eye, each eye drawn from its own half.
 //
 // The panels are canvases drawn the way FramePlayer's widgets draw (raised
 // keys, sunken trays, the accent play dome), with FramePlayer's fonts:
@@ -388,11 +391,15 @@
 
   // --- Video formats --------------------------------------------------------
   const EAC = 0, EQUIRECT = 1;
+  // sbs: left eye in the left half of the frame, right eye in the right.
+  // mesh: drawn with the stream's own mesh once youtube.js has it (the
+  // fov is the fallback).
   const FORMATS = {
     eac360: { label: 'EAC 360° (YouTube)', short: 'EAC 360°', layout: EAC, hFov: 360, vFov: 180 },
     erp360: { label: '360° 2D', short: '360°', layout: EQUIRECT, hFov: 360, vFov: 180 },
     erp180: { label: '180° 2D', short: '180°', layout: EQUIRECT, hFov: 180, vFov: 180 },
-    yt180: { label: 'VR180 (YouTube)', short: 'VR180', layout: EQUIRECT, hFov: 180, vFov: 135 },
+    yt180: { label: 'VR180 2D (YouTube)', short: 'VR180 2D', layout: EQUIRECT, hFov: 180, vFov: 180, mesh: true },
+    yt180sbs: { label: 'VR180 3D (YouTube)', short: 'VR180 3D', layout: EQUIRECT, hFov: 180, vFov: 180, sbs: true, mesh: true },
   };
   const DEFAULTS = {
     format: null, yaw: 0, pitch: 0, roll: 0, zoom: 1, height: 0, forward: 0,
@@ -415,8 +422,14 @@
     in vec2 ndc;
     out vec4 color;
     uniform sampler2D video;
+    // The stream's mesh as angle -> texture coordinate tables (youtube.js):
+    // row 0 longitude -> u, row 1 latitude -> v, one texel per degree from
+    // -90; negative outside the picture.
+    uniform highp sampler2D mesh;
+    uniform bool hasMesh;
     uniform mat4 invProj, camToWorld;
     uniform int mode;
+    uniform int eye; // -1 one view for both eyes, else this eye's half (0 left, 1 right)
     uniform vec2 fov; // radians
     uniform float yaw, pitch, roll, zoom;
     uniform vec3 viewer; // where you are in the sphere (height, forward), m
@@ -479,6 +492,13 @@
       return vec2((col + f.x) / 3.0, (row + f.y) / 2.0);
     }
 
+    float meshAt(int row, float angle) {
+      float x = clamp(degrees(angle) + 90.0, 0.0, 180.0);
+      int i = min(int(x), 179);
+      float a = texelFetch(mesh, ivec2(i, row), 0).r, b = texelFetch(mesh, ivec2(i + 1, row), 0).r;
+      return a < 0.0 || b < 0.0 ? -1.0 : mix(a, b, x - float(i));
+    }
+
     void main() {
       vec4 p = invProj * vec4(ndc, 1.0, 1.0);
       vec3 d = toVideo(normalize(mat3(camToWorld) * normalize(p.xyz / p.w)));
@@ -489,11 +509,16 @@
       } else {
         float lon = atan(d.x, -d.z), lat = asin(clamp(d.y, -1.0, 1.0));
         uv = vec2(0.5 + lon / fov.x, 0.5 - lat / fov.y);
+        if (hasMesh) {
+          uv = abs(lon) > 0.5 * PI ? vec2(-1.0) : vec2(meshAt(0, lon), meshAt(1, lat));
+          uv.y = uv.y < 0.0 ? -1.0 : 1.0 - uv.y; // the mesh's v runs up
+        }
         if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
           color = vec4(0.0, 0.0, 0.0, 1.0);
           return;
         }
       }
+      if (eye >= 0) uv.x = (uv.x + float(eye)) * 0.5;
       // Picture adjustments in the video's (gamma) space, as FramePlayer.
       vec3 g = texture(video, uv).rgb;
       g = (g - 0.5) * picture.y + 0.5 + picture.x;
@@ -560,6 +585,26 @@
     for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
       [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
+    // The playing stream's mesh tables (see the shader). Each quality has
+    // its own mesh, so follow the itag.
+    const meshTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, meshTexture);
+    for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.NEAREST);
+    let meshFor = '', meshReady = false;
+    function updateMesh() {
+      const stats = player.getStatsForNerds ? player.getStatsForNerds() : null;
+      const itag = (/\((\d+)\)/.exec((stats && stats.codecs) || '') || [])[1];
+      const key = `${videoId}:${itag}`;
+      if (!itag || key === meshFor || !window.__frameYoutubeMesh) return;
+      meshFor = key;
+      meshReady = false;
+      window.__frameYoutubeMesh(videoId, Number(itag)).then((tables) => {
+        if (!tables || meshFor !== key || !session) return;
+        gl.bindTexture(gl.TEXTURE_2D, meshTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, 181, 2, 0, gl.RED, gl.FLOAT, new Float32Array([...tables.u, ...tables.v]));
+        meshReady = true;
+      });
+    }
 
     // Panels: FramePlayer's control bar and adjust panel (app.rs: 1400x268
     // and 900x1020 pixels at 1.25 pixels per point).
@@ -1135,6 +1180,7 @@
           if (!detected) return session.end();
           loadSettings();
         }
+        updateMesh();
       }
       // While playing, the controls hide once they're left alone.
       const pointing = pointers.size > 0;
@@ -1185,7 +1231,13 @@
         gl.bindTexture(gl.TEXTURE_2D, texture);
         const u = sphere.uniform;
         gl.uniform1i(u.video, 0);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, meshTexture);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.uniform1i(u.mesh, 1);
+        gl.uniform1i(u.hasMesh, f.mesh && meshReady ? 1 : 0);
         gl.uniform1i(u.mode, f.layout);
+        gl.uniform1i(u.eye, f.sbs ? (view.eye === 'right' ? 1 : 0) : -1);
         gl.uniform2f(u.fov, rad(f.hFov), rad(f.vFov));
         gl.uniform1f(u.yaw, -anchorYaw - rad(settings.yaw));
         gl.uniform1f(u.pitch, rad(settings.pitch));
