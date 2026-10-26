@@ -36,3 +36,12 @@ Steam Frame controllers (Settings > Controller): renders of Valve's own
   models are Valve Corporation's; these pictures are not covered by
   FramePlayer's MIT / Apache-2.0 licence. Steam and the Steam logo are
   trademarks of Valve Corporation.
+
+Meta Quest Touch Plus controllers (Settings > Controller, Quest build):
+  renders made with Blender of the meta-quest-touch-plus-v2 models from
+  WebXR Input Profiles (@webxr-input-profiles/assets 1.0.20,
+  https://github.com/immersive-web/webxr-input-profiles), under the MIT
+  License, Copyright (c) 2019 Amazon
+  (crates/frameplayer/assets/controllers/quest-*.png). Meta and Meta Quest
+  are trademarks of Meta Platforms, Inc.; the license does not grant use
+  of these trademarks.

@@ -1,12 +1,13 @@
-//! Settings > Controller: both Frame controllers face-on, every remappable
-//! button glowing, a label beside each saying what it does. Pointing at a
-//! button and pulling the trigger opens its choices below.
+//! Settings > Controller: both controllers face-on, every remappable button
+//! glowing, a label beside each saying what it does. Pointing at a button
+//! and pulling the trigger opens its choices below.
 //!
-//! The pictures are Blender renders of Valve's controller models as SteamVR
-//! ships them (assets/controllers, credited in packaging/licenses). Part
-//! centres come from the same renders, in units of the round head's radius
-//! from its centre. On a Quest the Touch controllers are drawn instead
-//! ([`draw_touch`]), with only the buttons they have.
+//! The pictures are Blender renders: on the Frame of Valve's controller
+//! models as SteamVR ships them, on a Quest of the Touch Plus models from
+//! the WebXR input profiles (assets/controllers, both credited in
+//! packaging/licenses). Part centres come from the same renders, in units
+//! of the round head's radius from its centre (on a Touch Plus, of half the
+//! picture's width less the margin).
 
 use super::theme::{self, Weight};
 use super::widgets;
@@ -82,16 +83,16 @@ fn spots(hand: usize) -> Vec<Spot> {
     }
 }
 
-/// A Touch controller's face, as [`draw_touch`] draws it: the stick toward
-/// the other hand, two face buttons beside it, and Menu (left only; the
-/// right's Meta button belongs to the system).
+/// A Touch Plus face: the stick on the outer side, the two face buttons
+/// inside it, and Menu below (left only; the right's Meta button belongs to
+/// the system). The controllers mirror each other.
 fn touch_spots(hand: usize) -> Vec<Spot> {
     let m = if hand == RIGHT { 1.0 } else { -1.0 };
     let mut s = vec![
-        Spot::Stick(-0.36 * m, -0.22),
+        Spot::Stick(0.417 * m, -0.242),
         Spot::Round(
-            0.40 * m,
-            -0.40,
+            -0.236 * m,
+            -0.215,
             0.15,
             if hand == RIGHT {
                 Button::East
@@ -99,89 +100,37 @@ fn touch_spots(hand: usize) -> Vec<Spot> {
                 Button::North
             },
         ),
-        Spot::Round(0.24 * m, 0.04, 0.15, Button::South),
+        Spot::Round(-0.011 * m, 0.202, 0.15, Button::South),
     ];
     if hand == LEFT {
-        s.push(Spot::Pill(-0.02 * m, 0.42, Button::Menu));
+        s.push(Spot::Round(-0.481, 0.301, 0.12, Button::Menu));
     }
     s
-}
-
-/// A Touch controller seen from above: the face plate, the handle below it,
-/// the stick and buttons (the hotspots glow over them).
-fn draw_touch(p: &egui::Painter, hand: usize, at: impl Fn(f32, f32) -> Pos2, r: f32) {
-    let m = if hand == RIGHT { 1.0 } else { -1.0 };
-    let body = Color32::from_rgb(46, 49, 54);
-    let edge = Stroke::new(1.5_f32, Color32::from_rgb(92, 97, 105));
-    // The handle, angled away under the face.
-    let handle: Vec<Pos2> = [
-        (-0.30, 0.55),
-        (0.42, 0.55),
-        (0.30, 2.05),
-        (0.12, 2.25),
-        (-0.10, 2.25),
-        (-0.22, 2.05),
-    ]
-    .iter()
-    .map(|&(x, y)| at(x * m + 0.05 * m, y))
-    .collect();
-    p.add(Shape::convex_polygon(
-        handle,
-        body.gamma_multiply(0.85),
-        edge,
-    ));
-    // The face plate: a rounded oval.
-    let plate: Vec<Pos2> = (0..48)
-        .map(|k| {
-            let a = k as f32 / 48.0 * std::f32::consts::TAU;
-            at(0.98 * a.cos(), 0.86 * a.sin())
-        })
-        .collect();
-    p.add(Shape::convex_polygon(plate, body, edge));
-    // Stick: a well and its cap.
-    let stick = at(-0.36 * m, -0.22);
-    p.circle_filled(stick, 0.31 * r, Color32::from_rgb(28, 30, 34));
-    p.circle_filled(stick, 0.22 * r, Color32::from_rgb(64, 68, 75));
-    p.circle_stroke(
-        stick,
-        0.22 * r,
-        Stroke::new(1.0_f32, Color32::from_white_alpha(40)),
-    );
-    // Face buttons, with their letters.
-    let names = if hand == RIGHT {
-        ["B", "A"]
-    } else {
-        ["Y", "X"]
-    };
-    for ((x, y), name) in [(0.40, -0.40), (0.24, 0.04)].into_iter().zip(names) {
-        let c = at(x * m, y);
-        p.circle_filled(c, 0.15 * r, KEY.gamma_multiply(0.55));
-        p.text(
-            c,
-            Align2::CENTER_CENTER,
-            name,
-            theme::font(Weight::SemiBold, (0.15 * r).max(10.0)),
-            Color32::from_rgb(20, 22, 26),
-        );
-    }
-    // Menu (left) or the system's Meta button (right): a small pill.
-    let pill = Rect::from_center_size(at(-0.02 * m, 0.42), Vec2::new(0.22 * r, 0.11 * r));
-    p.rect_filled(
-        pill,
-        CornerRadius::same((0.055 * r) as u8),
-        KEY.gamma_multiply(0.45),
-    );
 }
 
 /// Where each render sits around the head, in head radii from its centre:
 /// left, top, right, bottom.
 fn picture_rect(hand: usize) -> [f32; 4] {
-    if hand == RIGHT {
+    if TOUCH {
+        [-1.03, -1.1, 1.03, 2.431]
+    } else if hand == RIGHT {
         [-1.028, -1.096, 1.033, 2.452]
     } else {
         [-1.029, -1.088, 1.033, 2.511]
     }
 }
+
+/// Each build carries only its own controllers' pictures (left, right).
+#[cfg(not(target_os = "android"))]
+const PICTURES: [&[u8]; 2] = [
+    include_bytes!("../../assets/controllers/left.png"),
+    include_bytes!("../../assets/controllers/right.png"),
+];
+#[cfg(target_os = "android")]
+const PICTURES: [&[u8]; 2] = [
+    include_bytes!("../../assets/controllers/quest-left.png"),
+    include_bytes!("../../assets/controllers/quest-right.png"),
+];
 
 /// The controller's picture, loaded into `ctx` on first use.
 fn picture(ctx: &egui::Context, hand: usize) -> Option<egui::TextureHandle> {
@@ -189,12 +138,7 @@ fn picture(ctx: &egui::Context, hand: usize) -> Option<egui::TextureHandle> {
     if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
         return Some(t);
     }
-    let bytes: &[u8] = if hand == RIGHT {
-        include_bytes!("../../assets/controllers/right.png")
-    } else {
-        include_bytes!("../../assets/controllers/left.png")
-    };
-    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let img = image::load_from_memory(PICTURES[hand]).ok()?.to_rgba8();
     let size = [img.width() as usize, img.height() as usize];
     let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
     let name = if hand == RIGHT {
@@ -341,9 +285,7 @@ fn draw_hand(ui: &mut egui::Ui, v: &mut View, hand: usize, c: Pos2, r: f32, t: f
     let at = |x: f32, y: f32| Pos2::new(c.x + x * r, c.y + y * r);
     let p = ui.painter().clone();
 
-    if TOUCH {
-        draw_touch(&p, hand, at, r);
-    } else if let Some(tex) = picture(ui.ctx(), hand) {
+    if let Some(tex) = picture(ui.ctx(), hand) {
         let [l, t_, rr, b] = picture_rect(hand);
         p.image(
             tex.id(),
