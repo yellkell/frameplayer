@@ -144,6 +144,18 @@ unsafe fn ask_for_storage(
     }
 }
 
+/// With Quest hand tracking a half-closed hand reads as a squeezed grip:
+/// it grabbed panels, and with a grip "held" a pinch on empty space never
+/// showed the controls. Tracked hands here only point and pinch.
+pub(crate) fn hand_tracking(mut input: fp_xr::InputState) -> fp_xr::InputState {
+    for h in &mut input.hands {
+        if h.tracked_hand {
+            h.squeeze = 0.0;
+        }
+    }
+    input
+}
+
 /// Handles the activity's pending events without waiting. Returns true
 /// once the activity is being destroyed.
 pub(crate) fn pump() -> bool {

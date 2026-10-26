@@ -457,6 +457,8 @@ fn run_xr(args: &Args) -> Result<(), Error> {
         let frame = session.begin_frame()?;
         let work = Instant::now();
         let input = session.input(frame.state.predicted_display_time);
+        #[cfg(target_os = "android")]
+        let input = android::hand_tracking(input);
         let dt = last.elapsed().as_secs_f32().min(0.1);
         last = Instant::now();
         renderer.begin_frame()?;

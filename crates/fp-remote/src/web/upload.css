@@ -128,3 +128,4 @@ button.delete {
   font-weight: 500;
 }
 button.delete:disabled { opacity: 0.5; cursor: default; }
+button.delete.armed { background: var(--danger); color: var(--accent-text); border-color: var(--danger); font-weight: 600; }

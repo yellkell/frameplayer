@@ -63,8 +63,24 @@ async function showFiles() {
     li.querySelector(".name").textContent = f.name;
     li.querySelector(".size").textContent = size(f.size);
     const btn = li.querySelector("button");
+    // Two presses: the first arms the button for a few seconds (browsers
+    // may block confirm() dialogs, and then nothing would happen).
+    let armed = null;
     btn.addEventListener("click", async () => {
-      if (!confirm("Delete " + f.name + " from the headset? This can't be undone.")) return;
+      if (!armed) {
+        btn.textContent = "Delete?";
+        btn.classList.add("armed");
+        armed = setTimeout(() => {
+          armed = null;
+          btn.textContent = "Delete";
+          btn.classList.remove("armed");
+        }, 4000);
+        return;
+      }
+      clearTimeout(armed);
+      armed = null;
+      btn.textContent = "Deleting…";
+      btn.classList.remove("armed");
       btn.disabled = true;
       try {
         await api("/api/files?name=" + encodeURIComponent(f.name), "DELETE");
@@ -73,6 +89,7 @@ async function showFiles() {
         showSpace();
       } catch (e) {
         btn.disabled = false;
+        btn.textContent = "Delete";
         let why = li.querySelector(".why");
         if (!why) {
           why = document.createElement("p");

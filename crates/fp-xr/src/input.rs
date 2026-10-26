@@ -33,6 +33,9 @@ pub struct Hand {
     pub menu: bool,
     /// The bumper above the grip.
     pub shoulder: bool,
+    /// Input comes from a tracked hand (hand interaction profile), not a
+    /// controller: pinch is the trigger, and a closing hand reads as grip.
+    pub tracked_hand: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -56,6 +59,8 @@ pub(crate) struct Actions {
     shoulder: xr::Action<bool>,
     haptic: xr::Action<xr::Haptic>,
     pub hands: [xr::Path; 2],
+    /// The hand interaction profile, to tell tracked hands from controllers.
+    hand_profile: xr::Path,
     aim_spaces: Option<[xr::Space; 2]>,
     pub bound: Vec<(String, usize)>,
     /// `FRAMEPLAYER_DEBUG_INPUT=1`: log each hand's input when it changes,
@@ -201,6 +206,9 @@ impl Actions {
             shoulder,
             haptic,
             hands,
+            hand_profile: instance
+                .string_to_path("/interaction_profiles/ext/hand_interaction_ext")
+                .unwrap_or(xr::Path::NULL),
             aim_spaces: None,
             bound: Vec::new(),
             debug: std::env::var_os("FRAMEPLAYER_DEBUG_INPUT").is_some_and(|v| v != "0"),
@@ -319,6 +327,10 @@ impl Actions {
             if let Ok(s) = self.squeeze.state(session, *h) {
                 hand.squeeze = s.current_state;
             }
+            hand.tracked_hand = self.hand_profile != xr::Path::NULL
+                && session
+                    .current_interaction_profile(*h)
+                    .is_ok_and(|p| p == self.hand_profile);
             if let Ok(s) = self.stick.state(session, *h) {
                 hand.stick = Vec2::new(s.current_state.x, s.current_state.y);
             }
