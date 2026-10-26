@@ -612,22 +612,15 @@ fn home(ui: &mut egui::Ui, v: &mut View) {
                 .iter()
                 .map(|f| f.display().to_string())
                 .collect();
-            let body = if folders.is_empty() && cfg!(target_os = "android") {
-                "Send videos from a computer's browser with Wi-Fi upload in Settings › \
-                 Library, copy them into the Movies folder over USB, or stream them from \
-                 DLNA, SMB and WebDAV servers."
+            let body = if cfg!(target_os = "android") {
+                "Send videos from your computer over Wi-Fi: open the page FramePlayer shows \
+                 in any browser and drop them on it. Or stream them from DLNA, SMB and \
+                 WebDAV servers on your network."
                     .to_string()
             } else if folders.is_empty() {
                 "Copy videos to the Frame with FrameDrop or a USB drive, or stream them from \
                  XBVR, Stash, DLNA, SMB and WebDAV servers."
                     .to_string()
-            } else if cfg!(target_os = "android") {
-                format!(
-                    "Videos in {} are added automatically. Copy some over by connecting the \
-                     Quest to a computer with a USB cable, or stream from a server on your \
-                     network.",
-                    folders.join(", ")
-                )
             } else {
                 format!(
                     "Videos in {} are added automatically. Copy some over with FrameDrop or a \
@@ -641,13 +634,35 @@ fn home(ui: &mut egui::Ui, v: &mut View) {
                 "Your library is empty",
                 &body,
                 |ui| {
+                    // On a Quest, Wi-Fi upload is the easy way in: lead with it.
+                    let quest = cfg!(target_os = "android");
+                    if quest {
+                        ui.horizontal(|ui| {
+                            ui.add_space((ui.available_width() - 330.0).max(0.0) / 2.0);
+                            if widgets::button(
+                                ui,
+                                Some(icons::WIFI_HIGH),
+                                "Send videos from your computer",
+                                Kind::Primary,
+                            )
+                            .clicked()
+                            {
+                                open_wifi_upload(v);
+                            }
+                        });
+                        ui.add_space(8.0);
+                    }
                     ui.horizontal(|ui| {
                         ui.add_space((ui.available_width() - 400.0).max(0.0) / 2.0);
                         if widgets::button(
                             ui,
                             Some(icons::ARROWS_CLOCKWISE),
                             "Scan now",
-                            Kind::Primary,
+                            if quest {
+                                Kind::Secondary
+                            } else {
+                                Kind::Primary
+                            },
                         )
                         .clicked()
                         {
@@ -670,6 +685,15 @@ fn home(ui: &mut egui::Ui, v: &mut View) {
         row(ui, v, "Recently added", &rows.recent);
     });
     v.state.home = Some(rows);
+}
+
+/// Settings › Library with Wi-Fi upload on, showing its address and code.
+fn open_wifi_upload(v: &mut View) {
+    if v.services.upload.is_none() {
+        v.actions.push(Action::SetUpload(true));
+    }
+    v.state.screen = Screen::Settings;
+    v.state.settings_tab = super::SettingsTab::Library;
 }
 
 /// The search field: a rounded box with a magnifying glass.
@@ -785,6 +809,20 @@ fn library(ui: &mut egui::Ui, v: &mut View) {
                 .font(theme::font(Weight::Medium, 15.0))
                 .color(theme::TEXT_3),
             );
+            if cfg!(target_os = "android") {
+                ui.add_space(12.0);
+                if widgets::button_sized(
+                    ui,
+                    Some(icons::WIFI_HIGH),
+                    "Send from computer",
+                    Kind::Secondary,
+                    38.0,
+                )
+                .clicked()
+                {
+                    open_wifi_upload(v);
+                }
+            }
         });
     });
     ui.add_space(12.0);
