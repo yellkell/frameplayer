@@ -5,7 +5,8 @@
 //! The pictures are Blender renders of Valve's controller models as SteamVR
 //! ships them (assets/controllers, credited in packaging/licenses). Part
 //! centres come from the same renders, in units of the round head's radius
-//! from its centre.
+//! from its centre. On a Quest the Touch controllers are drawn instead
+//! ([`draw_touch`]), with only the buttons they have.
 
 use super::theme::{self, Weight};
 use super::widgets;
@@ -49,8 +50,14 @@ enum Spot {
 /// The D-pad's centre and how far each arm's centre is from it.
 const DPAD: (f32, f32, f32) = (-0.427, -0.094, 0.235);
 
+/// The Quest build shows Touch controllers.
+const TOUCH: bool = cfg!(target_os = "android");
+
 /// The right controller has A/B/X/Y, the left a D-pad in their place.
 fn spots(hand: usize) -> Vec<Spot> {
+    if TOUCH {
+        return touch_spots(hand);
+    }
     if hand == RIGHT {
         vec![
             Spot::Bumper,
@@ -73,6 +80,97 @@ fn spots(hand: usize) -> Vec<Spot> {
             Spot::Stick(0.300, 0.226),
         ]
     }
+}
+
+/// A Touch controller's face, as [`draw_touch`] draws it: the stick toward
+/// the other hand, two face buttons beside it, and Menu (left only; the
+/// right's Meta button belongs to the system).
+fn touch_spots(hand: usize) -> Vec<Spot> {
+    let m = if hand == RIGHT { 1.0 } else { -1.0 };
+    let mut s = vec![
+        Spot::Stick(-0.36 * m, -0.22),
+        Spot::Round(
+            0.40 * m,
+            -0.40,
+            0.15,
+            if hand == RIGHT {
+                Button::East
+            } else {
+                Button::North
+            },
+        ),
+        Spot::Round(0.24 * m, 0.04, 0.15, Button::South),
+    ];
+    if hand == LEFT {
+        s.push(Spot::Pill(-0.02 * m, 0.42, Button::Menu));
+    }
+    s
+}
+
+/// A Touch controller seen from above: the face plate, the handle below it,
+/// the stick and buttons (the hotspots glow over them).
+fn draw_touch(p: &egui::Painter, hand: usize, at: impl Fn(f32, f32) -> Pos2, r: f32) {
+    let m = if hand == RIGHT { 1.0 } else { -1.0 };
+    let body = Color32::from_rgb(46, 49, 54);
+    let edge = Stroke::new(1.5_f32, Color32::from_rgb(92, 97, 105));
+    // The handle, angled away under the face.
+    let handle: Vec<Pos2> = [
+        (-0.30, 0.55),
+        (0.42, 0.55),
+        (0.30, 2.05),
+        (0.12, 2.25),
+        (-0.10, 2.25),
+        (-0.22, 2.05),
+    ]
+    .iter()
+    .map(|&(x, y)| at(x * m + 0.05 * m, y))
+    .collect();
+    p.add(Shape::convex_polygon(
+        handle,
+        body.gamma_multiply(0.85),
+        edge,
+    ));
+    // The face plate: a rounded oval.
+    let plate: Vec<Pos2> = (0..48)
+        .map(|k| {
+            let a = k as f32 / 48.0 * std::f32::consts::TAU;
+            at(0.98 * a.cos(), 0.86 * a.sin())
+        })
+        .collect();
+    p.add(Shape::convex_polygon(plate, body, edge));
+    // Stick: a well and its cap.
+    let stick = at(-0.36 * m, -0.22);
+    p.circle_filled(stick, 0.31 * r, Color32::from_rgb(28, 30, 34));
+    p.circle_filled(stick, 0.22 * r, Color32::from_rgb(64, 68, 75));
+    p.circle_stroke(
+        stick,
+        0.22 * r,
+        Stroke::new(1.0_f32, Color32::from_white_alpha(40)),
+    );
+    // Face buttons, with their letters.
+    let names = if hand == RIGHT {
+        ["B", "A"]
+    } else {
+        ["Y", "X"]
+    };
+    for ((x, y), name) in [(0.40, -0.40), (0.24, 0.04)].into_iter().zip(names) {
+        let c = at(x * m, y);
+        p.circle_filled(c, 0.15 * r, KEY.gamma_multiply(0.55));
+        p.text(
+            c,
+            Align2::CENTER_CENTER,
+            name,
+            theme::font(Weight::SemiBold, (0.15 * r).max(10.0)),
+            Color32::from_rgb(20, 22, 26),
+        );
+    }
+    // Menu (left) or the system's Meta button (right): a small pill.
+    let pill = Rect::from_center_size(at(-0.02 * m, 0.42), Vec2::new(0.22 * r, 0.11 * r));
+    p.rect_filled(
+        pill,
+        CornerRadius::same((0.055 * r) as u8),
+        KEY.gamma_multiply(0.45),
+    );
 }
 
 /// Where each render sits around the head, in head radii from its centre:
@@ -243,7 +341,9 @@ fn draw_hand(ui: &mut egui::Ui, v: &mut View, hand: usize, c: Pos2, r: f32, t: f
     let at = |x: f32, y: f32| Pos2::new(c.x + x * r, c.y + y * r);
     let p = ui.painter().clone();
 
-    if let Some(tex) = picture(ui.ctx(), hand) {
+    if TOUCH {
+        draw_touch(&p, hand, at, r);
+    } else if let Some(tex) = picture(ui.ctx(), hand) {
         let [l, t_, rr, b] = picture_rect(hand);
         p.image(
             tex.id(),

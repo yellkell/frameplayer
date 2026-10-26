@@ -161,8 +161,19 @@ impl Button {
         Button::StickClick,
     ];
 
-    /// The button's name on the Frame controller of `hand`.
+    /// The button's name on the controller of `hand` (Frame, or Touch on a
+    /// Quest, where only A/B, X/Y and Menu exist).
     pub fn label(self, hand: usize) -> &'static str {
+        if cfg!(target_os = "android") {
+            match (self, hand == RIGHT) {
+                (Button::South, true) => return "A",
+                (Button::East, true) => return "B",
+                (Button::South, false) => return "X",
+                (Button::North, false) => return "Y",
+                (Button::Menu, false) => return "Menu",
+                _ => {}
+            }
+        }
         match (self, hand == RIGHT) {
             (Button::South, true) => "A",
             (Button::East, true) => "B",
@@ -288,7 +299,13 @@ impl Default for Bindings {
                 east: B::Passthrough,
                 west: B::AdjustPanel,
                 north: B::ShowHideControls,
-                menu: B::Recenter,
+                // On a Quest the system recenters (hold the Meta button),
+                // and the right controller has no Menu for the library.
+                menu: if cfg!(target_os = "android") {
+                    B::Library
+                } else {
+                    B::Recenter
+                },
                 shoulder: B::BackOneMinute,
                 stick_click: B::ResetPicture,
                 stick_x: X::Seek,
