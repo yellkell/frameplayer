@@ -50,7 +50,32 @@ pub type PanelId = usize;
 pub enum QuadTexture {
     /// Solid colour (tinted by the quad colour).
     White,
+    /// A soft-edged vertical capsule (rounded at the top and bottom), for
+    /// drawing rods such as finger bones.
+    Capsule,
     Panel(PanelId),
+}
+
+/// Size of the capsule texture (width, height).
+const CAPSULE_PX: [u32; 2] = [32, 96];
+
+/// The capsule: premultiplied white, coverage falling off over a texel at
+/// the edge.
+fn capsule_pixels() -> Vec<u8> {
+    let [w, h] = CAPSULE_PX.map(|v| v as f32);
+    let r = w / 2.0 - 1.0;
+    let mut px = Vec::with_capacity((w * h * 4.0) as usize);
+    for y in 0..CAPSULE_PX[1] {
+        for x in 0..CAPSULE_PX[0] {
+            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+            let cy = fy.clamp(r + 1.0, h - r - 1.0);
+            let d = ((fx - w / 2.0).powi(2) + (fy - cy).powi(2)).sqrt();
+            let a = ((r - d) / 1.5 + 0.5).clamp(0.0, 1.0);
+            let v = (a * 255.0).round() as u8;
+            px.extend([v, v, v, v]);
+        }
+    }
+    px
 }
 
 /// A textured quad in world space.
@@ -157,6 +182,7 @@ pub struct Renderer {
     egui_pl: vk::PipelineLayout,
     egui_pipe: vk::Pipeline,
     white: Tex,
+    capsule: Tex,
     dummy: Image,
     panels: Vec<Option<Panel>>,
     slots: Vec<Slot>,
@@ -332,6 +358,18 @@ impl Renderer {
                     image: Image::new(&gpu, 1, 1, &PANEL_FORMATS, usage_sampled(), 1, "white")?,
                     set: vk::DescriptorSet::null(),
                 },
+                capsule: Tex {
+                    image: Image::new(
+                        &gpu,
+                        CAPSULE_PX[0],
+                        CAPSULE_PX[1],
+                        &PANEL_FORMATS,
+                        usage_sampled(),
+                        1,
+                        "capsule",
+                    )?,
+                    set: vk::DescriptorSet::null(),
+                },
                 dummy: Image::new(
                     &gpu,
                     1,
@@ -385,6 +423,15 @@ impl Renderer {
                     );
                 }
             })?;
+            // Coverage, so the linear (UNORM) view.
+            r.capsule.set = r.tex_set(r.capsule.image.views[0])?;
+            r.upload(
+                r.capsule.image.image,
+                CAPSULE_PX[0],
+                CAPSULE_PX[1],
+                &capsule_pixels(),
+                (vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, mem::SHADER_READ),
+            )?;
             for _ in 0..SLOTS {
                 let slot = r.new_slot()?;
                 r.slots.push(slot);
@@ -1087,6 +1134,7 @@ impl Renderer {
         for q in quads {
             let set = match q.texture {
                 QuadTexture::White => self.white.set,
+                QuadTexture::Capsule => self.capsule.set,
                 QuadTexture::Panel(id) => match self.panels.get(id).and_then(Option::as_ref) {
                     Some(p) => p.set,
                     None => continue,
@@ -1355,6 +1403,25 @@ impl Renderer {
     /// with `rgba` and leaves it in COLOR_ATTACHMENT_OPTIMAL. Waits for the
     /// GPU; for small, static pictures.
     pub fn upload_rgba(&self, dst: vk::Image, width: u32, height: u32, rgba: &[u8]) -> Result<()> {
+        self.upload(
+            dst,
+            width,
+            height,
+            rgba,
+            (vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, mem::COLOR_WRITE),
+        )
+    }
+
+    /// Copies `rgba` into `dst`, leaving it in `then` (layout, and the
+    /// stage and access that use it next).
+    fn upload(
+        &self,
+        dst: vk::Image,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+        then: (vk::ImageLayout, (vk::PipelineStageFlags2, vk::AccessFlags2)),
+    ) -> Result<()> {
         let mut staging = Buffer::new(
             &self.gpu,
             rgba.len() as u64,
@@ -1403,9 +1470,9 @@ impl Renderer {
                 dst,
                 mem::range(0, 1),
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                then.0,
                 mem::TRANSFER_WRITE,
-                mem::COLOR_WRITE,
+                then.1,
             );
         });
         staging.destroy(&self.gpu);
@@ -1596,6 +1663,7 @@ impl Drop for Renderer {
                 }
             }
             self.white.image.destroy(&gpu);
+            self.capsule.image.destroy(&gpu);
             self.dummy.destroy(&gpu);
             for p in [self.scene_pipe, self.quad_pipe, self.egui_pipe] {
                 d.destroy_pipeline(p, None);

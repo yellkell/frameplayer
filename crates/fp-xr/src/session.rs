@@ -1,7 +1,7 @@
 //! Session lifecycle, swapchains and the frame loop.
 
 use crate::context::XrContext;
-use crate::input::{Actions, InputState};
+use crate::input::{Actions, InputState, Joint};
 use crate::{Error, Result, XrContextExt};
 use ash::vk::{self, Handle};
 use fp_render::{EyeTarget, EyeView, Gpu};
@@ -73,6 +73,8 @@ pub struct XrSession {
     /// Offset of our play space within the runtime's LOCAL space.
     space_origin: (Vec3, Quat),
     quads: std::collections::HashMap<u64, QuadLayer>,
+    /// Hand joint tracking (Quest), for drawing the hands.
+    hand_trackers: Option<[xr::HandTracker; 2]>,
 }
 
 /// One frame in progress.
@@ -160,6 +162,21 @@ impl XrSession {
             .copied()
             .unwrap_or(xr::EnvironmentBlendMode::OPAQUE);
         log::info!("XR session: {w}x{h} per eye, {format:?}, blend {blend_mode:?}");
+        // The Quest draws no hands in an immersive app: we do, from these.
+        let hand_trackers = if cfg!(target_os = "android") && ctx.enabled.ext_hand_tracking {
+            match (
+                session.create_hand_tracker(xr::Hand::LEFT),
+                session.create_hand_tracker(xr::Hand::RIGHT),
+            ) {
+                (Ok(l), Ok(r)) => Some([l, r]),
+                (Err(e), _) | (_, Err(e)) => {
+                    log::warn!("hand tracking: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         Ok(XrSession {
             ctx,
             gpu,
@@ -181,6 +198,7 @@ impl XrSession {
             event_buf: xr::EventDataBuffer::new(),
             space_origin: (Vec3::ZERO, Quat::IDENTITY),
             quads: std::collections::HashMap::new(),
+            hand_trackers,
         })
     }
 
@@ -512,7 +530,29 @@ impl XrSession {
 
     /// Controller state at `time`.
     pub fn input(&self, time: xr::Time) -> InputState {
-        self.actions.read(&self.session, &self.space, time)
+        let mut input = self.actions.read(&self.session, &self.space, time);
+        if let Some(trackers) = &self.hand_trackers {
+            for (hand, tracker) in input.hands.iter_mut().zip(trackers) {
+                hand.joints = self.locate_joints(tracker, time);
+            }
+        }
+        input
+    }
+
+    /// Every joint of a hand, or `None` unless all are tracked.
+    fn locate_joints(&self, tracker: &xr::HandTracker, time: xr::Time) -> Option<[Joint; 26]> {
+        let locs = self.space.locate_hand_joints(tracker, time).ok()??;
+        let valid = xr::SpaceLocationFlags::POSITION_VALID;
+        if !locs.iter().all(|l| l.location_flags.contains(valid)) {
+            return None;
+        }
+        Some(std::array::from_fn(|i| {
+            let p = locs[i].pose.position;
+            Joint {
+                pos: Vec3::new(p.x, p.y, p.z),
+                radius: locs[i].radius,
+            }
+        }))
     }
 
     pub fn buzz(&self, hand: usize, amplitude: f32, millis: i64) {

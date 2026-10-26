@@ -36,6 +36,17 @@ pub struct Hand {
     /// Input comes from a tracked hand (hand interaction profile), not a
     /// controller: pinch is the trigger, and a closing hand reads as grip.
     pub tracked_hand: bool,
+    /// The hand's 26 joints (XR_EXT_hand_tracking order: palm, wrist, then
+    /// thumb and each finger from the base to the tip), when tracked.
+    pub joints: Option<[Joint; 26]>,
+}
+
+/// One tracked hand joint, in the play space.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Joint {
+    pub pos: Vec3,
+    /// Roughly the finger's thickness there (metres).
+    pub radius: f32,
 }
 
 #[derive(Clone, Debug, Default)]

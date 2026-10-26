@@ -156,6 +156,90 @@ pub(crate) fn hand_tracking(mut input: fp_xr::InputState) -> fp_xr::InputState {
     input
 }
 
+/// Whether a tracked hand is being drawn.
+pub(crate) fn hands_shown(input: &fp_xr::InputState) -> bool {
+    input
+        .hands
+        .iter()
+        .any(|h| h.tracked_hand && h.joints.is_some())
+}
+
+/// Joint pairs drawn as bones (XR_EXT_hand_tracking indices): the thumb
+/// from the wrist, each finger from its metacarpal to the tip, and the
+/// knuckles across the palm.
+const BONES: [(usize, usize); 24] = [
+    (1, 2),
+    (2, 3),
+    (3, 4),
+    (4, 5),
+    (6, 7),
+    (7, 8),
+    (8, 9),
+    (9, 10),
+    (11, 12),
+    (12, 13),
+    (13, 14),
+    (14, 15),
+    (16, 17),
+    (17, 18),
+    (18, 19),
+    (19, 20),
+    (21, 22),
+    (22, 23),
+    (23, 24),
+    (24, 25),
+    (7, 12),
+    (12, 17),
+    (17, 22),
+    (1, 21),
+];
+
+/// The tracked hands as soft rods facing the eyes, drawn after (over)
+/// everything else, like the system's own hands.
+pub(crate) fn hand_quads(
+    input: &fp_xr::InputState,
+    eye: Option<glam::Vec3>,
+) -> Vec<fp_render::QuadDraw> {
+    let Some(eye) = eye else {
+        return Vec::new();
+    };
+    // Light grey, mostly opaque (overlaps between rods show less), in the
+    // linear premultiplied form quads take.
+    let alpha = 0.78;
+    let color = [0.62 * alpha, 0.64 * alpha, 0.68 * alpha, alpha];
+    let mut quads = Vec::new();
+    for h in &input.hands {
+        let (true, Some(j)) = (h.tracked_hand, h.joints) else {
+            continue;
+        };
+        for (a, b) in BONES {
+            let (pa, pb) = (j[a].pos, j[b].pos);
+            let along = pb - pa;
+            let len = along.length();
+            if len < 1e-4 {
+                continue;
+            }
+            let dir = along / len;
+            // Thicker than the joint radius reads better at arm's length.
+            let half = (j[a].radius + j[b].radius).max(0.012) * 0.6;
+            let side = dir.cross(((pa + pb) / 2.0 - eye).normalize_or_zero());
+            if side.length_squared() < 1e-8 {
+                continue;
+            }
+            let side = side.normalize() * half;
+            // The capsule's rounded ends reach past the joints.
+            let (top, bottom) = (pb + dir * half, pa - dir * half);
+            quads.push(fp_render::QuadDraw {
+                texture: fp_render::QuadTexture::Capsule,
+                corners: [top - side, top + side, bottom + side, bottom - side],
+                uv: [glam::Vec2::ZERO, glam::Vec2::ONE],
+                color,
+            });
+        }
+    }
+    quads
+}
+
 /// Handles the activity's pending events without waiting. Returns true
 /// once the activity is being destroyed.
 pub(crate) fn pump() -> bool {

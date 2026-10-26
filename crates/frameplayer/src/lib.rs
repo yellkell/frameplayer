@@ -462,7 +462,13 @@ fn run_xr(args: &Args) -> Result<(), Error> {
         let dt = last.elapsed().as_secs_f32().min(0.1);
         last = Instant::now();
         renderer.begin_frame()?;
-        let out = app.frame(
+        // Drawn hands must cover the menus they point at, which compositor
+        // layers would cover instead: while hands show, menus are drawn
+        // into the eyes too.
+        #[cfg(target_os = "android")]
+        let layers = layers && !android::hands_shown(&input);
+        #[allow(unused_mut)]
+        let mut out = app.frame(
             &mut renderer,
             FrameInput {
                 time: start.elapsed().as_secs_f64(),
@@ -473,6 +479,9 @@ fn run_xr(args: &Args) -> Result<(), Error> {
                 layers,
             },
         );
+        #[cfg(target_os = "android")]
+        out.quads
+            .extend(android::hand_quads(&input, frame.head.map(|h| h.0)));
         frames += 1;
         video_frames += out.frame.is_some() as u64;
         renderer.set_video(out.frame.as_ref())?;

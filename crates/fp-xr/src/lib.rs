@@ -16,7 +16,7 @@ pub mod session;
 pub use context::XrContext;
 #[cfg(target_os = "android")]
 pub use context::set_android_activity;
-pub use input::{Hand, InputState};
+pub use input::{Hand, InputState, Joint};
 pub use session::{FrameCtx, QuadSubmit, SessionEvent, XrSession};
 
 /// OpenXR errors with the failing call named.
