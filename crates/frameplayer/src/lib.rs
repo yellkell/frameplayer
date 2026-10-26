@@ -17,6 +17,8 @@ mod bindings;
 mod controls;
 mod jobs;
 mod logger;
+#[cfg(target_os = "android")]
+mod meta;
 mod pin;
 mod playback;
 mod preview;

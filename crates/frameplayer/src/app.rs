@@ -430,6 +430,13 @@ impl App {
     }
 
     fn poll_purchase(&mut self) {
+        // Bought before, on this or another headset: the store says so
+        // shortly after start-up.
+        #[cfg(target_os = "android")]
+        if !self.unlocked && self.purchase.is_none() && crate::meta::owns_unlock() {
+            self.unlocked = true;
+            self.repaint_all();
+        }
         let Some(p) = &self.purchase else {
             return;
         };
@@ -439,7 +446,10 @@ impl App {
         }
         self.repaint_all();
         if let crate::unlock::Status::Unlocked(licence) = s {
-            self.settings.unlock = Some(licence);
+            // A Quest's store keeps its own record of the purchase.
+            if !cfg!(target_os = "android") {
+                self.settings.unlock = Some(licence);
+            }
             self.unlocked = true;
             self.purchase = None;
             self.purchase_seen = None;

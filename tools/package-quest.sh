@@ -10,7 +10,8 @@
 # Works on Linux and in Git Bash on Windows.
 #
 # Signing: $QUEST_KEYSTORE (+ $QUEST_KEYSTORE_PASS, $QUEST_KEY_ALIAS), else the
-# Android debug keystore. Version code: $QUEST_VERSION_CODE, else the number
+# Android debug keystore. QUEST_STORE=1 builds for the Meta Quest Store: the
+# app closes when the store's entitlement check fails. Version code: $QUEST_VERSION_CODE, else the number
 # of commits, which only grows.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -20,6 +21,8 @@ API=29        # oldest Android (Quest system) supported
 TARGET_API=32 # what Meta's store asks for
 LOADER_VER=1.1.65
 LOADER_SHA256=a298c326085b09181c85235fb04d37510939bd30938ed4322c093c09780e8643
+PSDK_VER=77.0.1 # Meta's Platform SDK: entitlement check and in-app purchases
+PSDK_SHA256=3d64b23d4cdfcc88a38758a7b403c5784eacc208b5ab6296e814e77dfa3fc9d3
 
 # The first Python that runs (on Windows "python3" can be a Store stub).
 py=""
@@ -68,7 +71,9 @@ for p in sorted((pkgs[i] for i in seen if i not in ours), key=lambda p: p["name"
 export FP_RUST_CRATES="$work/rust-crates.txt"
 
 echo "== native library"
-(cd "$root" && cargo ndk -t arm64-v8a -P "$API" -o "$work/lib" build --release -p frameplayer-quest)
+features=()
+[ "${QUEST_STORE:-}" = 1 ] && features=(--features store)
+(cd "$root" && cargo ndk -t arm64-v8a -P "$API" -o "$work/lib" build --release -p frameplayer-quest "${features[@]}")
 cp "$ffmpeg"/lib*.so "$work/lib/arm64-v8a/"
 
 echo "== OpenXR loader $LOADER_VER"
@@ -79,6 +84,12 @@ mkdir -p "$root/third_party/src"
 echo "$LOADER_SHA256  $aar" | sha256sum -c --quiet - || { rm -f "$aar"; echo "OpenXR loader checksum mismatch" >&2; exit 1; }
 "$py" -I -c "import sys, zipfile; open(sys.argv[2], 'wb').write(zipfile.ZipFile(sys.argv[1]).read('jni/arm64-v8a/libopenxr_loader.so'))" \
   "$aar" "$work/lib/arm64-v8a/libopenxr_loader.so"
+
+echo "== Meta Platform SDK $PSDK_VER"
+psdk="$root/third_party/src/android-platform-sdk-$PSDK_VER.aar"
+[ -f "$psdk" ] || curl -fsSL --retry 4 -o "$psdk"   "https://repo1.maven.org/maven2/com/meta/horizon/platform/ovr/android-platform-sdk/$PSDK_VER/android-platform-sdk-$PSDK_VER.aar"
+echo "$PSDK_SHA256  $psdk" | sha256sum -c --quiet - || { rm -f "$psdk"; echo "Platform SDK checksum mismatch" >&2; exit 1; }
+"$py" -I -c "import sys, zipfile; open(sys.argv[2], 'wb').write(zipfile.ZipFile(sys.argv[1]).read('jni/arm64-v8a/libovrplatformloader.so'))"   "$psdk" "$work/lib/arm64-v8a/libovrplatformloader.so"
 
 echo "== APK $version ($code)"
 cp "$root/assets/steam/icon.png" "$work/res/mipmap/ic_launcher.png"

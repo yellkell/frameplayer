@@ -10,6 +10,10 @@ license.workspace = true
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+# For the Meta Quest Store: see the frameplayer crate's feature.
+store = ["frameplayer/store"]
+
 # Only an Android build has anything in it; elsewhere it is an empty library,
 # so the workspace still builds for the Frame and in CI.
 [target.'cfg(target_os = "android")'.dependencies]

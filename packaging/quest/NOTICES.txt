@@ -17,6 +17,10 @@ Khronos OpenXR loader for Android 1.1.65 (libopenxr_loader.so)
   Licence: Apache License 2.0. Copyright The Khronos Group Inc.
   Source: https://github.com/KhronosGroup/OpenXR-SDK-Source
 
+Meta Platform SDK 77.0.1 (libovrplatformloader.so): the store's entitlement
+  check and in-app purchase. Licence: Meta Platform Technologies SDK License
+  Agreement, https://developer.oculus.com/licenses/oculussdk/
+
 Rust crates compiled into the app are under MIT, Apache-2.0, BSD, ISC, Zlib,
 Unicode-3.0 or MPL-2.0 licences; each is listed with its licence below.
 

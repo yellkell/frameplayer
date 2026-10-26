@@ -4,6 +4,10 @@
 //! phone or computer and pays with Stripe; the next claim brings back a
 //! licence, kept in the settings and checked offline here against the
 //! server's public key. Server: `tools/unlock-server`.
+//!
+//! On a Meta Quest the unlock is an add-on bought in the store's own
+//! checkout instead (crate::meta), as the store requires.
+#![cfg_attr(target_os = "android", allow(dead_code))]
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -73,6 +77,21 @@ pub struct Purchase {
 }
 
 impl Purchase {
+    #[cfg(target_os = "android")]
+    pub fn start() -> Purchase {
+        crate::meta::checkout();
+        Purchase {
+            status: Arc::new(Mutex::new(Status::Starting)),
+            stop: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    pub fn status(&self) -> Status {
+        crate::meta::checkout_status()
+    }
+
+    #[cfg(not(target_os = "android"))]
     pub fn start() -> Purchase {
         let status = Arc::new(Mutex::new(Status::Starting));
         let stop = Arc::new(AtomicBool::new(false));
@@ -87,6 +106,7 @@ impl Purchase {
         Purchase { status, stop }
     }
 
+    #[cfg(not(target_os = "android"))]
     pub fn status(&self) -> Status {
         self.status.lock().unwrap().clone()
     }

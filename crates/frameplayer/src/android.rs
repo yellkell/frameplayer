@@ -41,6 +41,8 @@ pub fn run(app: AndroidApp) {
         "FramePlayer {} starting (Android)",
         env!("CARGO_PKG_VERSION")
     );
+    // SAFETY: as above, and pump() below runs on this same thread.
+    unsafe { crate::meta::start(vm, activity) };
     if let Err(e) = crate::run_xr(&crate::Args::default()) {
         log::error!("{e}");
     }
@@ -240,9 +242,14 @@ pub(crate) fn hand_quads(
     quads
 }
 
-/// Handles the activity's pending events without waiting. Returns true
-/// once the activity is being destroyed.
+/// Handles the activity's pending events and the store's answers without
+/// waiting. Returns true once the activity is being destroyed, or when a
+/// store build's user doesn't own the app.
 pub(crate) fn pump() -> bool {
+    if crate::meta::pump() {
+        log::warn!("closing: this account doesn't own FramePlayer");
+        return true;
+    }
     let Some(app) = APP.get() else {
         return false;
     };

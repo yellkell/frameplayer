@@ -896,7 +896,12 @@ pub(super) fn unlock_card(
         Some(Status::Starting) => {
             ui.horizontal(|ui| {
                 ui.add(egui::Spinner::new().size(18.0).color(premium::VIOLET));
-                ui.label(text("Getting a code", 16.0, theme::TEXT_2));
+                let doing = if cfg!(target_os = "android") {
+                    "Opening the Meta Quest Store"
+                } else {
+                    "Getting a code"
+                };
+                ui.label(text(doing, 16.0, theme::TEXT_2));
             });
         }
         _ => {
@@ -909,11 +914,12 @@ pub(super) fn unlock_card(
             if premium::button(ui, &format!("Unlock for {PRICE}")).clicked() {
                 actions.push(Action::StartUnlock);
             }
-            ui.label(text(
-                "One-time purchase at yellkell.com/unlock, paid on your phone or computer.",
-                14.0,
-                theme::TEXT_3,
-            ));
+            let how = if cfg!(target_os = "android") {
+                "One-time purchase through the Meta Quest Store."
+            } else {
+                "One-time purchase at yellkell.com/unlock, paid on your phone or computer."
+            };
+            ui.label(text(how, 14.0, theme::TEXT_3));
         }
     }
 }

@@ -35,5 +35,10 @@ ureq = { version = "3", default-features = false, features = ["rustls"] }
 android-activity = { version = "0.6", features = ["native-activity"] }
 jni-sys = "0.3"
 
+[features]
+# A Meta Quest Store build: it closes when the store's entitlement check
+# fails (crate::meta). Sideloaded test builds leave it off.
+store = []
+
 [dev-dependencies]
 png = "0.18"
