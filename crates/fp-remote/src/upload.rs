@@ -3,7 +3,7 @@
 //! no cable and nothing installed on the computer.
 //!
 //! It runs only while the app shows its address and code, and every API
-//! call carries that six-digit code (`X-Upload-Code`). A file is written
+//! call carries that two-digit code (`X-Upload-Code`). A file is written
 //! hidden as `.partial-<name>` (library scans skip hidden files; the name
 //! keeps its extension, which Android's shared storage requires) and
 //! renamed once all of it has arrived. The page also lists the videos in
@@ -46,8 +46,9 @@ const RECV_POLL: Duration = Duration::from_millis(200);
 /// Space left free on the headset after an upload.
 const RESERVE: u64 = 512 << 20;
 /// Wrong codes before the server answers no one: a new code means turning
-/// the upload off and on in the headset.
-const MAX_FAILURES: u32 = 20;
+/// the upload off and on in the headset. The code is short (easy to type),
+/// so this stays low: a guesser gets 5 of 100.
+const MAX_FAILURES: u32 = 5;
 const MAX_NAME_BYTES: usize = 180;
 const CHUNK: usize = 1 << 20;
 
@@ -188,11 +189,11 @@ impl Drop for UploadServer {
     }
 }
 
-/// Six random digits.
+/// Two random digits.
 fn new_code() -> Result<String, RemoteError> {
     let mut b = [0u8; 4];
     getrandom::fill(&mut b).map_err(|e| RemoteError::Random(e.to_string()))?;
-    Ok(format!("{:06}", u32::from_le_bytes(b) % 1_000_000))
+    Ok(format!("{:02}", u32::from_le_bytes(b) % 100))
 }
 
 fn worker(server: &Server, state: &State) {
@@ -587,6 +588,11 @@ mod tests {
         assert!(call("DELETE", "/api/files?name=clip%201.mp4").starts_with("HTTP/1.1 200"));
         assert!(!dir.join("clip 1.mp4").exists());
         assert_eq!(up.progress().deleted, vec!["clip 1.mp4".to_string()]);
+        // One wrong code so far; four more and even the right one is refused.
+        for _ in 1..MAX_FAILURES {
+            assert!(put("xx", b"").starts_with("HTTP/1.1 401"));
+        }
+        assert!(call("GET", "/api/files").starts_with("HTTP/1.1 429"));
         up.stop();
         fs::remove_dir_all(&dir).unwrap();
     }
