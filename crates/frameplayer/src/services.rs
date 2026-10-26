@@ -281,6 +281,16 @@ pub fn mount_drive(drive: &UnmountedDrive) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("unexpected udisksctl output: {}", text.trim()))
 }
 
+/// Where Wi-Fi uploads are saved: the Quest's Movies, else ~/Videos.
+pub fn upload_folder() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    Some(home.join(if cfg!(target_os = "android") {
+        "Movies"
+    } else {
+        "Videos"
+    }))
+}
+
 /// Video folders worth offering for the library that are not in it yet
 /// (removable drives are indexed automatically).
 pub fn suggested_folders(existing: &[PathBuf]) -> Vec<PathBuf> {
@@ -315,6 +325,9 @@ pub struct Services {
     )>,
     pub remote: Option<RemoteHub>,
     pub remote_error: Option<String>,
+    /// The Wi-Fi upload page, while it is turned on.
+    pub upload: Option<fp_remote::upload::UploadServer>,
+    pub upload_error: Option<String>,
 }
 
 /// Library access for the web remote.
@@ -380,6 +393,8 @@ impl Services {
             haptic_devices: Vec::new(),
             remote: None,
             remote_error: None,
+            upload: None,
+            upload_error: None,
         };
         s.start_worker();
         s.apply_remote(&settings.remote);

@@ -613,8 +613,9 @@ fn home(ui: &mut egui::Ui, v: &mut View) {
                 .map(|f| f.display().to_string())
                 .collect();
             let body = if folders.is_empty() && cfg!(target_os = "android") {
-                "Connect the Quest to a computer with a USB cable and copy videos into its \
-                 Movies folder, or stream them from DLNA, SMB and WebDAV servers."
+                "Send videos from a computer's browser with Wi-Fi upload in Settings › \
+                 Library, copy them into the Movies folder over USB, or stream them from \
+                 DLNA, SMB and WebDAV servers."
                     .to_string()
             } else if folders.is_empty() {
                 "Copy videos to the Frame with FrameDrop or a USB drive, or stream them from \

@@ -337,6 +337,9 @@ fn passthrough(ui: &mut egui::Ui, v: &mut View) {
 }
 
 fn library(ui: &mut egui::Ui, v: &mut View) {
+    if cfg!(target_os = "android") {
+        wifi_upload(ui, v);
+    }
     heading(ui, "Folders on this device");
     let mut remove = None;
     widgets::rows(ui, |r| {
@@ -726,6 +729,74 @@ fn remote(ui: &mut egui::Ui, v: &mut View) {
             }
         }
     }
+}
+
+/// Sending videos from a computer's browser (the Quest has no FrameDrop,
+/// and copying over USB needs a prompt answered inside the headset).
+fn wifi_upload(ui: &mut egui::Ui, v: &mut View) {
+    heading(ui, "Wi-Fi upload");
+    let mut on = v.services.upload.is_some();
+    widgets::rows(ui, |r| {
+        if r.switch(
+            "Send videos from a computer",
+            Some("Open a page in any browser on your Wi-Fi and drop videos on it."),
+            &mut on,
+        ) {
+            v.actions.push(Action::SetUpload(on));
+        }
+    });
+    if let Some(e) = &v.services.upload_error {
+        ui.label(RichText::new(e).color(theme::ERROR));
+    }
+    let Some(up) = &v.services.upload else {
+        return;
+    };
+    let Some(ip) = fp_remote::lan_addresses().first().copied() else {
+        note(
+            ui,
+            "Not connected to a network. Connect the headset to Wi-Fi first.",
+        );
+        return;
+    };
+    let url = format!("http://{ip}:{}", up.addr().port());
+    let progress = up.progress();
+    widgets::card(ui, |ui| {
+        egui::Frame::new()
+            .inner_margin(egui::Margin::same(16))
+            .show(ui, |ui| {
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = 24.0;
+                    if let Ok(qr) = fp_remote::pairing_qr(&url) {
+                        draw_qr(ui, &qr, 180.0);
+                    }
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("On your computer, open").color(theme::TEXT_2));
+                        ui.label(RichText::new(&url).font(theme::font(Weight::SemiBold, 26.0)));
+                        ui.add_space(8.0);
+                        ui.label(RichText::new("and enter the code").color(theme::TEXT_2));
+                        ui.label(RichText::new(up.code()).font(theme::font(Weight::Bold, 34.0)));
+                    });
+                });
+                ui.add_space(10.0);
+                let status = match (&progress.current, &progress.failed) {
+                    (Some((name, done, total)), _) => format!(
+                        "Receiving {name}: {}%",
+                        (100 * done).checked_div(*total).unwrap_or(0)
+                    ),
+                    (None, Some((name, why))) => format!("{name} failed: {why}"),
+                    (None, None) if progress.saved.is_empty() => format!(
+                        "Videos are saved in {} and added to the library.",
+                        up.folder().display()
+                    ),
+                    (None, None) => format!(
+                        "{} received. Last: {}",
+                        progress.saved.len(),
+                        progress.saved.last().map(String::as_str).unwrap_or("")
+                    ),
+                };
+                ui.label(RichText::new(status).color(theme::TEXT_2));
+            });
+    });
 }
 
 fn draw_qr(ui: &mut egui::Ui, qr: &fp_remote::QrMatrix, size: f32) {

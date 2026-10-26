@@ -10,6 +10,9 @@
 //!   paired by scanning a QR code ([`pairing_qr`]) that carries a
 //!   per-install token.
 //!
+//! Separately, [`upload`] serves a page computers on the LAN use to send
+//! videos to the headset over Wi-Fi, while the app shows its code.
+//!
 //! The render thread calls [`RemoteHub::publish`] every frame and drains
 //! [`RemoteHub::events`] for [`RemoteEvent`]s. Only loopback and
 //! private/link-local peers are served ([`is_allowed_peer`]).
@@ -24,6 +27,7 @@ pub mod net;
 pub mod qr;
 mod status;
 pub mod token;
+pub mod upload;
 pub mod web;
 
 pub use config::{DEFAULT_DEOVR_PORT, DEFAULT_WEB_PORT, RemoteConfig};

@@ -117,6 +117,8 @@ pub enum Action {
     RemoveDevice(usize),
     ReconnectDevices,
     RegenerateToken,
+    /// Turn the Wi-Fi upload page on or off.
+    SetUpload(bool),
     CheckUpdates,
     InstallUpdate,
     /// Start or stop buying the passthrough videos unlock.

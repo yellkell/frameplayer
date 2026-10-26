@@ -138,6 +138,8 @@ pub struct App {
     /// An unlock purchase in progress, and its status as last shown.
     purchase: Option<crate::unlock::Purchase>,
     purchase_seen: Option<crate::unlock::Status>,
+    /// Wi-Fi uploads already added to the library.
+    uploads_seen: usize,
 }
 
 /// A panel held by a grip: which panel and hand, and the hand's aim angles
@@ -236,6 +238,7 @@ impl App {
             unlocked,
             purchase: None,
             purchase_seen: None,
+            uploads_seen: 0,
         };
         app.offsets = app.settings.panel_offsets;
         app.rescan(false);
@@ -377,6 +380,49 @@ impl App {
     }
 
     /// Follows an unlock purchase; once paid, keeps the licence.
+    /// Rescans once a Wi-Fi upload has been saved, so it shows up.
+    fn poll_upload(&mut self) {
+        let Some(up) = &self.services.upload else {
+            return;
+        };
+        let saved = up.progress().saved.len();
+        if saved > self.uploads_seen {
+            self.uploads_seen = saved;
+            self.rescan(false);
+        }
+    }
+
+    /// Starts or stops the Wi-Fi upload page. Its folder joins the library
+    /// folders so what arrives is indexed.
+    fn set_upload(&mut self, on: bool) {
+        self.services.upload = None;
+        self.services.upload_error = None;
+        self.uploads_seen = 0;
+        if !on {
+            return;
+        }
+        let Some(dir) = crate::services::upload_folder() else {
+            self.services.upload_error = Some("No folder to save uploads in.".into());
+            return;
+        };
+        let bind =
+            std::net::SocketAddr::from(([0, 0, 0, 0], fp_remote::upload::DEFAULT_UPLOAD_PORT));
+        match fp_remote::upload::UploadServer::start(bind, dir.clone()) {
+            Ok(up) => {
+                self.services.upload = Some(up);
+                if !self
+                    .settings
+                    .library_folders
+                    .iter()
+                    .any(|f| dir.starts_with(f))
+                {
+                    self.settings.library_folders.push(dir);
+                }
+            }
+            Err(e) => self.services.upload_error = Some(e.to_string()),
+        }
+    }
+
     fn poll_purchase(&mut self) {
         let Some(p) = &self.purchase else {
             return;
@@ -1259,6 +1305,7 @@ impl App {
                     self.ui.toast(e.to_string());
                 }
             }
+            Action::SetUpload(on) => self.set_upload(on),
             Action::CheckUpdates => self.check_updates(),
             Action::InstallUpdate => self.install_update(),
             Action::Recenter => self.recenter(),
@@ -1699,6 +1746,7 @@ impl App {
         self.check_mounts();
         self.remote_events();
         self.poll_purchase();
+        self.poll_upload();
         if let Some(p) = &mut self.playback {
             p.save_progress(&self.services.library, false);
             p.save_key(&self.services.library, false);

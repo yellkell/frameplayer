@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<title>Send to FramePlayer</title>
+<link rel="stylesheet" href="/upload.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1>Send videos to FramePlayer</h1>
+    <p class="muted">They go straight onto your headset over Wi-Fi.</p>
+  </header>
+
+  <section class="card" id="code-card">
+    <h2>Enter the code</h2>
+    <p class="muted">The six-digit code is shown in the headset, under Wi-Fi upload.</p>
+    <form id="code-form" autocomplete="off">
+      <input id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="123456" aria-label="Code" required>
+      <button type="submit">Connect</button>
+    </form>
+    <p class="error" id="code-error" role="alert"></p>
+  </section>
+
+  <section class="card hidden" id="drop-card">
+    <label class="drop" id="drop" for="files">
+      <input type="file" id="files" multiple accept="video/*,.mkv,.srt,.ass,.ssa,.vtt">
+      <strong>Drop videos here</strong>
+      <span class="muted">or click to choose files</span>
+    </label>
+    <p class="muted" id="space"></p>
+    <ul id="queue"></ul>
+    <p class="done hidden" id="done">All sent. They appear in FramePlayer's library in a moment.</p>
+  </section>
+</main>
+<script src="/upload.js"></script>
+</body>
+</html>
