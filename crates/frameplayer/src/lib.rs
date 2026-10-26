@@ -440,6 +440,8 @@ fn run_xr(args: &Args) -> Result<(), Error> {
     // Panel picture each quad layer holds: (panel, paint version).
     let mut copied: std::collections::HashMap<u64, (fp_render::PanelId, u64)> =
         std::collections::HashMap::new();
+    #[allow(unused_variables, unused_assignments)]
+    let mut ui_shown = true;
     loop {
         // The activity is going away: no time left for a clean session end.
         #[cfg(target_os = "android")]
@@ -465,8 +467,10 @@ fn run_xr(args: &Args) -> Result<(), Error> {
         // Drawn hands must cover the menus they point at, which compositor
         // layers would cover instead: while hands show, menus are drawn
         // into the eyes too.
+        // Hands only show with the menus or playbar (last frame's), and go
+        // with them while a video plays.
         #[cfg(target_os = "android")]
-        let layers = layers && !android::hands_shown(&input);
+        let layers = layers && !(ui_shown && android::hands_shown(&input));
         #[allow(unused_mut)]
         let mut out = app.frame(
             &mut renderer,
@@ -480,8 +484,11 @@ fn run_xr(args: &Args) -> Result<(), Error> {
             },
         );
         #[cfg(target_os = "android")]
-        out.quads
-            .extend(android::hand_quads(&input, frame.head.map(|h| h.0)));
+        if out.ui_shown {
+            out.quads
+                .extend(android::hand_quads(&input, frame.head.map(|h| h.0)));
+        }
+        ui_shown = out.ui_shown;
         frames += 1;
         video_frames += out.frame.is_some() as u64;
         renderer.set_video(out.frame.as_ref())?;

@@ -63,6 +63,8 @@ pub struct FrameOutput {
     /// (hand, amplitude, milliseconds)
     pub buzz: Vec<(usize, f32, i64)>,
     pub quit: bool,
+    /// A panel (menu, playbar, ...) is showing.
+    pub ui_shown: bool,
 }
 
 enum Job {
@@ -2008,6 +2010,7 @@ impl App {
             passthrough,
             buzz,
             quit: self.quit,
+            ui_shown: any_ui,
         }
     }
 
