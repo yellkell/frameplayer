@@ -45,6 +45,28 @@ ffmpeg="$root/third_party/ffmpeg/android-aarch64/lib"
 
 rm -rf "$work"; mkdir -p "$work/lib/arm64-v8a" "$work/res/mipmap" "$out"
 
+echo "== licences"
+# The Rust crates in the app and their licences, for the About page
+# (crates/frameplayer/build.rs embeds the list).
+(cd "$root" && cargo metadata --format-version 1 --filter-platform aarch64-linux-android) |
+  "$py" -I -c '
+import json, sys
+m = json.load(sys.stdin)
+pkgs = {p["id"]: p for p in m["packages"]}
+nodes = {n["id"]: n for n in m["resolve"]["nodes"]}
+root = next(i for i, p in pkgs.items() if p["name"] == "frameplayer-quest")
+seen, todo = set(), [root]
+while todo:
+    i = todo.pop()
+    if i in seen: continue
+    seen.add(i)
+    todo += [d["pkg"] for d in nodes[i]["deps"] if any(k["kind"] in (None, "normal") for k in d["dep_kinds"])]
+ours = set(m["workspace_members"])
+for p in sorted((pkgs[i] for i in seen if i not in ours), key=lambda p: p["name"]):
+    print("%s %s: %s" % (p["name"], p["version"], p.get("license") or "see crate"))
+' > "$work/rust-crates.txt"
+export FP_RUST_CRATES="$work/rust-crates.txt"
+
 echo "== native library"
 (cd "$root" && cargo ndk -t arm64-v8a -P "$API" -o "$work/lib" build --release -p frameplayer-quest)
 cp "$ffmpeg"/lib*.so "$work/lib/arm64-v8a/"

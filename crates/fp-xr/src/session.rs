@@ -528,6 +528,13 @@ impl XrSession {
             .ctx("xrEndFrame")
     }
 
+    /// Whether the hands' joints are tracked (see [`Hand::joints`]).
+    ///
+    /// [`Hand::joints`]: crate::Hand::joints
+    pub fn hand_tracking(&self) -> bool {
+        self.hand_trackers.is_some()
+    }
+
     /// Controller state at `time`.
     pub fn input(&self, time: xr::Time) -> InputState {
         let mut input = self.actions.read(&self.session, &self.space, time);

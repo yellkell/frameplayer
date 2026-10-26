@@ -1,0 +1,36 @@
+FramePlayer for Meta Quest includes the following third-party software and
+pictures. The full licence texts follow in this app's About page.
+
+FFmpeg 7.1.1 (libavformat, libavcodec, libavutil, libswresample, libswscale)
+  Licence: GNU Lesser General Public License 2.1 or later (LGPL-2.1-or-later).
+  Built without any GPL or non-free components, as separate shared libraries
+  in the app package. Modified: a small patch adds 10-bit (P010) output to
+  its MediaCodec decoders (tools/ffmpeg-android-p010.patch).
+  Source: https://ffmpeg.org/releases/ffmpeg-7.1.1.tar.xz
+  Build recipe, configure flags and the patch: tools/build-ffmpeg-android.sh
+  in the FramePlayer repository, https://github.com/yellkell/frameplayer
+
+dav1d 1.5.3 (statically linked into libavcodec)
+  Licence: BSD 2-Clause. Source: https://code.videolan.org/videolan/dav1d
+
+Khronos OpenXR loader for Android 1.1.65 (libopenxr_loader.so)
+  Licence: Apache License 2.0. Copyright The Khronos Group Inc.
+  Source: https://github.com/KhronosGroup/OpenXR-SDK-Source
+
+Rust crates compiled into the app are under MIT, Apache-2.0, BSD, ISC, Zlib,
+Unicode-3.0 or MPL-2.0 licences; each is listed with its licence below.
+
+Inter 4.1 by Rasmus Andersson (subset)
+  Licence: SIL Open Font License 1.1. Source: https://github.com/rsms/inter
+
+Phosphor Icons
+  Licence: MIT. Source: https://github.com/phosphor-icons/core
+
+Meta Quest Touch Plus controllers (Settings > Controller): renders made with
+  Blender of the meta-quest-touch-plus-v2 models from WebXR Input Profiles
+  (@webxr-input-profiles/assets 1.0.20), MIT License, Copyright (c) 2019
+  Amazon. https://github.com/immersive-web/webxr-input-profiles
+  Meta and Meta Quest are trademarks of Meta Platforms, Inc.; that licence
+  does not grant use of these trademarks.
+
+FramePlayer itself is MIT OR Apache-2.0: https://github.com/yellkell/frameplayer

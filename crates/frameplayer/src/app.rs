@@ -63,7 +63,9 @@ pub struct FrameOutput {
     /// (hand, amplitude, milliseconds)
     pub buzz: Vec<(usize, f32, i64)>,
     pub quit: bool,
-    /// A panel (menu, playbar, ...) is showing.
+    /// A panel (menu, playbar, ...) is showing (the Quest's drawn hands go
+    /// with them).
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
     pub ui_shown: bool,
 }
 

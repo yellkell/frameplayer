@@ -932,10 +932,16 @@ fn check_button(ui: &mut egui::Ui, actions: &mut Vec<Action>) {
 }
 
 fn about(ui: &mut egui::Ui, v: &mut View) {
+    let quest = cfg!(target_os = "android");
     ui.label(
         RichText::new(format!(
-            "FramePlayer {} · a native VR video player for the Steam Frame",
-            env!("CARGO_PKG_VERSION")
+            "FramePlayer {} · {}",
+            env!("CARGO_PKG_VERSION"),
+            if quest {
+                "a VR video player for Meta Quest"
+            } else {
+                "a native VR video player for the Steam Frame"
+            }
         ))
         .color(theme::TEXT_2),
     );
@@ -945,6 +951,10 @@ fn about(ui: &mut egui::Ui, v: &mut View) {
             r.row(k, None, |ui| {
                 ui.label(RichText::new(val).color(theme::TEXT_2));
             });
+        }
+        // On a Quest these are in the app's private storage: no use there.
+        if quest {
+            return;
         }
         r.row("Settings file", None, |ui| {
             ui.label(
@@ -959,6 +969,10 @@ fn about(ui: &mut egui::Ui, v: &mut View) {
         });
     });
     ui.add_space(6.0);
+    if quest {
+        licences(ui);
+        return;
+    }
     note(
         ui,
         "Video decoding uses FFmpeg (LGPL 2.1+) and dav1d (BSD), shipped as separate \
@@ -966,3 +980,53 @@ fn about(ui: &mut egui::Ui, v: &mut View) {
          Licences and the source offer are in the licenses/ folder.",
     );
 }
+
+/// The Quest app has no folder to ship licences in: their texts are built
+/// in, each under a heading that opens it.
+#[cfg(target_os = "android")]
+fn licences(ui: &mut egui::Ui) {
+    const TEXTS: [(&str, &str); 7] = [
+        (
+            "Third-party software",
+            include_str!("../../../../packaging/quest/NOTICES.txt"),
+        ),
+        (
+            "Rust crates",
+            include_str!(concat!(env!("OUT_DIR"), "/rust-crates.txt")),
+        ),
+        (
+            "GNU LGPL 2.1 (FFmpeg)",
+            include_str!("../../../../packaging/licenses/LGPL-2.1.txt"),
+        ),
+        (
+            "BSD 2-Clause (dav1d)",
+            include_str!("../../../../packaging/licenses/dav1d-COPYING.txt"),
+        ),
+        (
+            "SIL Open Font License (Inter)",
+            include_str!("../../../../packaging/licenses/Inter-OFL.txt"),
+        ),
+        (
+            "MIT (Phosphor Icons)",
+            include_str!("../../../../packaging/licenses/Phosphor-MIT.txt"),
+        ),
+        (
+            "Apache License 2.0 (OpenXR loader)",
+            include_str!("../../../../packaging/quest/OpenXR-loader-LICENSE.txt"),
+        ),
+    ];
+    heading(ui, "Licences");
+    for (title, text) in TEXTS {
+        egui::CollapsingHeader::new(RichText::new(title).font(theme::font(Weight::Medium, 18.0)))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(text)
+                        .font(theme::font(Weight::Regular, 14.0))
+                        .color(theme::TEXT_2),
+                );
+            });
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+fn licences(_ui: &mut egui::Ui) {}

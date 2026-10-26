@@ -384,6 +384,31 @@ fn run_xr(args: &Args) -> Result<(), Error> {
     );
     let mut renderer = Renderer::new(gpu.clone(), session.format)?;
     let mut app = make_app()?;
+    // On a Quest: plain words, no SteamVR or WebXR details.
+    #[cfg(target_os = "android")]
+    app.set_about(vec![
+        ("Headset".into(), ctx.system_name.clone()),
+        ("OpenXR runtime".into(), ctx.runtime.clone()),
+        ("GPU".into(), gpu.device_name.clone()),
+        (
+            "Eye resolution".into(),
+            format!("{}×{}", session.extent.width, session.extent.height),
+        ),
+        (
+            "Hand tracking".into(),
+            if session.hand_tracking() { "yes" } else { "no" }.into(),
+        ),
+        (
+            "Passthrough".into(),
+            if session.supports_passthrough_blend() {
+                "yes"
+            } else {
+                "no"
+            }
+            .into(),
+        ),
+    ]);
+    #[cfg(not(target_os = "android"))]
     app.set_about(vec![
         ("OpenXR runtime".into(), ctx.runtime.clone()),
         ("Headset".into(), ctx.system_name.clone()),
@@ -440,7 +465,8 @@ fn run_xr(args: &Args) -> Result<(), Error> {
     // Panel picture each quad layer holds: (panel, paint version).
     let mut copied: std::collections::HashMap<u64, (fp_render::PanelId, u64)> =
         std::collections::HashMap::new();
-    #[allow(unused_variables, unused_assignments)]
+    // Whether a panel showed last frame (the drawn hands go with them).
+    #[cfg(target_os = "android")]
     let mut ui_shown = true;
     loop {
         // The activity is going away: no time left for a clean session end.
@@ -484,11 +510,13 @@ fn run_xr(args: &Args) -> Result<(), Error> {
             },
         );
         #[cfg(target_os = "android")]
-        if out.ui_shown {
-            out.quads
-                .extend(android::hand_quads(&input, frame.head.map(|h| h.0)));
+        {
+            if out.ui_shown {
+                out.quads
+                    .extend(android::hand_quads(&input, frame.head.map(|h| h.0)));
+            }
+            ui_shown = out.ui_shown;
         }
-        ui_shown = out.ui_shown;
         frames += 1;
         video_frames += out.frame.is_some() as u64;
         renderer.set_video(out.frame.as_ref())?;
