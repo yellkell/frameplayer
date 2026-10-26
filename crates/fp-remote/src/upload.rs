@@ -434,12 +434,21 @@ fn delete(name: &str, state: &State) -> Result<(), (u16, String)> {
             state.update(|p| p.deleted.push(name.to_owned()));
             Ok(())
         }
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => Err((
-            403,
-            "The headset only lets FramePlayer delete videos it received itself. Delete \
-             this one in the headset's Files app."
-                .into(),
-        )),
+        // Android's shared storage answers "no such file" (not "permission
+        // denied") for a file another app wrote, though it lists it.
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::NotFound
+            ) =>
+        {
+            Err((
+                403,
+                "The headset only lets FramePlayer delete videos it received itself. Delete \
+                 this one in the headset's Files app."
+                    .into(),
+            ))
+        }
         Err(e) => Err((500, format!("Could not delete it: {e}"))),
     }
 }
