@@ -138,7 +138,7 @@ pub struct App {
     /// An unlock purchase in progress, and its status as last shown.
     purchase: Option<crate::unlock::Purchase>,
     purchase_seen: Option<crate::unlock::Status>,
-    /// Wi-Fi uploads already added to the library.
+    /// Wi-Fi uploads and deletions the library already reflects.
     uploads_seen: usize,
 }
 
@@ -380,14 +380,16 @@ impl App {
     }
 
     /// Follows an unlock purchase; once paid, keeps the licence.
-    /// Rescans once a Wi-Fi upload has been saved, so it shows up.
+    /// Rescans once a Wi-Fi upload has been saved or a video deleted from
+    /// the page, so the library follows.
     fn poll_upload(&mut self) {
         let Some(up) = &self.services.upload else {
             return;
         };
-        let saved = up.progress().saved.len();
-        if saved > self.uploads_seen {
-            self.uploads_seen = saved;
+        let p = up.progress();
+        let changes = p.saved.len() + p.deleted.len();
+        if changes > self.uploads_seen {
+            self.uploads_seen = changes;
             self.rescan(false);
         }
     }

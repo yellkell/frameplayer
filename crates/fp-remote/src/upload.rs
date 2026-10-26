@@ -6,7 +6,9 @@
 //! call carries that six-digit code (`X-Upload-Code`). A file is written
 //! hidden as `.partial-<name>` (library scans skip hidden files; the name
 //! keeps its extension, which Android's shared storage requires) and
-//! renamed once all of it has arrived.
+//! renamed once all of it has arrived. The page also lists the videos in
+//! the folder and can delete them (only files right in the folder, and on
+//! Android only those FramePlayer wrote: the system refuses the rest).
 //!
 //! | Method | Path | |
 //! |---|---|---|
@@ -14,6 +16,8 @@
 //! | GET | `/upload.js`, `/upload.css` | its script and style |
 //! | GET | `/api/space` | `{"free": bytes, "folder": name}` |
 //! | PUT | `/api/upload?name=` | the file as the body; `{"saved": name}` |
+//! | GET | `/api/files` | `{"files": [{"name", "size", "modified"}...]}` |
+//! | DELETE | `/api/files?name=` | `{"deleted": name}` |
 
 use crate::RemoteError;
 use crate::net::is_allowed_peer;
@@ -66,6 +70,8 @@ pub struct UploadProgress {
     pub current: Option<(String, u64, u64)>,
     /// Files saved, oldest first.
     pub saved: Vec<String>,
+    /// Files deleted from the page, oldest first.
+    pub deleted: Vec<String>,
     /// The last upload that failed, and why.
     pub failed: Option<(String, String)>,
 }
@@ -271,6 +277,20 @@ fn handle(mut rq: Request, state: &State) {
                 serde_json::json!({ "free": free_space(&state.dir), "folder": folder }),
             )
         }
+        (Method::Get, "/api/files") => {
+            respond_json(rq, 200, serde_json::json!({ "files": list(&state.dir) }))
+        }
+        (Method::Delete, "/api/files") => {
+            let name = query
+                .iter()
+                .find(|(k, _)| k == "name")
+                .map(|(_, v)| v.as_str())
+                .unwrap_or("");
+            match delete(name, state) {
+                Ok(()) => respond_json(rq, 200, serde_json::json!({ "deleted": name })),
+                Err((status, msg)) => error(rq, status, &msg),
+            }
+        }
         (Method::Put, "/api/upload") => {
             let name = query
                 .iter()
@@ -365,6 +385,63 @@ fn receive(
         state.update(|p| p.current = Some((name.to_owned(), done, len)));
     }
     f.sync_all().map_err(|e| format!("writing failed: {e}"))
+}
+
+/// Videos and subtitles right in the folder (not hidden, not in
+/// subfolders), newest first.
+fn list(dir: &Path) -> Vec<serde_json::Value> {
+    let mut files: Vec<(String, u64, u64)> = fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let meta = e.metadata().ok()?;
+            let listed = meta.is_file()
+                && !name.starts_with('.')
+                && (is_video_name(&name) || is_subtitle_name(&name));
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_secs());
+            listed.then_some((name, meta.len(), modified))
+        })
+        .collect();
+    files.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+    files
+        .into_iter()
+        .map(|(name, size, modified)| {
+            serde_json::json!({ "name": name, "size": size, "modified": modified })
+        })
+        .collect()
+}
+
+/// Deletes one listed file. `name` must be exactly a listed name: nothing
+/// outside the folder can be reached.
+fn delete(name: &str, state: &State) -> Result<(), (u16, String)> {
+    let listed = !name.is_empty()
+        && !name.starts_with('.')
+        && !name.contains(['/', '\\'])
+        && (is_video_name(name) || is_subtitle_name(name));
+    let path = state.dir.join(name);
+    if !listed || !path.is_file() {
+        return Err((404, "That file is not on the headset.".into()));
+    }
+    match fs::remove_file(&path) {
+        Ok(()) => {
+            log::info!("Wi-Fi upload: deleted {name}");
+            state.update(|p| p.deleted.push(name.to_owned()));
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => Err((
+            403,
+            "The headset only lets FramePlayer delete videos it received itself. Delete \
+             this one in the headset's Files app."
+                .into(),
+        )),
+        Err(e) => Err((500, format!("Could not delete it: {e}"))),
+    }
 }
 
 /// A safe file name from what the browser sent, or `None` if it is not a
@@ -482,6 +559,25 @@ mod tests {
         assert_eq!(fs::read(dir.join("clip 1.mp4")).unwrap(), b"hello video");
         assert!(!dir.join(".partial-clip 1.mp4").exists());
         assert_eq!(up.progress().saved, vec!["clip 1.mp4".to_string()]);
+        let call = |method: &str, path: &str| -> String {
+            let mut s = std::net::TcpStream::connect(addr).unwrap();
+            write!(
+                s,
+                "{method} {path} HTTP/1.1\r\nHost: x\r\nX-Upload-Code: {}\r\n\
+                 Content-Length: 0\r\nConnection: close\r\n\r\n",
+                up.code()
+            )
+            .unwrap();
+            let mut out = String::new();
+            s.read_to_string(&mut out).unwrap();
+            out
+        };
+        let listed = call("GET", "/api/files");
+        assert!(listed.contains("\"name\":\"clip 1.mp4\""), "{listed}");
+        assert!(call("DELETE", "/api/files?name=..%2Fx.mp4").starts_with("HTTP/1.1 404"));
+        assert!(call("DELETE", "/api/files?name=clip%201.mp4").starts_with("HTTP/1.1 200"));
+        assert!(!dir.join("clip 1.mp4").exists());
+        assert_eq!(up.progress().deleted, vec!["clip 1.mp4".to_string()]);
         up.stop();
         fs::remove_dir_all(&dir).unwrap();
     }

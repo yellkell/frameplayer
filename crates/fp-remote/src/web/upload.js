@@ -11,8 +11,8 @@ function size(bytes) {
   return bytes >= 2 ** 30 ? (bytes / 2 ** 30).toFixed(1) + " GB" : Math.round(bytes / 2 ** 20) + " MB";
 }
 
-async function api(path) {
-  const r = await fetch(path, { headers: { "X-Upload-Code": code } });
+async function api(path, method) {
+  const r = await fetch(path, { method: method || "GET", headers: { "X-Upload-Code": code } });
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(body.error || "The headset did not answer (" + r.status + ").");
   return body;
@@ -40,8 +40,51 @@ $("code-form").addEventListener("submit", async (ev) => {
   try { sessionStorage.setItem("fp-upload-code", code); } catch (_) {}
   $("code-card").classList.add("hidden");
   $("drop-card").classList.remove("hidden");
+  $("files-card").classList.remove("hidden");
   showSpace();
+  showFiles();
 });
+
+// The videos already in the folder, each with a Delete button.
+async function showFiles() {
+  let files = [];
+  try {
+    files = (await api("/api/files")).files || [];
+  } catch (e) {
+    $("files-empty").textContent = e.message;
+    return;
+  }
+  const list = $("stored");
+  list.replaceChildren();
+  $("files-empty").textContent = files.length ? "" : "No videos in this folder yet.";
+  for (const f of files) {
+    const li = document.createElement("li");
+    li.innerHTML = '<span class="name"></span><span class="size"></span><button class="delete" type="button">Delete</button>';
+    li.querySelector(".name").textContent = f.name;
+    li.querySelector(".size").textContent = size(f.size);
+    const btn = li.querySelector("button");
+    btn.addEventListener("click", async () => {
+      if (!confirm("Delete " + f.name + " from the headset? This can't be undone.")) return;
+      btn.disabled = true;
+      try {
+        await api("/api/files?name=" + encodeURIComponent(f.name), "DELETE");
+        li.remove();
+        if (!list.children.length) $("files-empty").textContent = "No videos in this folder yet.";
+        showSpace();
+      } catch (e) {
+        btn.disabled = false;
+        let why = li.querySelector(".why");
+        if (!why) {
+          why = document.createElement("p");
+          why.className = "why";
+          li.appendChild(why);
+        }
+        why.textContent = e.message;
+      }
+    });
+    list.appendChild(li);
+  }
+}
 
 function add(files) {
   for (const file of files) {
@@ -61,6 +104,7 @@ function next() {
   if (!item) {
     if ($("queue").children.length) $("done").classList.remove("hidden");
     showSpace();
+    showFiles();
     return;
   }
   busy = true;
