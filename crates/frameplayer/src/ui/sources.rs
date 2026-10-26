@@ -531,7 +531,7 @@ fn browse(ui: &mut egui::Ui, v: &mut View) {
             if let Some(t) = e.modified {
                 facts.push(fmt_date(t));
             }
-            if !e.scripts.is_empty() {
+            if crate::HAPTICS && !e.scripts.is_empty() {
                 facts.push("haptics".into());
             }
             painter.text(

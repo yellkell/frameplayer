@@ -113,6 +113,22 @@ fn v4l2_name(codec: ff::AVCodecID) -> Option<&'static CStr> {
     }
 }
 
+/// Android's hardware decoder for a codec (FFmpeg's MediaCodec wrapper,
+/// through the NDK). It hands back frames copied out of the codec's
+/// buffers, in ordinary memory.
+#[cfg(target_os = "android")]
+fn mediacodec_name(codec: ff::AVCodecID) -> Option<&'static CStr> {
+    match codec {
+        ff::AV_CODEC_ID_HEVC => Some(c"hevc_mediacodec"),
+        ff::AV_CODEC_ID_H264 => Some(c"h264_mediacodec"),
+        ff::AV_CODEC_ID_AV1 => Some(c"av1_mediacodec"),
+        ff::AV_CODEC_ID_VP9 => Some(c"vp9_mediacodec"),
+        ff::AV_CODEC_ID_VP8 => Some(c"vp8_mediacodec"),
+        ff::AV_CODEC_ID_MPEG4 => Some(c"mpeg4_mediacodec"),
+        _ => None,
+    }
+}
+
 /// One way of decoding a stream, in the order [`candidates`] tries them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Candidate {
@@ -133,6 +149,10 @@ fn candidates(video: bool, codec: ff::AVCodecID, hw: HwDecode, native: bool) -> 
             c.push(Candidate::NativeV4l2);
         }
         if let Some(n) = v4l2_name(codec) {
+            c.push(Candidate::Named(n, true));
+        }
+        #[cfg(target_os = "android")]
+        if let Some(n) = mediacodec_name(codec) {
             c.push(Candidate::Named(n, true));
         }
     }
@@ -556,7 +576,8 @@ impl Decoder {
             return Ok(Some(false));
         }
         check(r, "receive frame")?;
-        if self.hardware {
+        // Only the V4L2 wrappers lend out the device's own buffers.
+        if self.hardware && self.name.ends_with("_v4l2m2m") {
             copy_out(frame)?;
         }
         Ok(Some(true))

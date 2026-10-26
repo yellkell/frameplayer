@@ -982,7 +982,7 @@ fn details_side(ui: &mut egui::Ui, v: &mut View, r: &MediaRecord) {
     if !r.tags.is_empty() {
         ui.label(RichText::new(r.tags.join("  ·  ")).color(theme::TEXT_2));
     }
-    if !r.scripts.is_empty() {
+    if crate::HAPTICS && !r.scripts.is_empty() {
         let n = r.scripts.len();
         ui.label(
             RichText::new(format!(

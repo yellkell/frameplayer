@@ -1,0 +1,17 @@
+[package]
+name = "frameplayer-quest"
+version = "0.1.0"
+description = "FramePlayer for Meta Quest: the native library the APK loads"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+# Only an Android build has anything in it; elsewhere it is an empty library,
+# so the workspace still builds for the Frame and in CI.
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity = { version = "0.6", features = ["native-activity"] }
+frameplayer = { path = "../frameplayer" }

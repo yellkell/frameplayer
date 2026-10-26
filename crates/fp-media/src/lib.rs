@@ -23,6 +23,8 @@ pub(crate) mod io;
 pub mod player;
 pub mod subtitle;
 pub mod thumb;
+// Only Linux has V4L2; elsewhere just its pure helpers compile (and go unused).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) mod v4l2;
 
 pub use decode::{HwDecode, hardware_sessions};

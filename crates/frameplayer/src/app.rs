@@ -240,9 +240,15 @@ impl App {
         app.offsets = app.settings.panel_offsets;
         app.rescan(false);
         for cfg in app.settings.haptic_devices.clone() {
+            if !crate::HAPTICS {
+                break;
+            }
             app.connect_device(cfg);
         }
-        if app.settings.check_updates && fp_updater::RELEASE_PUBLIC_KEY.is_some() {
+        if crate::SELF_UPDATE
+            && app.settings.check_updates
+            && fp_updater::RELEASE_PUBLIC_KEY.is_some()
+        {
             app.check_updates();
         }
         app

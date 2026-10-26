@@ -114,6 +114,65 @@ jobs:
           name: ${{ matrix.name }}
           path: out/
 
+  # FramePlayer for Meta Quest (Android): FFmpeg with MediaCodec, the native
+  # library and an APK. Signed with a key made for the run, for checking
+  # only; the APK for a headset is signed locally (tools/package-quest.sh).
+  # The FFmpeg build is uploaded too, so local builds can use it.
+  quest:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the version code counts commits
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.0
+          components: clippy
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: quest
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config
+          pipx install meson==1.12.1
+          cargo install --locked cargo-ndk
+      - name: Android NDK r27c
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - name: Restore FFmpeg for Android
+        id: ffmpeg-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: third_party/ffmpeg/android-aarch64
+          key: ffmpeg-android-${{ hashFiles('tools/build-ffmpeg-android.sh', 'tools/ffmpeg-android-p010.patch') }}
+      - name: Build FFmpeg for Android
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: tools/build-ffmpeg-android.sh
+      - name: Save FFmpeg for Android
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: third_party/ffmpeg/android-aarch64
+          key: ffmpeg-android-${{ hashFiles('tools/build-ffmpeg-android.sh', 'tools/ffmpeg-android-p010.patch') }}
+      - name: Clippy (Android)
+        run: cargo ndk -t arm64-v8a -P 29 clippy -p frameplayer-quest -- -D warnings
+      - name: Package APK
+        run: |
+          mkdir -p "$HOME/.android"
+          keytool -genkeypair -keystore "$HOME/.android/debug.keystore" -storepass android             -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 30             -dname "CN=FramePlayer CI" -noprompt
+          tools/package-quest.sh dist-quest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frameplayer-quest
+          path: dist-quest/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-android-aarch64
+          path: third_party/ffmpeg/android-aarch64/
+
   release:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release != '')
     needs: [check, installer]

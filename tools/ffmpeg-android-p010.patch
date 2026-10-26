@@ -1,0 +1,88 @@
+diff -ru a/libavcodec/mediacodec_sw_buffer.c b/libavcodec/mediacodec_sw_buffer.c
+--- a/libavcodec/mediacodec_sw_buffer.c	2026-10-26 17:31:43.953008600 +0000
++++ b/libavcodec/mediacodec_sw_buffer.c	2026-10-26 17:31:44.043954500 +0000
+@@ -178,6 +178,38 @@
+ 
+ 
+ 
++/* 10-bit output (FramePlayer): like the 8-bit semi-planar copy, with two
++ * bytes per sample, each value in the high bits of a little-endian word. */
++void ff_mediacodec_sw_buffer_copy_p010(AVCodecContext *avctx,
++                                       MediaCodecDecContext *s,
++                                       uint8_t *data,
++                                       size_t size,
++                                       FFAMediaCodecBufferInfo *info,
++                                       AVFrame *frame)
++{
++    int i, j;
++
++    for (i = 0; i < 2; i++) {
++        int height = i == 0 ? avctx->height : (avctx->height + 1) / 2;
++        int width = FFMIN(FFALIGN(avctx->width, 2) * 2, frame->linesize[i]);
++        uint8_t *src = data + info->offset;
++        uint8_t *dst = frame->data[i];
++
++        if (i == 1)
++            src += s->slice_height * s->stride;
++        src += s->crop_top * s->stride;
++        src += s->crop_left * 2;
++
++        for (j = 0; j < height; j++) {
++            if (src + width > data + size)
++                break;
++            memcpy(dst, src, width);
++            src += s->stride;
++            dst += frame->linesize[i];
++        }
++    }
++}
++
+ void ff_mediacodec_sw_buffer_copy_yuv420_packed_semi_planar(AVCodecContext *avctx,
+                                                             MediaCodecDecContext *s,
+                                                             uint8_t *data,
+diff -ru a/libavcodec/mediacodec_sw_buffer.h b/libavcodec/mediacodec_sw_buffer.h
+--- a/libavcodec/mediacodec_sw_buffer.h	2026-10-26 17:31:43.973885600 +0000
++++ b/libavcodec/mediacodec_sw_buffer.h	2026-10-26 17:31:44.042953900 +0000
+@@ -45,6 +45,13 @@
+                                                      FFAMediaCodecBufferInfo *info,
+                                                      AVFrame *frame);
+ 
++void ff_mediacodec_sw_buffer_copy_p010(AVCodecContext *avctx,
++                                       MediaCodecDecContext *s,
++                                       uint8_t *data,
++                                       size_t size,
++                                       FFAMediaCodecBufferInfo *info,
++                                       AVFrame *frame);
++
+ void ff_mediacodec_sw_buffer_copy_yuv420_packed_semi_planar(AVCodecContext *avctx,
+                                                      MediaCodecDecContext *s,
+                                                      uint8_t *data,
+diff -ru a/libavcodec/mediacodecdec_common.c b/libavcodec/mediacodecdec_common.c
+--- a/libavcodec/mediacodecdec_common.c	2026-10-26 17:31:43.936502200 +0000
++++ b/libavcodec/mediacodecdec_common.c	2026-10-26 17:31:44.042953900 +0000
+@@ -192,6 +192,7 @@
+     COLOR_FormatYUV420Planar                              = 0x13,
+     COLOR_FormatYUV420SemiPlanar                          = 0x15,
+     COLOR_FormatYCbYCr                                    = 0x19,
++    COLOR_FormatYUVP010                                   = 0x36,
+     COLOR_FormatAndroidOpaque                             = 0x7F000789,
+     COLOR_QCOM_FormatYUV420SemiPlanar                     = 0x7fa30c00,
+     COLOR_QCOM_FormatYUV420SemiPlanar32m                  = 0x7fa30c04,
+@@ -214,6 +215,7 @@
+     { COLOR_QCOM_FormatYUV420PackedSemiPlanar64x32Tile2m8ka, AV_PIX_FMT_NV12    },
+     { COLOR_TI_FormatYUV420PackedSemiPlanar,                 AV_PIX_FMT_NV12    },
+     { COLOR_TI_FormatYUV420PackedSemiPlanarInterlaced,       AV_PIX_FMT_NV12    },
++    { COLOR_FormatYUVP010,                                   AV_PIX_FMT_P010    },
+     { 0 }
+ };
+ 
+@@ -492,6 +494,9 @@
+     case COLOR_TI_FormatYUV420PackedSemiPlanarInterlaced:
+         ff_mediacodec_sw_buffer_copy_yuv420_packed_semi_planar(avctx, s, data, size, info, frame);
+         break;
++    case COLOR_FormatYUVP010:
++        ff_mediacodec_sw_buffer_copy_p010(avctx, s, data, size, info, frame);
++        break;
+     case COLOR_QCOM_FormatYUV420PackedSemiPlanar64x32Tile2m8ka:
+         ff_mediacodec_sw_buffer_copy_yuv420_packed_semi_planar_64x32Tile2m8ka(avctx, s, data, size, info, frame);
+         break;

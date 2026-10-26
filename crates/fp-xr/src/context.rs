@@ -1,6 +1,6 @@
 //! OpenXR instance and system, and Vulkan creation through the runtime.
 
-use crate::loader::{self, RuntimeManifest};
+use crate::loader::RuntimeManifest;
 use crate::{Error, Result, XrContextExt};
 use ash::vk::{self, Handle};
 use openxr as xr;
@@ -24,10 +24,11 @@ impl XrContext {
     /// Loads the active runtime and creates an instance with the extensions
     /// FramePlayer uses when they are available.
     pub fn new(app_name: &str) -> Result<XrContext> {
-        let manifest = loader::find_active_runtime(&loader::SearchEnv::from_process())
-            .map_err(Error::Runtime)?;
-        let loaded = loader::load_runtime(&manifest).map_err(Error::Runtime)?;
-        let entry = loaded.entry;
+        #[cfg(not(target_os = "android"))]
+        let platform = ();
+        #[cfg(target_os = "android")]
+        let platform = android_platform();
+        let (manifest, entry) = load_entry(&platform)?;
         let avail = entry.enumerate_extensions().ctx("enumerate extensions")?;
         if !avail.khr_vulkan_enable2 {
             return Err(Error::Runtime(
@@ -43,6 +44,10 @@ impl XrContext {
         e.khr_composition_layer_cylinder = avail.khr_composition_layer_cylinder;
         e.khr_composition_layer_equirect2 = avail.khr_composition_layer_equirect2;
         e.khr_visibility_mask = avail.khr_visibility_mask;
+        #[cfg(target_os = "android")]
+        {
+            e.khr_android_create_instance = true;
+        }
         // The Steam Frame controller profile only exists with this enabled.
         if avail
             .other
@@ -61,7 +66,7 @@ impl XrContext {
                 engine_version: 1,
                 api_version: api,
             };
-            match entry.create_instance(&app, &e, &[], &()) {
+            match entry.create_instance(&app, &e, &[], &platform) {
                 Ok(i) => {
                     instance = Some(i);
                     break;
@@ -127,6 +132,44 @@ impl XrContext {
     pub fn creator(&self) -> XrCreator<'_> {
         XrCreator { ctx: self }
     }
+}
+
+/// The active runtime (from its manifest), loaded directly.
+#[cfg(not(target_os = "android"))]
+fn load_entry(_platform: &()) -> Result<(RuntimeManifest, xr::Entry)> {
+    use crate::loader;
+    let manifest =
+        loader::find_active_runtime(&loader::SearchEnv::from_process()).map_err(Error::Runtime)?;
+    let loaded = loader::load_runtime(&manifest).map_err(Error::Runtime)?;
+    Ok((manifest, loaded.entry))
+}
+
+/// The Khronos loader packaged in the APK, which asks Android's runtime
+/// broker for the system runtime (Meta's on a Quest).
+#[cfg(target_os = "android")]
+fn load_entry(platform: &xr::AndroidPlatformInfo) -> Result<(RuntimeManifest, xr::Entry)> {
+    // SAFETY: libopenxr_loader.so is the Khronos loader shipped in the APK.
+    let entry = unsafe { xr::Entry::load(platform) }
+        .map_err(|e| Error::Runtime(format!("OpenXR loader: {e}")))?;
+    let lib = "libopenxr_loader.so".to_string();
+    let manifest = RuntimeManifest {
+        manifest_path: "(Android runtime broker)".into(),
+        canonical_manifest_path: String::new(),
+        name: None,
+        library_path: lib.clone(),
+        resolved_library_path: lib,
+        is_steamvr: false,
+        file_format_version: None,
+    };
+    Ok((manifest, entry))
+}
+
+/// The Java VM and activity, which the loader and runtime need on Android.
+#[cfg(target_os = "android")]
+fn android_platform() -> xr::AndroidPlatformInfo {
+    let c = ndk_context::android_context();
+    // SAFETY: the activity glue keeps both valid for the life of the app.
+    unsafe { xr::AndroidPlatformInfo::new(c.vm(), c.context()) }
 }
 
 pub struct XrCreator<'a> {

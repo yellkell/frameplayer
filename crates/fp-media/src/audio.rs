@@ -1,5 +1,7 @@
 //! Audio: resampling, time-stretch, ambisonic rendering and device output.
 
+#[cfg(target_os = "android")]
+pub mod aaudio;
 pub mod ambisonic;
 pub mod output;
 pub mod resample;

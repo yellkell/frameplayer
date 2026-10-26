@@ -35,7 +35,18 @@ impl Default for Backend {
 }
 
 /// Opens `backend`, falling back to the null sink if ALSA is unavailable.
+/// On Android the device is AAudio's, whatever the backend.
 pub fn open(backend: &Backend, channels: u32) -> Box<dyn Sink> {
+    #[cfg(target_os = "android")]
+    if *backend != Backend::Null {
+        return match super::aaudio::AAudio::open(channels) {
+            Ok(a) => Box::new(a),
+            Err(e) => {
+                log::warn!("audio: {e}; continuing without sound");
+                Box::new(NullSink::new(channels))
+            }
+        };
+    }
     match backend {
         Backend::Alsa { device, latency_ms } => match Alsa::open(device, channels, *latency_ms) {
             Ok(a) => Box::new(a),

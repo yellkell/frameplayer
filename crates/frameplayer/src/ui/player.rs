@@ -493,6 +493,11 @@ const TABS: [(&str, &str); 7] = [
 
 /// Format, view adjustments, tracks and haptics for the open video.
 pub fn adjust_panel(ctx: &egui::Context, v: &mut View) {
+    let tabs = if crate::HAPTICS {
+        &TABS[..]
+    } else {
+        &TABS[..6]
+    };
     widgets::panel_slab(ctx, 28.0);
     let frame = egui::Frame::new()
         .outer_margin(widgets::SHADOW_ROOM)
@@ -507,7 +512,7 @@ pub fn adjust_panel(ctx: &egui::Context, v: &mut View) {
                 .color(theme::TEXT),
         );
         ui.add_space(4.0);
-        if let Some(i) = widgets::segmented(ui, &TABS, v.state.adjust_tab) {
+        if let Some(i) = widgets::segmented(ui, tabs, v.state.adjust_tab) {
             v.state.adjust_tab = i;
         }
         ui.add_space(10.0);

@@ -31,6 +31,11 @@ pub fn settings(ui: &mut egui::Ui, v: &mut View) {
             ui.set_width(240.0);
             ui.spacing_mut().item_spacing.y = 4.0;
             for (t, icon, label) in TABS {
+                if (t == SettingsTab::Haptics && !crate::HAPTICS)
+                    || (t == SettingsTab::Updates && !crate::SELF_UPDATE)
+                {
+                    continue;
+                }
                 if side_tab(ui, icon, label, v.state.settings_tab == t).clicked() {
                     v.state.settings_tab = t;
                 }

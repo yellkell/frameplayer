@@ -30,5 +30,9 @@ serde_json = "1"
 # DevTools connection of the embedded web view (no TLS: loopback only).
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 
+# Meta Quest (see crates/frameplayer-quest): the activity glue.
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity = { version = "0.6", features = ["native-activity"] }
+
 [dev-dependencies]
 png = "0.18"

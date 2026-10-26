@@ -30,7 +30,10 @@ impl Log for Logger {
             r.target(),
             r.args()
         );
+        #[cfg(not(target_os = "android"))]
         let _ = std::io::stderr().write_all(line.as_bytes());
+        #[cfg(target_os = "android")]
+        logcat(r.level(), &line);
         if let Some(f) = &self.file
             && let Ok(mut f) = f.lock()
         {
@@ -38,6 +41,27 @@ impl Log for Logger {
         }
     }
     fn flush(&self) {}
+}
+
+/// Android has no stderr anyone reads: lines go to logcat, tag FramePlayer.
+#[cfg(target_os = "android")]
+fn logcat(level: log::Level, line: &str) {
+    use std::ffi::{CString, c_char, c_int};
+    #[link(name = "log")]
+    unsafe extern "C" {
+        fn __android_log_write(prio: c_int, tag: *const c_char, text: *const c_char) -> c_int;
+    }
+    let prio = match level {
+        log::Level::Error => 6,
+        log::Level::Warn => 5,
+        log::Level::Info => 4,
+        log::Level::Debug => 3,
+        log::Level::Trace => 2,
+    };
+    if let Ok(text) = CString::new(line.trim_end()) {
+        // SAFETY: both strings are NUL-terminated and outlive the call.
+        unsafe { __android_log_write(prio, c"FramePlayer".as_ptr(), text.as_ptr()) };
+    }
 }
 
 pub fn log_path() -> std::path::PathBuf {
