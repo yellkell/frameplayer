@@ -95,7 +95,13 @@ impl Default for Settings {
     fn default() -> Self {
         let mut library_folders = Vec::new();
         if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-            for d in ["Videos", "Downloads"] {
+            // Android's shared storage names them Movies and Download.
+            let dirs = if cfg!(target_os = "android") {
+                ["Movies", "Download"]
+            } else {
+                ["Videos", "Downloads"]
+            };
+            for d in dirs {
                 let p = home.join(d);
                 if p.is_dir() {
                     library_folders.push(p);

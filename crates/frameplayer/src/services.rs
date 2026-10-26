@@ -283,7 +283,12 @@ pub fn mount_drive(drive: &UnmountedDrive) -> Result<PathBuf, String> {
 pub fn suggested_folders(existing: &[PathBuf]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-        for d in ["Videos", "Downloads", "Movies"] {
+        let dirs: &[&str] = if cfg!(target_os = "android") {
+            &["Movies", "Download"]
+        } else {
+            &["Videos", "Downloads", "Movies"]
+        };
+        for d in dirs {
             out.push(home.join(d));
         }
     }
