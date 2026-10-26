@@ -19,7 +19,6 @@ serde_json = "1"
 thiserror = "2"
 
 # Meta Quest: the Khronos loader (libopenxr_loader.so in the APK) finds the
-# runtime through Android's broker, given the activity from ndk-context.
+# runtime through Android's broker, given the app's activity.
 [target.'cfg(target_os = "android")'.dependencies]
-ndk-context = "0.1"
 openxr = { version = "0.22.0", default-features = false, features = ["loaded"] }

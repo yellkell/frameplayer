@@ -14,6 +14,8 @@ pub mod loader;
 pub mod session;
 
 pub use context::XrContext;
+#[cfg(target_os = "android")]
+pub use context::set_android_activity;
 pub use input::{Hand, InputState};
 pub use session::{FrameCtx, QuadSubmit, SessionEvent, XrSession};
 

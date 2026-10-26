@@ -34,7 +34,6 @@ ureq = { version = "3", default-features = false, features = ["rustls"] }
 [target.'cfg(target_os = "android")'.dependencies]
 android-activity = { version = "0.6", features = ["native-activity"] }
 jni-sys = "0.3"
-ndk-context = "0.1"
 
 [dev-dependencies]
 png = "0.18"

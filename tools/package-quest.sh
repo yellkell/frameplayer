@@ -21,7 +21,12 @@ TARGET_API=32 # what Meta's store asks for
 LOADER_VER=1.1.65
 LOADER_SHA256=a298c326085b09181c85235fb04d37510939bd30938ed4322c093c09780e8643
 
-py="$(command -v python3 || command -v python)"
+# The first Python that runs (on Windows "python3" can be a Store stub).
+py=""
+for c in python3 python; do
+  if command -v "$c" >/dev/null && "$c" -c "" 2>/dev/null; then py="$c"; break; fi
+done
+[ -n "$py" ] || { echo "Python 3 not found" >&2; exit 1; }
 exe="" bat=""
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) exe=.exe bat=.bat ;; esac
 

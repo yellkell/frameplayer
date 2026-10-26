@@ -164,12 +164,26 @@ fn load_entry(platform: &xr::AndroidPlatformInfo) -> Result<(RuntimeManifest, xr
     Ok((manifest, entry))
 }
 
-/// The Java VM and activity, which the loader and runtime need on Android.
+/// The Java VM and activity (a global reference), given by the app at
+/// start-up: the loader and runtime need them on Android.
+#[cfg(target_os = "android")]
+static ANDROID_ACTIVITY: std::sync::OnceLock<(usize, usize)> = std::sync::OnceLock::new();
+
+/// Tells OpenXR which Java VM and activity the app runs in; call once
+/// before [`XrContext::new`].
+///
+/// # Safety
+/// Both must stay valid for as long as OpenXR is used.
+#[cfg(target_os = "android")]
+pub unsafe fn set_android_activity(vm: *mut std::ffi::c_void, activity: *mut std::ffi::c_void) {
+    let _ = ANDROID_ACTIVITY.set((vm as usize, activity as usize));
+}
+
 #[cfg(target_os = "android")]
 fn android_platform() -> xr::AndroidPlatformInfo {
-    let c = ndk_context::android_context();
-    // SAFETY: the activity glue keeps both valid for the life of the app.
-    unsafe { xr::AndroidPlatformInfo::new(c.vm(), c.context()) }
+    let (vm, activity) = ANDROID_ACTIVITY.get().copied().unwrap_or_default();
+    // SAFETY: the app's promise in set_android_activity.
+    unsafe { xr::AndroidPlatformInfo::new(vm as *mut _, activity as *mut _) }
 }
 
 pub struct XrCreator<'a> {

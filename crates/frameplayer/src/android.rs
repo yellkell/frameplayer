@@ -25,10 +25,15 @@ pub fn run(app: AndroidApp) {
             std::env::set_var("HOME", SHARED_STORAGE);
         }
     }
+    // The activity itself (ndk_context only has the application, which
+    // can't ask for permissions and isn't what OpenXR wants).
+    let (vm, activity) = (app.vm_as_ptr(), app.activity_as_ptr());
     let _ = APP.set(app);
     crate::logger::init(false);
-    // SAFETY: the activity glue set up the VM and activity.
-    if let Err(e) = unsafe { ask_for_storage() } {
+    // SAFETY: both stay valid while APP holds the AndroidApp, i.e. for good.
+    unsafe { fp_xr::set_android_activity(vm, activity) };
+    // SAFETY: as above.
+    if let Err(e) = unsafe { ask_for_storage(vm, activity) } {
         log::warn!("storage permission: {e}");
     }
     fp_media::init_logging();
@@ -49,14 +54,16 @@ pub fn run(app: AndroidApp) {
 /// library only has network sources.
 ///
 /// # Safety
-/// The activity glue must have set up `ndk_context`.
-unsafe fn ask_for_storage() -> Result<(), String> {
+/// `vm` and `activity` must be the app's Java VM and activity.
+unsafe fn ask_for_storage(
+    vm: *mut std::ffi::c_void,
+    activity: *mut std::ffi::c_void,
+) -> Result<(), String> {
     use jni_sys::{JNI_OK, JNIEnv, jobject, jvalue};
     use std::ffi::c_void;
     const PERMISSION: &std::ffi::CStr = c"android.permission.READ_EXTERNAL_STORAGE";
-    let c = ndk_context::android_context();
-    let vm = c.vm() as *mut jni_sys::JavaVM;
-    let activity = c.context() as jobject;
+    let vm = vm as *mut jni_sys::JavaVM;
+    let activity = activity as jobject;
     // SAFETY (all calls): JNI functions from the VM's own table, on a thread
     // attached here, with references created in this frame.
     unsafe {
@@ -96,6 +103,12 @@ unsafe fn ask_for_storage() -> Result<(), String> {
             c"checkSelfPermission".as_ptr(),
             c"(Ljava/lang/String;)I".as_ptr(),
         );
+        // A missing method leaves an exception pending; calling it anyway
+        // makes the VM abort the whole app.
+        if check.is_null() {
+            clear_exc(env);
+            return Err("no checkSelfPermission".into());
+        }
         let granted = call_int(env, activity, check, [jvalue { l: perm }].as_ptr());
         if check_exc(env) != 0 {
             clear_exc(env);
@@ -112,6 +125,10 @@ unsafe fn ask_for_storage() -> Result<(), String> {
             c"requestPermissions".as_ptr(),
             c"([Ljava/lang/String;I)V".as_ptr(),
         );
+        if request.is_null() {
+            clear_exc(env);
+            return Err("no requestPermissions".into());
+        }
         call_void(
             env,
             activity,
