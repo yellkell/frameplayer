@@ -612,10 +612,21 @@ fn home(ui: &mut egui::Ui, v: &mut View) {
                 .iter()
                 .map(|f| f.display().to_string())
                 .collect();
-            let body = if folders.is_empty() {
+            let body = if folders.is_empty() && cfg!(target_os = "android") {
+                "Connect the Quest to a computer with a USB cable and copy videos into its \
+                 Movies folder, or stream them from DLNA, SMB and WebDAV servers."
+                    .to_string()
+            } else if folders.is_empty() {
                 "Copy videos to the Frame with FrameDrop or a USB drive, or stream them from \
                  XBVR, Stash, DLNA, SMB and WebDAV servers."
                     .to_string()
+            } else if cfg!(target_os = "android") {
+                format!(
+                    "Videos in {} are added automatically. Copy some over by connecting the \
+                     Quest to a computer with a USB cable, or stream from a server on your \
+                     network.",
+                    folders.join(", ")
+                )
             } else {
                 format!(
                     "Videos in {} are added automatically. Copy some over with FrameDrop or a \

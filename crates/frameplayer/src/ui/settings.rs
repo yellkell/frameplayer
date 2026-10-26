@@ -360,7 +360,11 @@ fn library(ui: &mut egui::Ui, v: &mut View) {
                 ui.add(
                     egui::TextEdit::singleline(&mut v.state.new_folder)
                         .margin(egui::Margin::symmetric(12, 9))
-                        .hint_text("/run/media/deck/SDCARD/Videos")
+                        .hint_text(if cfg!(target_os = "android") {
+                            "/storage/emulated/0/Movies"
+                        } else {
+                            "/run/media/deck/SDCARD/Videos"
+                        })
                         .font(theme::font(Weight::Regular, 17.0))
                         .desired_width(ui.available_width() - 170.0),
                 );
@@ -407,21 +411,24 @@ fn library(ui: &mut egui::Ui, v: &mut View) {
     if let Some(i) = remove {
         v.actions.push(Action::RemoveFolder(i));
     }
-    heading(ui, "Drives");
-    widgets::rows(ui, |r| {
-        let mounts = crate::services::removable_mounts();
-        let names: Vec<String> = mounts.iter().map(|m| m.display().to_string()).collect();
-        let desc = if names.is_empty() {
-            "None plugged in.".to_string()
-        } else {
-            names.join(", ")
-        };
-        r.switch(
-            "Add videos on microSD cards and USB drives",
-            Some(desc.as_str()),
-            &mut v.settings.index_removable,
-        );
-    });
+    // The Quest has no card slot (see services::builtin_sources).
+    if !cfg!(target_os = "android") {
+        heading(ui, "Drives");
+        widgets::rows(ui, |r| {
+            let mounts = crate::services::removable_mounts();
+            let names: Vec<String> = mounts.iter().map(|m| m.display().to_string()).collect();
+            let desc = if names.is_empty() {
+                "None plugged in.".to_string()
+            } else {
+                names.join(", ")
+            };
+            r.switch(
+                "Add videos on microSD cards and USB drives",
+                Some(desc.as_str()),
+                &mut v.settings.index_removable,
+            );
+        });
+    }
     heading(ui, "Maintenance");
     widgets::rows(ui, |r| {
         r.row(

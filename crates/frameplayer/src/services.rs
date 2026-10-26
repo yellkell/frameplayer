@@ -124,11 +124,14 @@ pub fn builtin_sources() -> Vec<SourceConfig> {
         }));
     }
     // Always offered, so a card inserted later shows up without a restart.
-    out.push(SourceConfig::Local(fp_sources::LocalConfig {
-        id: REMOVABLE_SOURCE.into(),
-        name: "microSD and USB drives".into(),
-        root: PathBuf::from(REMOVABLE_ROOT),
-    }));
+    // Not on a Quest: no card slot, and Android mounts drives elsewhere.
+    if !cfg!(target_os = "android") {
+        out.push(SourceConfig::Local(fp_sources::LocalConfig {
+            id: REMOVABLE_SOURCE.into(),
+            name: "microSD and USB drives".into(),
+            root: PathBuf::from(REMOVABLE_ROOT),
+        }));
+    }
     out
 }
 
