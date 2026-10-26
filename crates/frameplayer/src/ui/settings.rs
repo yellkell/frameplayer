@@ -738,7 +738,7 @@ fn wifi_upload(ui: &mut egui::Ui, v: &mut View) {
     let mut on = v.services.upload.is_some();
     widgets::rows(ui, |r| {
         if r.switch(
-            "Send videos from a computer",
+            "Send videos from a computer or phone",
             Some("Open a page in any browser on your Wi-Fi and drop videos on it."),
             &mut on,
         ) {
@@ -770,7 +770,9 @@ fn wifi_upload(ui: &mut egui::Ui, v: &mut View) {
                         draw_qr(ui, &qr, 180.0);
                     }
                     ui.vertical(|ui| {
-                        ui.label(RichText::new("On your computer, open").color(theme::TEXT_2));
+                        ui.label(
+                            RichText::new("On your computer or phone, open").color(theme::TEXT_2),
+                        );
                         ui.label(RichText::new(&url).font(theme::font(Weight::SemiBold, 26.0)));
                         ui.add_space(8.0);
                         ui.label(RichText::new("and enter the code").color(theme::TEXT_2));

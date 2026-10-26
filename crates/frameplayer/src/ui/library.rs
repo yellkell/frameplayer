@@ -613,9 +613,9 @@ fn home(ui: &mut egui::Ui, v: &mut View) {
                 .map(|f| f.display().to_string())
                 .collect();
             let body = if cfg!(target_os = "android") {
-                "Send videos from your computer over Wi-Fi: open the page FramePlayer shows \
-                 in any browser and drop them on it. Or stream them from DLNA, SMB and \
-                 WebDAV servers on your network."
+                "Send videos from your computer or phone over Wi-Fi: open the page \
+                 FramePlayer shows in any browser and drop them on it. Or stream them from \
+                 DLNA, SMB and WebDAV servers on your network."
                     .to_string()
             } else if folders.is_empty() {
                 "Copy videos to the Frame with FrameDrop or a USB drive, or stream them from \
@@ -638,11 +638,11 @@ fn home(ui: &mut egui::Ui, v: &mut View) {
                     let quest = cfg!(target_os = "android");
                     if quest {
                         ui.horizontal(|ui| {
-                            ui.add_space((ui.available_width() - 330.0).max(0.0) / 2.0);
+                            ui.add_space((ui.available_width() - 420.0).max(0.0) / 2.0);
                             if widgets::button(
                                 ui,
                                 Some(icons::WIFI_HIGH),
-                                "Send videos from your computer",
+                                "Send videos from your computer or phone",
                                 Kind::Primary,
                             )
                             .clicked()
@@ -814,7 +814,7 @@ fn library(ui: &mut egui::Ui, v: &mut View) {
                 if widgets::button_sized(
                     ui,
                     Some(icons::WIFI_HIGH),
-                    "Send from computer",
+                    "Send from computer or phone",
                     Kind::Secondary,
                     38.0,
                 )
