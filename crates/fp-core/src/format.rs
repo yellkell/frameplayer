@@ -145,6 +145,20 @@ impl VideoFormat {
         (self.alpha_packed && self.stereo == StereoLayout::SideBySide).then_some(ALPHA_PACK_SCALE)
     }
 
+    /// Shape (width / height) of one eye's picture on a flat screen, for a
+    /// `width` × `height` frame. Half side by side (1920x1080 HSBS) and half
+    /// over/under squeeze each eye into half the frame, so an eye whose half
+    /// has no movie shape (narrower than 1.25:1 side by side, wider than
+    /// 2.8:1 stacked) is shown at the whole frame's shape instead.
+    pub fn eye_aspect(&self, width: u32, height: u32) -> f32 {
+        let (w, h) = (width.max(1) as f32, height.max(1) as f32);
+        match self.stereo {
+            StereoLayout::SideBySide if w / 2.0 / h >= 1.25 => w / 2.0 / h,
+            StereoLayout::TopBottom if w * 2.0 / h <= 2.8 => w * 2.0 / h,
+            _ => w / h,
+        }
+    }
+
     /// Same projection, stereo layout and eye order (the alpha mask aside).
     pub fn same_layout(&self, other: &VideoFormat) -> bool {
         VideoFormat {
@@ -586,6 +600,30 @@ mod tests {
         assert_eq!(guess_from_aspect(3072, 2048), None);
         assert_eq!(guess_from_aspect(1080, 1080), None);
         assert_eq!(guess_from_aspect(0, 0), None);
+    }
+
+    #[test]
+    fn flat_eye_aspect() {
+        let sbs = VideoFormat::new(P::Flat, S::SideBySide);
+        let tb = VideoFormat::new(P::Flat, S::TopBottom);
+        let near = |a: f32, b: f32| (a - b).abs() < 0.01;
+        // Full: each eye keeps its own shape.
+        assert!(near(sbs.eye_aspect(3840, 1080), 16.0 / 9.0));
+        assert!(near(sbs.eye_aspect(3840, 1600), 2.4));
+        assert!(near(sbs.eye_aspect(2880, 1080), 4.0 / 3.0));
+        assert!(near(tb.eye_aspect(1920, 2160), 16.0 / 9.0));
+        assert!(near(tb.eye_aspect(1920, 1600), 2.4));
+        // Half: each eye is squeezed, shown at the frame's shape.
+        assert!(near(sbs.eye_aspect(1920, 1080), 16.0 / 9.0));
+        assert!(near(sbs.eye_aspect(1920, 800), 2.4));
+        assert!(near(sbs.eye_aspect(1440, 1080), 4.0 / 3.0));
+        assert!(near(tb.eye_aspect(1920, 1080), 16.0 / 9.0));
+        assert!(near(tb.eye_aspect(1920, 800), 2.4));
+        assert!(near(
+            VideoFormat::new(P::Flat, S::Mono).eye_aspect(1920, 1080),
+            16.0 / 9.0
+        ));
+        assert!(sbs.eye_aspect(0, 0).is_finite());
     }
 
     #[test]

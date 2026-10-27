@@ -154,14 +154,9 @@ pub(crate) fn build(
             (1, 1),
         ),
     };
-    // Per-eye aspect for flat screens.
-    let (ew, eh) = match video.format.stereo {
-        StereoLayout::SideBySide => (tex.0 as f32 / 2.0, tex.1 as f32),
-        StereoLayout::TopBottom => (tex.0 as f32, tex.1 as f32 / 2.0),
-        StereoLayout::Mono => (tex.0 as f32, tex.1 as f32),
-    };
+    // Per-eye aspect for flat screens (half SBS / OU unsqueezed).
     let screen_w = s.screen_width * s.zoom;
-    let screen_h = screen_w * eh / ew.max(1.0);
+    let screen_h = screen_w / video.format.eye_aspect(tex.0, tex.1);
     let arc = s.screen_curvature.clamp(0.0, 1.0) * std::f32::consts::TAU / 3.0;
     let correction =
         Mat4::from_euler(EulerRot::YXZ, deg(s.yaw), deg(s.pitch), deg(s.roll)).inverse();
