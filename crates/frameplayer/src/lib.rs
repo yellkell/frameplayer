@@ -167,8 +167,20 @@ fn location(arg: &str) -> String {
 }
 
 fn make_app() -> Result<App, Error> {
-    let settings = Settings::load(&Settings::path());
+    let mut settings = Settings::load(&Settings::path());
     let library = fp_library::Library::open_default()?;
+    if !settings.flat_3d_thumbs_redone {
+        match library.redo_flat_stereo_thumbnails() {
+            Ok(n) => {
+                log::info!("remaking {n} flat 3D thumbnails");
+                settings.flat_3d_thumbs_redone = true;
+                if let Err(e) = settings.save(&Settings::path()) {
+                    log::warn!("saving settings: {e}");
+                }
+            }
+            Err(e) => log::warn!("remaking flat 3D thumbnails: {e}"),
+        }
+    }
     Ok(App::new(settings, library))
 }
 

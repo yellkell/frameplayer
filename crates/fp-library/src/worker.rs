@@ -44,14 +44,25 @@ pub enum ThumbnailCrop {
     LeftEye,
     /// Top half (top/bottom stereo).
     TopEye,
+    /// Left half of a half side-by-side movie, stretched to the whole
+    /// frame's shape.
+    LeftEyeUnsqueezed,
+    /// Top half of a half over/under movie, stretched to the whole frame's
+    /// shape.
+    TopEyeUnsqueezed,
     /// The whole frame (mono).
     Full,
 }
 
 impl ThumbnailCrop {
-    /// The crop for a format: SBS → left half, TB → top half, mono → full.
-    pub fn for_format(format: &VideoFormat) -> ThumbnailCrop {
+    /// The crop for a format and frame size: SBS → left half, TB → top
+    /// half, mono → full; a half-packed 3D movie's eye is unsqueezed (see
+    /// [`VideoFormat::half_packed`]).
+    pub fn for_format(format: &VideoFormat, width: u32, height: u32) -> ThumbnailCrop {
+        let half = format.half_packed(width, height);
         match format.stereo {
+            StereoLayout::SideBySide if half => ThumbnailCrop::LeftEyeUnsqueezed,
+            StereoLayout::TopBottom if half => ThumbnailCrop::TopEyeUnsqueezed,
             StereoLayout::SideBySide => ThumbnailCrop::LeftEye,
             StereoLayout::TopBottom => ThumbnailCrop::TopEye,
             StereoLayout::Mono => ThumbnailCrop::Full,
@@ -269,7 +280,7 @@ fn process_one(
         rec.detected
     };
     let effective = rec.user_format.unwrap_or(detected.format);
-    let crop = ThumbnailCrop::for_format(&effective);
+    let crop = ThumbnailCrop::for_format(&effective, info.width, info.height);
     let duration = info
         .duration
         .filter(|d| d.is_finite() && *d > 0.0)
@@ -601,7 +612,9 @@ mod tests {
             let (w, h) = match crop {
                 ThumbnailCrop::LeftEye => (info.width / 2, info.height),
                 ThumbnailCrop::TopEye => (info.width, info.height / 2),
-                ThumbnailCrop::Full => (info.width, info.height),
+                ThumbnailCrop::LeftEyeUnsqueezed
+                | ThumbnailCrop::TopEyeUnsqueezed
+                | ThumbnailCrop::Full => (info.width, info.height),
             };
             let (w, h) = crate::image::fit_size(w, h, max_w, max_h);
             Ok(RgbaImage::filled(w, h, [200, 100, 50, 255]))
@@ -635,16 +648,34 @@ mod tests {
     fn crop_follows_stereo_layout() {
         let f = |s| VideoFormat::new(Projection::EQUIRECT_180, s);
         assert_eq!(
-            ThumbnailCrop::for_format(&f(StereoLayout::SideBySide)),
+            ThumbnailCrop::for_format(&f(StereoLayout::SideBySide), 5760, 2880),
             ThumbnailCrop::LeftEye
         );
         assert_eq!(
-            ThumbnailCrop::for_format(&f(StereoLayout::TopBottom)),
+            ThumbnailCrop::for_format(&f(StereoLayout::TopBottom), 4096, 4096),
             ThumbnailCrop::TopEye
         );
         assert_eq!(
-            ThumbnailCrop::for_format(&f(StereoLayout::Mono)),
+            ThumbnailCrop::for_format(&f(StereoLayout::Mono), 4096, 2048),
             ThumbnailCrop::Full
+        );
+        // Flat 3D movies: full keeps the eye, half is unsqueezed.
+        let flat = |s| VideoFormat::new(Projection::Flat, s);
+        assert_eq!(
+            ThumbnailCrop::for_format(&flat(StereoLayout::SideBySide), 3840, 1080),
+            ThumbnailCrop::LeftEye
+        );
+        assert_eq!(
+            ThumbnailCrop::for_format(&flat(StereoLayout::SideBySide), 1920, 1080),
+            ThumbnailCrop::LeftEyeUnsqueezed
+        );
+        assert_eq!(
+            ThumbnailCrop::for_format(&flat(StereoLayout::TopBottom), 1920, 2160),
+            ThumbnailCrop::TopEye
+        );
+        assert_eq!(
+            ThumbnailCrop::for_format(&flat(StereoLayout::TopBottom), 1920, 1080),
+            ThumbnailCrop::TopEyeUnsqueezed
         );
     }
 

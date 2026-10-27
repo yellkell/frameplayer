@@ -82,6 +82,9 @@ pub struct Settings {
     /// [`crate::pin`]). Left out of the file when empty.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub source_pins: std::collections::BTreeMap<String, String>,
+    /// Flat 3D thumbnails were remade once with half side-by-side and half
+    /// over/under unsqueezed (they used to come out squeezed).
+    pub flat_3d_thumbs_redone: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -132,6 +135,7 @@ impl Default for Settings {
             browse_sort: fp_sources::EntrySort::default(),
             recent_after: None,
             source_pins: Default::default(),
+            flat_3d_thumbs_redone: false,
         }
     }
 }
