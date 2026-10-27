@@ -1202,6 +1202,20 @@ impl Library {
         })
     }
 
+    /// Drops the thumbnails and preview strips of flat 3D videos so the
+    /// metadata worker makes them again (half side-by-side and half
+    /// over/under ones used to come out squeezed). Returns how many.
+    pub fn redo_flat_stereo_thumbnails(&self) -> Result<usize> {
+        self.with(|c| {
+            Ok(c.execute(
+                "UPDATE media SET thumbnail = NULL, preview_strip = NULL
+                 WHERE projection_kind = 'flat' AND stereo != 'mono'
+                   AND thumbnail IS NOT NULL",
+                [],
+            )?)
+        })
+    }
+
     /// Stores probe results and re-resolved format (worker use).
     pub(crate) fn store_probe(&self, id: MediaId, probe: &StoredProbe) -> Result<()> {
         self.in_tx(|c| {
@@ -1898,6 +1912,40 @@ mod tests {
         assert_eq!(lib.purge_missing(Some("other")).unwrap(), 0);
         assert_eq!(lib.purge_missing(None).unwrap(), 1);
         assert_eq!(lib.sources().unwrap(), vec![]);
+    }
+
+    #[test]
+    fn redo_flat_stereo_thumbnails_requeues_only_flat_3d() {
+        let lib = lib();
+        let ids = ["/Movie.3D.HSBS.mkv", "/Scene_180_LR.mp4", "/Holiday.mp4"].map(|p| {
+            let id = add(&lib, p);
+            let detected = lib.get(id).unwrap().unwrap().detected;
+            lib.store_probe(
+                id,
+                &StoredProbe {
+                    duration: Some(60.0),
+                    width: Some(1920),
+                    height: Some(1080),
+                    video_codec: None,
+                    detected,
+                    thumbnail: Some(format!("/cache/{}.jpg", id.0).into()),
+                    preview_strip: None,
+                    error: None,
+                },
+            )
+            .unwrap();
+            id
+        });
+        assert!(lib.pending_metadata(10).unwrap().is_empty());
+        assert_eq!(lib.redo_flat_stereo_thumbnails().unwrap(), 1);
+        let pending: Vec<_> = lib
+            .pending_metadata(10)
+            .unwrap()
+            .iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(pending, vec![ids[0]]);
+        assert_eq!(lib.redo_flat_stereo_thumbnails().unwrap(), 0);
     }
 
     #[test]

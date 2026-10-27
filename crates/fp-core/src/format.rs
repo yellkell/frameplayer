@@ -145,17 +145,33 @@ impl VideoFormat {
         (self.alpha_packed && self.stereo == StereoLayout::SideBySide).then_some(ALPHA_PACK_SCALE)
     }
 
-    /// Shape (width / height) of one eye's picture on a flat screen, for a
-    /// `width` × `height` frame. Half side by side (1920x1080 HSBS) and half
-    /// over/under squeeze each eye into half the frame, so an eye whose half
-    /// has no movie shape (narrower than 1.25:1 side by side, wider than
-    /// 2.8:1 stacked) is shown at the whole frame's shape instead.
+    /// A flat 3D `width` × `height` frame that squeezes each eye into half
+    /// the frame (1920x1080 half side by side, or half over/under): its
+    /// halves have no movie shape (narrower than 1.25:1 side by side, wider
+    /// than 2.8:1 stacked), so each eye is meant to be seen at the whole
+    /// frame's shape.
+    pub fn half_packed(&self, width: u32, height: u32) -> bool {
+        if self.projection != Projection::Flat || width == 0 || height == 0 {
+            return false;
+        }
+        let (w, h) = (width as f32, height as f32);
+        match self.stereo {
+            StereoLayout::SideBySide => w / 2.0 / h < 1.25,
+            StereoLayout::TopBottom => w * 2.0 / h > 2.8,
+            StereoLayout::Mono => false,
+        }
+    }
+
+    /// Shape (width / height) of one eye's picture for a `width` × `height`
+    /// frame: its half of the frame, or the whole frame's shape when
+    /// [`VideoFormat::half_packed`].
     pub fn eye_aspect(&self, width: u32, height: u32) -> f32 {
         let (w, h) = (width.max(1) as f32, height.max(1) as f32);
         match self.stereo {
-            StereoLayout::SideBySide if w / 2.0 / h >= 1.25 => w / 2.0 / h,
-            StereoLayout::TopBottom if w * 2.0 / h <= 2.8 => w * 2.0 / h,
-            _ => w / h,
+            _ if self.half_packed(width, height) => w / h,
+            StereoLayout::SideBySide => w / 2.0 / h,
+            StereoLayout::TopBottom => w * 2.0 / h,
+            StereoLayout::Mono => w / h,
         }
     }
 
@@ -624,6 +640,12 @@ mod tests {
             16.0 / 9.0
         ));
         assert!(sbs.eye_aspect(0, 0).is_finite());
+        // Only flat movies are packed this way: a 180° eye is square.
+        let vr = VideoFormat::new(P::EQUIRECT_180, S::SideBySide);
+        assert!(!vr.half_packed(5760, 2880));
+        assert!(near(vr.eye_aspect(5760, 2880), 1.0));
+        assert!(sbs.half_packed(1920, 1080) && !sbs.half_packed(3840, 1080));
+        assert!(!sbs.half_packed(0, 0));
     }
 
     #[test]

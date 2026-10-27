@@ -17,6 +17,11 @@ pub enum Crop {
     LeftHalf,
     /// Top half (top/bottom stereo).
     TopHalf,
+    /// Left half, stretched to the whole frame's shape (half side-by-side
+    /// movies, whose eyes are squeezed to half width).
+    LeftHalfUnsqueezed,
+    /// Top half, stretched to the whole frame's shape (half over/under).
+    TopHalfUnsqueezed,
 }
 
 /// An RGBA image.
@@ -77,7 +82,8 @@ pub fn probe(
 }
 
 /// Decodes the first frame at or after `at` seconds and scales it to fit
-/// within `max_w` x `max_h`, keeping the aspect ratio of the cropped area.
+/// within `max_w` x `max_h`, keeping the aspect ratio of the cropped area
+/// (of the whole frame for the unsqueezed crops).
 /// Setting `interrupt` stops it at the next read.
 pub fn grab(
     src: Arc<dyn ByteSource>,
@@ -142,17 +148,22 @@ fn scale(frame: &Frame, max_w: u32, max_h: u32, crop: Crop) -> Result<Rgba> {
         let f = &*frame.as_ptr();
         let (sw, sh) = match crop {
             Crop::Full => (f.width, f.height),
-            Crop::LeftHalf => (f.width / 2, f.height),
-            Crop::TopHalf => (f.width, f.height / 2),
+            Crop::LeftHalf | Crop::LeftHalfUnsqueezed => (f.width / 2, f.height),
+            Crop::TopHalf | Crop::TopHalfUnsqueezed => (f.width, f.height / 2),
         };
         if sw <= 0 || sh <= 0 {
             return Err(Error::Unsupported("empty frame".into()));
         }
-        let s = (max_w as f64 / sw as f64)
-            .min(max_h as f64 / sh as f64)
+        // The shape the picture is shown at.
+        let (vw, vh) = match crop {
+            Crop::LeftHalfUnsqueezed | Crop::TopHalfUnsqueezed => (f.width, f.height),
+            _ => (sw, sh),
+        };
+        let s = (max_w as f64 / vw as f64)
+            .min(max_h as f64 / vh as f64)
             .min(1.0);
-        let dw = ((sw as f64 * s).round() as i32).max(2) & !1;
-        let dh = ((sh as f64 * s).round() as i32).max(2) & !1;
+        let dw = ((vw as f64 * s).round() as i32).max(2) & !1;
+        let dh = ((vh as f64 * s).round() as i32).max(2) & !1;
         let ctx = ff::sws_getContext(
             sw,
             sh,
@@ -233,6 +244,22 @@ mod tests {
             .map(|p| (p[0] / 32, p[1] / 32, p[2] / 32))
             .collect();
         assert!(distinct.len() > 10, "image looks blank");
+    }
+
+    #[test]
+    fn unsqueezed_eye_takes_the_frame_shape() {
+        // 640x320: each eye is 320x320, shown at 2:1 when unsqueezed.
+        let img = grab(
+            src("h264_aac_180_LR.mp4"),
+            "x.mp4",
+            1.0,
+            160,
+            160,
+            Crop::LeftHalfUnsqueezed,
+            no_interrupt(),
+        )
+        .unwrap();
+        assert_eq!((img.width, img.height), (160, 80));
     }
 
     #[test]
