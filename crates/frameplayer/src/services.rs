@@ -125,7 +125,7 @@ pub fn builtin_sources() -> Vec<SourceConfig> {
     }
     // Always offered, so a card inserted later shows up without a restart.
     // Not on a Quest: no card slot, and Android mounts drives elsewhere.
-    if !cfg!(target_os = "android") {
+    if !crate::QUEST {
         out.push(SourceConfig::Local(fp_sources::LocalConfig {
             id: REMOVABLE_SOURCE.into(),
             name: "microSD and USB drives".into(),
@@ -284,11 +284,7 @@ pub fn mount_drive(drive: &UnmountedDrive) -> Result<PathBuf, String> {
 /// Where Wi-Fi uploads are saved: the Quest's Movies, else ~/Videos.
 pub fn upload_folder() -> Option<PathBuf> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    Some(home.join(if cfg!(target_os = "android") {
-        "Movies"
-    } else {
-        "Videos"
-    }))
+    Some(home.join(if crate::QUEST { "Movies" } else { "Videos" }))
 }
 
 /// Video folders worth offering for the library that are not in it yet
@@ -296,7 +292,7 @@ pub fn upload_folder() -> Option<PathBuf> {
 pub fn suggested_folders(existing: &[PathBuf]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-        let dirs: &[&str] = if cfg!(target_os = "android") {
+        let dirs: &[&str] = if crate::QUEST {
             &["Movies", "Download"]
         } else {
             &["Videos", "Downloads", "Movies"]

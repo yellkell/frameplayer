@@ -156,9 +156,18 @@ panel bar player-bar-slow-decode
 EOF
 
 features=()
+run_home="$home"
 if [ "${QUEST_LOOK:-}" = 1 ]; then
   features=(--features quest-look)
+  # The Quest's shared storage, where its paths start, with the videos in
+  # Movies (CI has sudo for the link).
+  mv "$home/Videos" "$home/Movies"
+  sudo mkdir -p /storage/emulated
+  sudo ln -sfn "$home" /storage/emulated/0
+  run_home=/storage/emulated/0
   cat >"$script" <<EOF
+# The controller's ray off the panels.
+aim 0 -70
 wait 4
 panel main home
 screen library
@@ -178,7 +187,7 @@ EOF
 fi
 
 cargo build -p frameplayer "${features[@]}"
-HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_DATA_HOME="$home/.local/share" \
+HOME="$run_home" XDG_CONFIG_HOME="$home/.config" XDG_DATA_HOME="$home/.local/share" \
   XDG_CACHE_HOME="$home/.cache" \
   target/debug/frameplayer --preview "$out" --script "$script" --size 1400
 ls -l "$out"

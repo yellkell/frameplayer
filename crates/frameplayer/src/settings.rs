@@ -99,7 +99,7 @@ impl Default for Settings {
         let mut library_folders = Vec::new();
         if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
             // Android's shared storage names them Movies and Download.
-            let dirs = if cfg!(target_os = "android") {
+            let dirs = if crate::QUEST {
                 ["Movies", "Download"]
             } else {
                 ["Videos", "Downloads"]
