@@ -337,7 +337,7 @@ fn passthrough(ui: &mut egui::Ui, v: &mut View) {
 }
 
 fn library(ui: &mut egui::Ui, v: &mut View) {
-    if cfg!(target_os = "android") {
+    if crate::QUEST {
         wifi_upload(ui, v);
     }
     heading(ui, "Folders on this device");
@@ -363,7 +363,7 @@ fn library(ui: &mut egui::Ui, v: &mut View) {
                 ui.add(
                     egui::TextEdit::singleline(&mut v.state.new_folder)
                         .margin(egui::Margin::symmetric(12, 9))
-                        .hint_text(if cfg!(target_os = "android") {
+                        .hint_text(if crate::QUEST {
                             "/storage/emulated/0/Movies"
                         } else {
                             "/run/media/deck/SDCARD/Videos"
@@ -415,7 +415,7 @@ fn library(ui: &mut egui::Ui, v: &mut View) {
         v.actions.push(Action::RemoveFolder(i));
     }
     // The Quest has no card slot (see services::builtin_sources).
-    if !cfg!(target_os = "android") {
+    if !crate::QUEST {
         heading(ui, "Drives");
         widgets::rows(ui, |r| {
             let mounts = crate::services::removable_mounts();
@@ -932,7 +932,7 @@ fn check_button(ui: &mut egui::Ui, actions: &mut Vec<Action>) {
 }
 
 fn about(ui: &mut egui::Ui, v: &mut View) {
-    let quest = cfg!(target_os = "android");
+    let quest = crate::QUEST;
     ui.label(
         RichText::new(format!(
             "FramePlayer {} · {}",
@@ -983,7 +983,7 @@ fn about(ui: &mut egui::Ui, v: &mut View) {
 
 /// The Quest app has no folder to ship licences in: their texts are built
 /// in, each under a heading that opens it.
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", feature = "quest-look"))]
 fn licences(ui: &mut egui::Ui) {
     const TEXTS: [(&str, &str); 7] = [
         (
@@ -1028,5 +1028,5 @@ fn licences(ui: &mut egui::Ui) {
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", feature = "quest-look")))]
 fn licences(_ui: &mut egui::Ui) {}

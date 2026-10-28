@@ -30,11 +30,14 @@ mod ui;
 mod unlock;
 mod world;
 
+/// The Meta Quest build's screens: on Android, and in a desktop preview built
+/// with `--features quest-look` (store screenshots without a headset).
+pub(crate) const QUEST: bool = cfg!(any(target_os = "android", feature = "quest-look"));
 /// Haptic devices and scripts. Left out of the Meta Quest build, which is
 /// made for Meta's store.
-pub(crate) const HAPTICS: bool = !cfg!(target_os = "android");
+pub(crate) const HAPTICS: bool = !QUEST;
 /// Updating itself from GitHub releases; the store updates the Quest build.
-pub(crate) const SELF_UPDATE: bool = !cfg!(target_os = "android");
+pub(crate) const SELF_UPDATE: bool = !QUEST;
 
 use app::{App, FrameInput, LayerDraw};
 use fp_render::{Gpu, Renderer};
@@ -487,6 +490,14 @@ fn run_xr(args: &Args) -> Result<(), Error> {
         #[cfg(target_os = "android")]
         if android::pump() {
             break;
+        }
+        #[cfg(all(target_os = "android", not(feature = "store")))]
+        if let Some(screen) = android::screen_request() {
+            let parts: Vec<&str> = screen.split('/').collect();
+            match preview::set_screen(&mut app, &parts) {
+                Ok(()) => log::info!("screen {screen} (debug.frameplayer.screen)"),
+                Err(e) => log::warn!("debug.frameplayer.screen: {e}"),
+            }
         }
         match session.poll()? {
             SessionEvent::Exit => break,

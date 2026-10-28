@@ -686,7 +686,7 @@ fn short_location(l: &str) -> String {
 const KINDS: [(SourceKind, &str); 7] = [
     (
         SourceKind::DeoVr,
-        if cfg!(target_os = "android") {
+        if crate::QUEST {
             "Any DeoVR-format feed URL, e.g. http://192.168.1.10:9999/deovr"
         } else {
             "XBVR / Stash / any DeoVR feed URL, e.g. http://192.168.1.10:9999/deovr"
@@ -694,7 +694,7 @@ const KINDS: [(SourceKind, &str); 7] = [
     ),
     (
         SourceKind::HereSphere,
-        if cfg!(target_os = "android") {
+        if crate::QUEST {
             "Any HereSphere-format API URL, e.g. http://192.168.1.10:9999/heresphere"
         } else {
             "XBVR / Stash HereSphere API, e.g. http://192.168.1.10:9999/heresphere"
@@ -718,7 +718,7 @@ const KINDS: [(SourceKind, &str); 7] = [
     ),
     (
         SourceKind::Local,
-        if cfg!(target_os = "android") {
+        if crate::QUEST {
             "A folder on this headset"
         } else {
             "A folder on this device, a microSD card or a USB drive"
@@ -840,7 +840,7 @@ fn add_form(ui: &mut egui::Ui, v: &mut View) {
                 field(
                     ui,
                     &mut f.address,
-                    if local && cfg!(target_os = "android") {
+                    if local && crate::QUEST {
                         "/storage/emulated/0/Movies"
                     } else if local {
                         "/run/media/deck/SDCARD/Videos"

@@ -52,7 +52,7 @@ enum Spot {
 const DPAD: (f32, f32, f32) = (-0.427, -0.094, 0.235);
 
 /// The Quest build shows Touch controllers.
-const TOUCH: bool = cfg!(target_os = "android");
+const TOUCH: bool = crate::QUEST;
 
 /// The right controller has A/B/X/Y, the left a D-pad in their place.
 fn spots(hand: usize) -> Vec<Spot> {
@@ -121,12 +121,12 @@ fn picture_rect(hand: usize) -> [f32; 4] {
 }
 
 /// Each build carries only its own controllers' pictures (left, right).
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", feature = "quest-look")))]
 const PICTURES: [&[u8]; 2] = [
     include_bytes!("../../assets/controllers/left.png"),
     include_bytes!("../../assets/controllers/right.png"),
 ];
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", feature = "quest-look"))]
 const PICTURES: [&[u8]; 2] = [
     include_bytes!("../../assets/controllers/quest-left.png"),
     include_bytes!("../../assets/controllers/quest-right.png"),

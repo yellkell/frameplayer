@@ -242,6 +242,36 @@ pub(crate) fn hand_quads(
     quads
 }
 
+/// Screen a sideloaded build is told to show over adb, for headset
+/// screenshots without anyone pressing buttons:
+/// `adb shell setprop debug.frameplayer.screen settings/controller`.
+/// Gives each new value once.
+#[cfg(not(feature = "store"))]
+pub(crate) fn screen_request() -> Option<String> {
+    use std::ffi::{c_char, c_int};
+    use std::sync::Mutex;
+    unsafe extern "C" {
+        // Bionic; a value is at most 92 bytes (PROP_VALUE_MAX).
+        fn __system_property_get(name: *const c_char, value: *mut c_char) -> c_int;
+    }
+    static LAST: Mutex<String> = Mutex::new(String::new());
+    let mut buf = [0u8; 92];
+    // SAFETY: a NUL-terminated name and a PROP_VALUE_MAX buffer.
+    let n = unsafe {
+        __system_property_get(
+            c"debug.frameplayer.screen".as_ptr(),
+            buf.as_mut_ptr().cast(),
+        )
+    };
+    let value = String::from_utf8_lossy(&buf[..n.clamp(0, 91) as usize]).into_owned();
+    let mut last = LAST.lock().ok()?;
+    if value.is_empty() || *last == value {
+        return None;
+    }
+    *last = value.clone();
+    Some(value)
+}
+
 /// Handles the activity's pending events and the store's answers without
 /// waiting. Returns true once the activity is being destroyed, or when a
 /// store build's user doesn't own the app.

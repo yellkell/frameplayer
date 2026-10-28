@@ -3,6 +3,9 @@
 # desktop preview (no headset; any Vulkan driver, lavapipe on CI).
 #
 # Usage: tools/ui-preview.sh OUT_DIR
+# QUEST_LOOK=1 draws the Meta Quest build's screens instead (the quest-look
+# feature: Quest controllers, Wi-Fi upload, no haptics or updates), for the
+# Meta Horizon Store's screenshots.
 # Runs against a throwaway home with a small library made from the test
 # clips, so it never touches your own settings or library.
 set -euo pipefail
@@ -152,7 +155,29 @@ frames 8
 panel bar player-bar-slow-decode
 EOF
 
-cargo build -p frameplayer
+features=()
+if [ "${QUEST_LOOK:-}" = 1 ]; then
+  features=(--features quest-look)
+  cat >"$script" <<EOF
+wait 4
+panel main home
+screen library
+wait 1
+panel main library
+screen settings controller
+panel main settings-controller
+screen settings controller-open
+panel main settings-controller-open
+screen settings library
+upload on
+wait 1
+panel main settings-library
+screen settings about
+panel main settings-about
+EOF
+fi
+
+cargo build -p frameplayer "${features[@]}"
 HOME="$home" XDG_CONFIG_HOME="$home/.config" XDG_DATA_HOME="$home/.local/share" \
   XDG_CACHE_HOME="$home/.cache" \
   target/debug/frameplayer --preview "$out" --script "$script" --size 1400

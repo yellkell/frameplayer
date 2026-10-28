@@ -896,7 +896,7 @@ pub(super) fn unlock_card(
         Some(Status::Starting) => {
             ui.horizontal(|ui| {
                 ui.add(egui::Spinner::new().size(18.0).color(premium::VIOLET));
-                let doing = if cfg!(target_os = "android") {
+                let doing = if crate::QUEST {
                     "Opening the Meta Quest Store"
                 } else {
                     "Getting a code"
@@ -914,7 +914,7 @@ pub(super) fn unlock_card(
             if premium::button(ui, &format!("Unlock for {PRICE}")).clicked() {
                 actions.push(Action::StartUnlock);
             }
-            let how = if cfg!(target_os = "android") {
+            let how = if crate::QUEST {
                 "One-time purchase through the Meta Quest Store."
             } else {
                 "One-time purchase at yellkell.com/unlock, paid on your phone or computer."

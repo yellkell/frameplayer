@@ -400,7 +400,7 @@ impl App {
 
     /// Starts or stops the Wi-Fi upload page. Its folder joins the library
     /// folders so what arrives is indexed.
-    fn set_upload(&mut self, on: bool) {
+    pub(crate) fn set_upload(&mut self, on: bool) {
         self.services.upload = None;
         self.services.upload_error = None;
         self.uploads_seen = 0;

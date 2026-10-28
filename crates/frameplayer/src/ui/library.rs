@@ -612,7 +612,7 @@ fn home(ui: &mut egui::Ui, v: &mut View) {
                 .iter()
                 .map(|f| f.display().to_string())
                 .collect();
-            let body = if cfg!(target_os = "android") {
+            let body = if crate::QUEST {
                 "Send videos from your computer or phone over Wi-Fi: open the page \
                  FramePlayer shows in any browser and drop them on it. Or stream them from \
                  DLNA, SMB and WebDAV servers on your network."
@@ -635,7 +635,7 @@ fn home(ui: &mut egui::Ui, v: &mut View) {
                 &body,
                 |ui| {
                     // On a Quest, Wi-Fi upload is the easy way in: lead with it.
-                    let quest = cfg!(target_os = "android");
+                    let quest = crate::QUEST;
                     if quest {
                         ui.horizontal(|ui| {
                             ui.add_space((ui.available_width() - 420.0).max(0.0) / 2.0);
@@ -809,7 +809,7 @@ fn library(ui: &mut egui::Ui, v: &mut View) {
                 .font(theme::font(Weight::Medium, 15.0))
                 .color(theme::TEXT_3),
             );
-            if cfg!(target_os = "android") {
+            if crate::QUEST {
                 ui.add_space(12.0);
                 if widgets::button_sized(
                     ui,

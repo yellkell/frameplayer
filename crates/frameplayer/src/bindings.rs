@@ -164,7 +164,7 @@ impl Button {
     /// The button's name on the controller of `hand` (Frame, or Touch on a
     /// Quest, where only A/B, X/Y and Menu exist).
     pub fn label(self, hand: usize) -> &'static str {
-        if cfg!(target_os = "android") {
+        if crate::QUEST {
             match (self, hand == RIGHT) {
                 (Button::South, true) => return "A",
                 (Button::East, true) => return "B",
@@ -301,7 +301,7 @@ impl Default for Bindings {
                 north: B::ShowHideControls,
                 // On a Quest the system recenters (hold the Meta button),
                 // and the right controller has no Menu for the library.
-                menu: if cfg!(target_os = "android") {
+                menu: if crate::QUEST {
                     B::Library
                 } else {
                     B::Recenter

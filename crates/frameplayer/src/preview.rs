@@ -23,6 +23,7 @@
 //! | `screen NAME [TAB]` | show a browser screen (`home`, `library`, `sources`, `settings` and its tab) |
 //! | `adjust [TAB]` | open the adjustments panel (at tab TAB) |
 //! | `chroma` | turn chroma key on for the open video |
+//! | `upload [on/off]` | switch Wi-Fi upload (the Quest build's Library settings) |
 //! | `panel PANEL NAME` | save a panel's image flat, pixel for pixel, as OUT_DIR/NAME.png |
 
 use crate::app::{App, FrameInput};
@@ -200,50 +201,11 @@ impl Sim {
                 }
             }
             Some("screen") => {
-                use crate::ui::{Screen, SettingsTab};
-                let screen = match parts.get(1).copied().unwrap_or("home") {
-                    "home" => Screen::Home,
-                    "library" => Screen::Library,
-                    "sources" => Screen::Sources,
-                    "settings" => Screen::Settings,
-                    other => return Err(format!("no screen {other:?}").into()),
-                };
-                let ui = &mut self.app.ui;
-                ui.screen = screen;
-                // The sources list, not the folder last browsed.
-                ui.browse = None;
-                ui.details = None;
-                ui.remap_open = None;
-                if let Some(tab) = parts.get(2) {
-                    ui.settings_tab = match *tab {
-                        "playback" => SettingsTab::Playback,
-                        "passthrough" => SettingsTab::Passthrough,
-                        "controller" => SettingsTab::Controller,
-                        // The Controller tab with the right A button's choices open.
-                        "controller-open" => {
-                            ui.remap_open = Some(crate::ui::RemapSlot::Button(
-                                crate::bindings::RIGHT,
-                                crate::bindings::Button::South,
-                            ));
-                            SettingsTab::Controller
-                        }
-                        // ...and with the left thumbstick's choices open.
-                        "controller-stick" => {
-                            ui.remap_open = Some(crate::ui::RemapSlot::Axis(
-                                crate::bindings::LEFT,
-                                crate::bindings::Axis::StickX,
-                            ));
-                            SettingsTab::Controller
-                        }
-                        "library" => SettingsTab::Library,
-                        "haptics" => SettingsTab::Haptics,
-                        "remote" => SettingsTab::Remote,
-                        "updates" => SettingsTab::Updates,
-                        "about" => SettingsTab::About,
-                        other => return Err(format!("no settings tab {other:?}").into()),
-                    };
-                }
-                self.app.repaint_all();
+                set_screen(&mut self.app, &parts[1..])?;
+                self.run_frames(3)?;
+            }
+            Some("upload") => {
+                self.app.set_upload(parts.get(1) != Some(&"off"));
                 self.run_frames(3)?;
             }
             Some("panel") => {
@@ -536,5 +498,56 @@ pub fn run(args: &Args, out: &Path) -> Result<(), Error> {
     app.shutdown();
     renderer.wait_idle();
     drop(renderer);
+    Ok(())
+}
+
+/// Shows a screen and, for settings, a tab: `["settings", "controller"]`.
+/// Shared with sideloaded Quest builds, which take it from an adb property
+/// for headset screenshots (`android::screen_request`).
+pub(crate) fn set_screen(app: &mut App, parts: &[&str]) -> Result<(), String> {
+    use crate::ui::{Screen, SettingsTab};
+    let screen = match parts.first().copied().unwrap_or("home") {
+        "home" => Screen::Home,
+        "library" => Screen::Library,
+        "sources" => Screen::Sources,
+        "settings" => Screen::Settings,
+        other => return Err(format!("no screen {other:?}")),
+    };
+    let ui = &mut app.ui;
+    ui.screen = screen;
+    // The sources list, not the folder last browsed.
+    ui.browse = None;
+    ui.details = None;
+    ui.remap_open = None;
+    if let Some(tab) = parts.get(1) {
+        ui.settings_tab = match *tab {
+            "playback" => SettingsTab::Playback,
+            "passthrough" => SettingsTab::Passthrough,
+            "controller" => SettingsTab::Controller,
+            // The Controller tab with the right A button's choices open.
+            "controller-open" => {
+                ui.remap_open = Some(crate::ui::RemapSlot::Button(
+                    crate::bindings::RIGHT,
+                    crate::bindings::Button::South,
+                ));
+                SettingsTab::Controller
+            }
+            // ...and with the left thumbstick's choices open.
+            "controller-stick" => {
+                ui.remap_open = Some(crate::ui::RemapSlot::Axis(
+                    crate::bindings::LEFT,
+                    crate::bindings::Axis::StickX,
+                ));
+                SettingsTab::Controller
+            }
+            "library" => SettingsTab::Library,
+            "haptics" => SettingsTab::Haptics,
+            "remote" => SettingsTab::Remote,
+            "updates" => SettingsTab::Updates,
+            "about" => SettingsTab::About,
+            other => return Err(format!("no settings tab {other:?}")),
+        };
+    }
+    app.repaint_all();
     Ok(())
 }

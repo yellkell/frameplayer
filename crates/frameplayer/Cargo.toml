@@ -39,6 +39,9 @@ jni-sys = "0.3"
 # A Meta Quest Store build: it closes when the store's entitlement check
 # fails (crate::meta). Sideloaded test builds leave it off.
 store = []
+# A desktop preview that draws the Meta Quest build's screens (Quest
+# controllers, no haptics or self-update): store screenshots without a headset.
+quest-look = []
 
 [dev-dependencies]
 png = "0.18"

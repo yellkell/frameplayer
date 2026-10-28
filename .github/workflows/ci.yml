@@ -76,6 +76,18 @@ jobs:
         with:
           name: ui-preview
           path: ui-preview/
+      # The Meta Quest build's screens, for its store screenshots.
+      - name: UI preview (Quest)
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/third_party/ffmpeg/x86_64/lib
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+          QUEST_LOOK: "1"
+        run: tools/ui-preview.sh ui-preview-quest
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-preview-quest
+          path: ui-preview-quest/
       - name: Package for the Steam Frame (aarch64, glibc 2.28)
         run: tools/package.sh
       - uses: actions/upload-artifact@v4
