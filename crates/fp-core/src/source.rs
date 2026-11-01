@@ -50,7 +50,7 @@ impl ByteSource for FileSource {
     }
 }
 
-/// An in-memory `ByteSource`, for tests.
+/// An in-memory `ByteSource`.
 pub struct MemorySource(pub Vec<u8>);
 
 impl ByteSource for MemorySource {

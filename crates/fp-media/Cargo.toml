@@ -8,6 +8,8 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+chardetng = "0.1"
+encoding_rs = "0.8"
 fp-core = { path = "../fp-core" }
 fp-ffmpeg-sys = { path = "../fp-ffmpeg-sys" }
 libloading = "0.8"
