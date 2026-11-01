@@ -255,6 +255,17 @@ pub(crate) fn enabled() -> bool {
     cfg!(target_os = "linux") && !matches!(std::env::var("FRAMEPLAYER_V4L2").as_deref(), Ok("0"))
 }
 
+/// Whether a stream's pixel format is one the hardware decoder can output
+/// (a stream that doesn't declare a format is given a try).
+pub(crate) fn eight_bit_420(format: i32) -> bool {
+    [
+        fp_ffmpeg_sys::AV_PIX_FMT_NONE,
+        fp_ffmpeg_sys::AV_PIX_FMT_YUV420P,
+        fp_ffmpeg_sys::AV_PIX_FMT_YUVJ420P,
+    ]
+    .contains(&format)
+}
+
 #[cfg(target_os = "linux")]
 mod sys {
     //! The slice of `linux/videodev2.h` this decoder uses (64-bit layouts).
@@ -800,12 +811,7 @@ mod linux {
             let p = unsafe { &*par };
             let codec = Codec::from_ffmpeg(p.codec_id)
                 .ok_or_else(|| Error::Unsupported("codec not handled by V4L2".into()))?;
-            let eight_bit_420 = [
-                ff::AV_PIX_FMT_NONE,
-                ff::AV_PIX_FMT_YUV420P,
-                ff::AV_PIX_FMT_YUVJ420P,
-            ];
-            if !eight_bit_420.contains(&p.format) {
+            if !super::eight_bit_420(p.format) {
                 return Err(Error::Unsupported(format!(
                     "V4L2 path takes 8-bit 4:2:0 only (pixel format {})",
                     p.format
