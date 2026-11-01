@@ -3,7 +3,10 @@
 use crate::decode::{Decoder, HwDecode, Packet};
 use crate::input::Input;
 use crate::{Result, check};
+use chardetng::EncodingDetector;
+use encoding_rs::{Encoding, UTF_8};
 use fp_core::ByteSource;
+use fp_core::source::{MemorySource, is_subtitle_name};
 use fp_ffmpeg_sys as ff;
 use std::ffi::CStr;
 use std::sync::Arc;
@@ -165,9 +168,54 @@ pub(crate) fn decode_packet(dec: &mut Decoder, pkt: &Packet) -> Option<Cue> {
     }
 }
 
+/// Largest subtitle file that is read whole to detect its encoding.
+const MAX_TEXT_SUBTITLE: u64 = 64 << 20;
+
+fn read_all(src: &dyn ByteSource) -> std::io::Result<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = src.read_at(out.len() as u64, &mut buf)?;
+        if n == 0 {
+            return Ok(out);
+        }
+        out.extend_from_slice(&buf[..n]);
+    }
+}
+
+/// Re-encodes subtitle text as UTF-8. FFmpeg drops cues in any other encoding,
+/// and the bundled build has no iconv for its `sub_charenc` option. Without a
+/// byte order mark the encoding is guessed from the text.
+fn to_utf8(bytes: Vec<u8>) -> Vec<u8> {
+    let encoding = match Encoding::for_bom(&bytes) {
+        Some((encoding, _)) if encoding == UTF_8 => return bytes,
+        Some((encoding, _)) => encoding,
+        None if std::str::from_utf8(&bytes).is_ok() => return bytes,
+        None => {
+            let mut detector = EncodingDetector::new();
+            detector.feed(&bytes, true);
+            detector.guess(None, false)
+        }
+    };
+    log::info!("subtitle encoding: {}", encoding.name());
+    encoding.decode(&bytes).0.into_owned().into_bytes()
+}
+
 /// Loads every cue from a subtitle file (SRT, ASS, VTT) or from the first
 /// subtitle stream of any container.
 pub fn load_file(src: Arc<dyn ByteSource>, name: &str) -> Result<Vec<Cue>> {
+    let src: Arc<dyn ByteSource> =
+        if is_subtitle_name(name) && src.size().is_some_and(|s| s <= MAX_TEXT_SUBTITLE) {
+            match read_all(src.as_ref()) {
+                Ok(bytes) => Arc::new(MemorySource(to_utf8(bytes))),
+                Err(e) => {
+                    log::warn!("subtitle {name}: {e}");
+                    src
+                }
+            }
+        } else {
+            src
+        };
     let mut input = Input::open(src, name, Arc::new(AtomicBool::new(false)))?;
     let idx = input
         .best_stream(ff::AVMEDIA_TYPE_SUBTITLE)
@@ -226,6 +274,74 @@ mod tests {
         assert_eq!(cues[1].text, "Second line\nwith break");
         assert_eq!(active(&cues, 0.5).len(), 1);
         assert_eq!(active(&cues, 1.1).len(), 0);
+    }
+
+    const SRT_TC: &str = "1\n00:00:00,200 --> 00:00:01,000\n你好,世界\n\n\
+                          2\n00:00:01,200 --> 00:00:02,000\n這是一段繁體中文字幕\n";
+    const SRT_SC: &str = "1\n00:00:00,200 --> 00:00:01,000\n你好,世界\n\n\
+                          2\n00:00:01,200 --> 00:00:02,000\n这是一段简体中文字幕\n";
+
+    fn cue_texts(bytes: Vec<u8>, name: &str) -> Vec<String> {
+        load_file(Arc::new(MemorySource(bytes)), name)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.text)
+            .collect()
+    }
+
+    #[test]
+    fn loads_utf8_srt() {
+        assert_eq!(
+            cue_texts(SRT_TC.as_bytes().to_vec(), "movie.srt"),
+            ["你好,世界", "這是一段繁體中文字幕"]
+        );
+    }
+
+    #[test]
+    fn loads_utf8_srt_with_bom() {
+        let bytes = [b"\xEF\xBB\xBF".as_slice(), SRT_TC.as_bytes()].concat();
+        assert_eq!(
+            cue_texts(bytes, "movie.srt"),
+            ["你好,世界", "這是一段繁體中文字幕"]
+        );
+    }
+
+    #[test]
+    fn loads_big5_srt() {
+        let bytes = encoding_rs::BIG5.encode(SRT_TC).0.into_owned();
+        assert_eq!(
+            cue_texts(bytes, "movie.srt"),
+            ["你好,世界", "這是一段繁體中文字幕"]
+        );
+    }
+
+    #[test]
+    fn loads_gbk_srt() {
+        let bytes = encoding_rs::GBK.encode(SRT_SC).0.into_owned();
+        assert_eq!(
+            cue_texts(bytes, "movie.srt"),
+            ["你好,世界", "这是一段简体中文字幕"]
+        );
+    }
+
+    #[test]
+    fn loads_utf16le_srt_with_bom() {
+        let mut bytes = vec![0xFF, 0xFE];
+        bytes.extend(SRT_TC.encode_utf16().flat_map(u16::to_le_bytes));
+        assert_eq!(
+            cue_texts(bytes, "movie.srt"),
+            ["你好,世界", "這是一段繁體中文字幕"]
+        );
+    }
+
+    #[test]
+    fn loads_big5_ass() {
+        let ass = "[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\n\
+                   Format: Name, Fontname, Fontsize\nStyle: Default,Arial,20\n\n\
+                   [Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n\
+                   Dialogue: 0,0:00:00.20,0:00:01.00,Default,,0,0,0,,這是一段繁體中文字幕\n";
+        let bytes = encoding_rs::BIG5.encode(ass).0.into_owned();
+        assert_eq!(cue_texts(bytes, "movie.ass"), ["這是一段繁體中文字幕"]);
     }
 
     #[test]

@@ -6,7 +6,7 @@ use egui::{
     Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Shadow, Stroke,
     TextStyle, Visuals,
 };
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 // Surfaces, darkest first.
 pub const BG: Color32 = Color32::from_rgb(13, 16, 21);
@@ -71,6 +71,35 @@ pub fn subhead() -> TextStyle {
     TextStyle::Name("subhead".into())
 }
 
+/// Noto Sans CJK from the system: on SteamOS, on SteamOS as seen from the
+/// Steam Linux Runtime, and on Debian. Too large to bundle at 20 MB.
+const CJK_FONT_PATHS: &[&str] = &[
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    "/run/host/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+];
+/// The Traditional Chinese face in that collection; JP is 0, KR 1, SC 2.
+const CJK_TC_FACE: u32 = 3;
+
+/// Read once and shared: every UI panel has its own egui context.
+fn cjk_font() -> Option<Arc<FontData>> {
+    static FONT: OnceLock<Option<Arc<FontData>>> = OnceLock::new();
+    FONT.get_or_init(|| {
+        let found = CJK_FONT_PATHS
+            .iter()
+            .find_map(|p| std::fs::read(p).ok().map(|bytes| (*p, bytes)));
+        let Some((path, bytes)) = found else {
+            log::warn!("no CJK font found; Chinese text will not display");
+            return None;
+        };
+        log::info!("CJK font: {path}");
+        let mut data = FontData::from_owned(bytes);
+        data.index = CJK_TC_FACE;
+        Some(Arc::new(data))
+    })
+    .clone()
+}
+
 fn fonts() -> FontDefinitions {
     let mut defs = FontDefinitions::default();
     let fallbacks: Vec<String> = defs.families[&FontFamily::Proportional].clone();
@@ -102,9 +131,16 @@ fn fonts() -> FontDefinitions {
         "phosphor-fill",
         include_bytes!("../../assets/fonts/Phosphor-Fill.ttf"),
     );
+    let cjk = cjk_font();
+    if let Some(data) = cjk.clone() {
+        defs.font_data.insert("cjk".into(), data);
+    }
     let chain = |first: &str| {
         let mut v = vec![first.to_string(), "phosphor".to_string()];
         v.extend(fallbacks.iter().cloned());
+        if cjk.is_some() {
+            v.push("cjk".to_string());
+        }
         v
     };
     defs.families
@@ -259,5 +295,36 @@ mod tests {
         for c in ['\u{E3D0}', '\u{E39E}', '\u{E46A}'] {
             assert!(ctx.fonts(|f| f.has_glyph(&super::icon_fill(20.0), c)));
         }
+    }
+
+    /// Needs a Noto Sans CJK system font, as on SteamOS and in tools/docker.
+    #[test]
+    fn every_text_weight_draws_chinese() {
+        use super::{Weight, font};
+        let ctx = egui::Context::default();
+        super::apply(&ctx);
+        let _ = ctx.run(Default::default(), |_| {});
+        for weight in [
+            Weight::Regular,
+            Weight::Medium,
+            Weight::SemiBold,
+            Weight::Bold,
+        ] {
+            for c in ['繁', '简', '字', 'あ'] {
+                assert!(
+                    ctx.fonts(|f| f.has_glyph(&font(weight, 54.0), c)),
+                    "no glyph for {c} in {weight:?}"
+                );
+            }
+        }
+    }
+
+    /// Inter keeps drawing Latin text; the CJK face is only a fallback.
+    #[test]
+    fn cjk_face_comes_after_the_latin_fonts() {
+        let defs = super::fonts();
+        let chain = &defs.families[&egui::FontFamily::Proportional];
+        assert_eq!(chain.first().map(String::as_str), Some("inter"));
+        assert_eq!(chain.last().map(String::as_str), Some("cjk"));
     }
 }
