@@ -113,6 +113,18 @@ fn v4l2_name(codec: ff::AVCodecID) -> Option<&'static CStr> {
     }
 }
 
+/// The preference for a stream of pixel format `format`. Only 8-bit 4:2:0 has
+/// a working hardware path on the Frame: FFmpeg's V4L2 wrapper still opens a
+/// 10-bit stream, then shows it with broken colours or stalls, with no error
+/// to fall back on.
+fn hw_for_format(hw: HwDecode, format: i32) -> HwDecode {
+    if crate::v4l2::eight_bit_420(format) {
+        hw
+    } else {
+        HwDecode::Off
+    }
+}
+
 /// One way of decoding a stream, in the order [`candidates`] tries them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Candidate {
@@ -277,7 +289,13 @@ impl Decoder {
         native: bool,
     ) -> Result<Decoder> {
         // SAFETY: par is valid for the call.
-        let (codec_id, kind) = unsafe { ((*par).codec_id, (*par).codec_type) };
+        let (codec_id, kind, format) =
+            unsafe { ((*par).codec_id, (*par).codec_type, (*par).format) };
+        let hw = if kind == ff::AVMEDIA_TYPE_VIDEO {
+            hw_for_format(hw, format)
+        } else {
+            hw
+        };
         let mut last_err = Error::Unsupported(format!("no decoder for codec id {codec_id}"));
         let mut hardware_error = None;
         for cand in candidates(kind == ff::AVMEDIA_TYPE_VIDEO, codec_id, hw, native) {
@@ -659,6 +677,26 @@ mod tests {
             }
         }
         (dec.name.clone(), out)
+    }
+
+    #[test]
+    fn hardware_only_takes_8_bit_420() {
+        for format in [
+            ff::AV_PIX_FMT_NONE,
+            ff::AV_PIX_FMT_YUV420P,
+            ff::AV_PIX_FMT_YUVJ420P,
+        ] {
+            assert_eq!(hw_for_format(HwDecode::Auto, format), HwDecode::Auto);
+        }
+        // Main10: the V4L2 wrapper opens it, then shows broken colours.
+        assert_eq!(
+            hw_for_format(HwDecode::Auto, ff::AV_PIX_FMT_YUV420P10LE),
+            HwDecode::Off
+        );
+        assert_eq!(
+            hw_for_format(HwDecode::Off, ff::AV_PIX_FMT_YUV420P),
+            HwDecode::Off
+        );
     }
 
     #[test]
