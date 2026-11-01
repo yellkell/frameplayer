@@ -452,6 +452,12 @@ fn run_xr(args: &Args) -> Result<(), Error> {
         }
         let frame = session.begin_frame()?;
         let work = Instant::now();
+        // Tracking can relocalise just after launch, turning the room by
+        // anything up to half a turn: the panels would be left behind you.
+        if session.take_space_change(frame.state.predicted_display_time) {
+            log::info!("tracking space changed: recentering");
+            app.recenter();
+        }
         let input = session.input(frame.state.predicted_display_time);
         let dt = last.elapsed().as_secs_f32().min(0.1);
         last = Instant::now();

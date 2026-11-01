@@ -72,7 +72,29 @@ pub struct XrSession {
     event_buf: xr::EventDataBuffer,
     /// Offset of our play space within the runtime's LOCAL space.
     space_origin: (Vec3, Quat),
+    space_change: SpaceChange,
     quads: std::collections::HashMap<u64, QuadLayer>,
+}
+
+/// A change of the LOCAL space the runtime announced: poses only reflect it
+/// from its change time on, so acting on it earlier would use the old space.
+#[derive(Default)]
+struct SpaceChange {
+    at: Option<i64>,
+}
+
+impl SpaceChange {
+    fn pending(&mut self, time: i64) {
+        self.at = Some(time);
+    }
+
+    fn take_due(&mut self, now: i64) -> bool {
+        let due = self.at.is_some_and(|t| now >= t);
+        if due {
+            self.at = None;
+        }
+        due
+    }
 }
 
 /// One frame in progress.
@@ -180,6 +202,7 @@ impl XrSession {
             blend_mode,
             event_buf: xr::EventDataBuffer::new(),
             space_origin: (Vec3::ZERO, Quat::IDENTITY),
+            space_change: SpaceChange::default(),
             quads: std::collections::HashMap::new(),
         })
     }
@@ -248,6 +271,11 @@ impl XrSession {
                     }
                 }
                 xr::Event::InstanceLossPending(_) => return Ok(SessionEvent::Exit),
+                xr::Event::ReferenceSpaceChangePending(e)
+                    if e.reference_space_type() == xr::ReferenceSpaceType::LOCAL =>
+                {
+                    self.space_change.pending(e.change_time().as_nanos());
+                }
                 _ => {}
             }
         }
@@ -255,6 +283,12 @@ impl XrSession {
             result = SessionEvent::Running;
         }
         Ok(result)
+    }
+
+    /// Whether the LOCAL space has just moved: the runtime recentered, or
+    /// tracking relocalised. Anything placed in it is now somewhere else.
+    pub fn take_space_change(&mut self, time: xr::Time) -> bool {
+        self.space_change.take_due(time.as_nanos())
     }
 
     /// Waits for the next frame, locates the views and acquires swapchain
@@ -559,5 +593,40 @@ impl Drop for XrSession {
                 unsafe { self.gpu.device.destroy_image_view(v, None) };
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SpaceChange;
+
+    #[test]
+    fn a_space_change_waits_for_its_time() {
+        let mut c = SpaceChange::default();
+        c.pending(100);
+        assert!(!c.take_due(99));
+        assert!(c.take_due(100));
+    }
+
+    #[test]
+    fn a_space_change_fires_once() {
+        let mut c = SpaceChange::default();
+        c.pending(100);
+        assert!(c.take_due(100));
+        assert!(!c.take_due(200));
+    }
+
+    #[test]
+    fn a_later_space_change_replaces_an_earlier_one() {
+        let mut c = SpaceChange::default();
+        c.pending(100);
+        c.pending(300);
+        assert!(!c.take_due(200));
+        assert!(c.take_due(300));
+    }
+
+    #[test]
+    fn nothing_is_due_without_a_change() {
+        assert!(!SpaceChange::default().take_due(i64::MAX));
     }
 }

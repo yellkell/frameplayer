@@ -294,7 +294,7 @@ impl App {
     /// Forward becomes where the head faces, and the library and adjust
     /// panels come back in front: moved round to the side or behind, they
     /// stayed there after recentering. How high they were moved is kept.
-    fn recenter(&mut self) {
+    pub fn recenter(&mut self) {
         self.reanchor = true;
         self.panel_drag = None;
         self.offsets.main[0] = 0.0;
