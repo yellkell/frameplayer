@@ -93,7 +93,7 @@ impl Sim {
         };
         let eyes = [ev(self.head_pos() - right), ev(self.head_pos() + right)];
         self.renderer
-            .draw(&self.eyes.targets(), &eyes, &out.video, &out.quads)?;
+            .draw(&self.eyes.targets(), &eyes, &out.video, &out.quads, &[])?;
         self.renderer.end_frame()?;
         self.frames += 1;
         Ok(out.quit)

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 fn main() {
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
-    for name in ["scene", "quad", "egui"] {
+    for name in ["scene", "quad", "egui", "hand"] {
         let path = format!("shaders/{name}.wgsl");
         println!("cargo:rerun-if-changed={path}");
         let src = std::fs::read_to_string(&path).expect("shader source");

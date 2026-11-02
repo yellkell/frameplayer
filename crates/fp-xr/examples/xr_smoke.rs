@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let (Some(targets), Some(eyes)) = (frame.targets, frame.eyes) {
             renderer.begin_frame()?;
             renderer.set_video(None)?;
-            renderer.draw(&targets, &eyes, &VideoParams::default(), &[])?;
+            renderer.draw(&targets, &eyes, &VideoParams::default(), &[], &[])?;
             renderer.end_frame()?;
             rendered += 1;
         }

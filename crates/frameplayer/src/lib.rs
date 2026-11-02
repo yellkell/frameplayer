@@ -15,6 +15,8 @@ pub mod android;
 mod app;
 mod bindings;
 mod controls;
+#[cfg(any(target_os = "android", test))]
+mod glove;
 mod jobs;
 mod logger;
 #[cfg(target_os = "android")]
@@ -485,6 +487,8 @@ fn run_xr(args: &Args) -> Result<(), Error> {
     // Whether a panel showed last frame (the drawn hands go with them).
     #[cfg(target_os = "android")]
     let mut ui_shown = true;
+    #[cfg(target_os = "android")]
+    let mut gloves = glove::Gloves::default();
     loop {
         // The activity is going away: no time left for a clean session end.
         #[cfg(target_os = "android")]
@@ -522,8 +526,7 @@ fn run_xr(args: &Args) -> Result<(), Error> {
         // with them while a video plays.
         #[cfg(target_os = "android")]
         let layers = layers && !(ui_shown && android::hands_shown(&input));
-        #[allow(unused_mut)]
-        let mut out = app.frame(
+        let out = app.frame(
             &mut renderer,
             FrameInput {
                 time: start.elapsed().as_secs_f64(),
@@ -535,19 +538,23 @@ fn run_xr(args: &Args) -> Result<(), Error> {
             },
         );
         #[cfg(target_os = "android")]
-        {
-            if out.ui_shown {
-                out.quads
-                    .extend(android::hand_quads(&input, frame.head.map(|h| h.0)));
-            }
+        let hands = {
             ui_shown = out.ui_shown;
-        }
+            gloves.frame(
+                &input.hands,
+                out.ui_shown,
+                out.passthrough && session.supports_passthrough_blend(),
+                dt,
+            )
+        };
+        #[cfg(not(target_os = "android"))]
+        let hands: Vec<fp_render::HandDraw> = Vec::new();
         frames += 1;
         video_frames += out.frame.is_some() as u64;
         renderer.set_video(out.frame.as_ref())?;
         let mut submits = Vec::new();
         if let (Some(targets), Some(eyes)) = (frame.targets, frame.eyes) {
-            renderer.draw(&targets, &eyes, &out.video, &out.quads)?;
+            renderer.draw(&targets, &eyes, &out.video, &out.quads, &hands)?;
             for l in &out.layers {
                 match *l {
                     LayerDraw::Panel {

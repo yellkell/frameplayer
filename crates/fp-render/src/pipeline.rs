@@ -4,14 +4,41 @@ use crate::gpu::Gpu;
 use crate::{Result, VkContext};
 use ash::vk;
 
+/// The depth format of passes that use depth (the hands').
+pub(crate) const DEPTH_FORMAT: vk::Format = vk::Format::D16_UNORM;
+
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Blend {
+    Off,
+    /// Premultiplied alpha.
+    Premultiplied,
+    /// Only takes away: what's drawn is scaled by one minus the source alpha
+    /// (colour and alpha).
+    Erase,
+    /// Adds colour, leaves alpha as it is.
+    Add,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Depth {
+    /// No depth attachment.
+    None,
+    /// Tests (less or equal) and writes.
+    Write,
+    /// Tests (less or equal) only.
+    Test,
+}
+
 pub(crate) struct PipelineDesc<'a> {
     pub spv: &'a [u8],
+    /// The fragment shader's entry point.
+    pub fs: &'a std::ffi::CStr,
     pub layout: vk::PipelineLayout,
     pub color_format: vk::Format,
     pub vertex_stride: u32,
     pub attributes: &'a [vk::VertexInputAttributeDescription],
-    /// Premultiplied-alpha blending.
-    pub blend: bool,
+    pub blend: Blend,
+    pub depth: Depth,
 }
 
 pub(crate) fn create(gpu: &Gpu, d: &PipelineDesc) -> Result<vk::Pipeline> {
@@ -24,7 +51,7 @@ pub(crate) fn create(gpu: &Gpu, d: &PipelineDesc) -> Result<vk::Pipeline> {
         vk::PipelineShaderStageCreateInfo::default()
             .stage(vk::ShaderStageFlags::FRAGMENT)
             .module(module)
-            .name(c"fs_main"),
+            .name(d.fs),
     ];
     let bindings = [vk::VertexInputBindingDescription::default()
         .binding(0)
@@ -48,27 +75,51 @@ pub(crate) fn create(gpu: &Gpu, d: &PipelineDesc) -> Result<vk::Pipeline> {
         .line_width(1.0);
     let ms = vk::PipelineMultisampleStateCreateInfo::default()
         .rasterization_samples(vk::SampleCountFlags::TYPE_1);
-    let att = [if d.blend {
-        vk::PipelineColorBlendAttachmentState::default()
+    use vk::BlendFactor as F;
+    // (source colour, destination colour, source alpha, destination alpha)
+    let factors = match d.blend {
+        Blend::Off => None,
+        Blend::Premultiplied => Some((
+            F::ONE,
+            F::ONE_MINUS_SRC_ALPHA,
+            F::ONE,
+            F::ONE_MINUS_SRC_ALPHA,
+        )),
+        Blend::Erase => Some((
+            F::ZERO,
+            F::ONE_MINUS_SRC_ALPHA,
+            F::ZERO,
+            F::ONE_MINUS_SRC_ALPHA,
+        )),
+        Blend::Add => Some((F::ONE, F::ONE, F::ZERO, F::ONE)),
+    };
+    let att = [match factors {
+        Some((sc, dc, sa, da)) => vk::PipelineColorBlendAttachmentState::default()
             .blend_enable(true)
-            .src_color_blend_factor(vk::BlendFactor::ONE)
-            .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+            .src_color_blend_factor(sc)
+            .dst_color_blend_factor(dc)
             .color_blend_op(vk::BlendOp::ADD)
-            .src_alpha_blend_factor(vk::BlendFactor::ONE)
-            .dst_alpha_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+            .src_alpha_blend_factor(sa)
+            .dst_alpha_blend_factor(da)
             .alpha_blend_op(vk::BlendOp::ADD)
-            .color_write_mask(vk::ColorComponentFlags::RGBA)
-    } else {
-        vk::PipelineColorBlendAttachmentState::default()
-            .color_write_mask(vk::ColorComponentFlags::RGBA)
+            .color_write_mask(vk::ColorComponentFlags::RGBA),
+        None => vk::PipelineColorBlendAttachmentState::default()
+            .color_write_mask(vk::ColorComponentFlags::RGBA),
     }];
     let cb = vk::PipelineColorBlendStateCreateInfo::default().attachments(&att);
+    let ds = vk::PipelineDepthStencilStateCreateInfo::default()
+        .depth_test_enable(d.depth != Depth::None)
+        .depth_write_enable(d.depth == Depth::Write)
+        .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL);
     let dyn_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
     let dynamic = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dyn_states);
     let formats = [d.color_format];
     let mut rendering =
         vk::PipelineRenderingCreateInfo::default().color_attachment_formats(&formats);
-    let info = vk::GraphicsPipelineCreateInfo::default()
+    if d.depth != Depth::None {
+        rendering = rendering.depth_attachment_format(DEPTH_FORMAT);
+    }
+    let mut info = vk::GraphicsPipelineCreateInfo::default()
         .stages(&stages)
         .vertex_input_state(&vertex_input)
         .input_assembly_state(&ia)
@@ -79,6 +130,9 @@ pub(crate) fn create(gpu: &Gpu, d: &PipelineDesc) -> Result<vk::Pipeline> {
         .dynamic_state(&dynamic)
         .layout(d.layout)
         .push_next(&mut rendering);
+    if d.depth != Depth::None {
+        info = info.depth_stencil_state(&ds);
+    }
     // SAFETY: all referenced state lives until the call returns.
     let result = unsafe {
         gpu.device

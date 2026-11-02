@@ -3,7 +3,8 @@
 //! - [`gpu`]: instance/device creation, directly (tests, desktop preview) or
 //!   through OpenXR's `XR_KHR_vulkan_enable2`.
 //! - [`renderer`]: per-frame recording: video upload, UI panels painted with
-//!   egui, and the two eye passes (projection shader, then world-space quads).
+//!   egui, and the two eye passes (projection shader, world-space quads, then
+//!   the tracked hands).
 //! - [`params`]: turns a video format, view settings and colour info into the
 //!   projection shader's uniform block.
 //! - [`math`]: OpenXR-style projection and view matrices.
@@ -21,7 +22,9 @@ mod video;
 
 pub use gpu::{Creator, DirectCreator, Gpu};
 pub use params::VideoParams;
-pub use renderer::{EyeTarget, EyeView, PanelId, QuadDraw, QuadTexture, Renderer};
+pub use renderer::{
+    EyeTarget, EyeView, HandDraw, HandVertex, PanelId, QuadDraw, QuadTexture, Renderer,
+};
 
 use ash::vk;
 
@@ -56,3 +59,4 @@ impl<T> VkContext<T> for std::result::Result<T, vk::Result> {
 pub(crate) const SCENE_SPV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/scene.spv"));
 pub(crate) const QUAD_SPV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/quad.spv"));
 pub(crate) const EGUI_SPV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/egui.spv"));
+pub(crate) const HAND_SPV: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/hand.spv"));

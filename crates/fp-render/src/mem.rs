@@ -185,11 +185,22 @@ pub fn view(
                 .image(image)
                 .view_type(vk::ImageViewType::TYPE_2D)
                 .format(format)
-                .subresource_range(range(base_mip, mips)),
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: aspect(format),
+                    ..range(base_mip, mips)
+                }),
             None,
         )
     }
     .ctx("create image view")
+}
+
+/// The aspect an image of `format` has.
+pub fn aspect(format: vk::Format) -> vk::ImageAspectFlags {
+    match format {
+        vk::Format::D16_UNORM | vk::Format::D32_SFLOAT => vk::ImageAspectFlags::DEPTH,
+        _ => vk::ImageAspectFlags::COLOR,
+    }
 }
 
 pub fn range(base_mip: u32, mips: u32) -> vk::ImageSubresourceRange {
@@ -249,4 +260,22 @@ pub const SHADER_READ: (vk::PipelineStageFlags2, vk::AccessFlags2) = (
 pub const COLOR_WRITE: (vk::PipelineStageFlags2, vk::AccessFlags2) = (
     vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
     vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+);
+/// Blending over what an earlier pass drew.
+pub const COLOR_BLEND: (vk::PipelineStageFlags2, vk::AccessFlags2) = (
+    vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+    vk::AccessFlags2::from_raw(
+        vk::AccessFlags2::COLOR_ATTACHMENT_READ.as_raw()
+            | vk::AccessFlags2::COLOR_ATTACHMENT_WRITE.as_raw(),
+    ),
+);
+pub const DEPTH: (vk::PipelineStageFlags2, vk::AccessFlags2) = (
+    vk::PipelineStageFlags2::from_raw(
+        vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS.as_raw()
+            | vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS.as_raw(),
+    ),
+    vk::AccessFlags2::from_raw(
+        vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_READ.as_raw()
+            | vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE.as_raw(),
+    ),
 );

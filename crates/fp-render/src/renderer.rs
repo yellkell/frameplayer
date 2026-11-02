@@ -9,7 +9,7 @@
 use crate::gpu::Gpu;
 use crate::mem::{self, Buffer, Image};
 use crate::params::{self, SceneParams, VideoParams};
-use crate::pipeline::{self, PipelineDesc};
+use crate::pipeline::{self, Blend, Depth, PipelineDesc};
 use crate::video::VideoPlanes;
 use crate::{Result, VkContext};
 use ash::vk;
@@ -50,32 +50,47 @@ pub type PanelId = usize;
 pub enum QuadTexture {
     /// Solid colour (tinted by the quad colour).
     White,
-    /// A soft-edged vertical capsule (rounded at the top and bottom), for
-    /// drawing rods such as finger bones.
-    Capsule,
     Panel(PanelId),
 }
 
-/// Size of the capsule texture (width, height).
-const CAPSULE_PX: [u32; 2] = [32, 96];
+/// One vertex of a hand's glove.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct HandVertex {
+    pub pos: [f32; 3],
+    /// Outward, unit length.
+    pub normal: [f32; 3],
+    /// r: how lit the pointing fingertip is here; a: the glove's presence
+    /// (it fades out up the wrist).
+    pub color: [f32; 4],
+}
 
-/// The capsule: premultiplied white, coverage falling off over a texel at
-/// the edge.
-fn capsule_pixels() -> Vec<u8> {
-    let [w, h] = CAPSULE_PX.map(|v| v as f32);
-    let r = w / 2.0 - 1.0;
-    let mut px = Vec::with_capacity((w * h * 4.0) as usize);
-    for y in 0..CAPSULE_PX[1] {
-        for x in 0..CAPSULE_PX[0] {
-            let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-            let cy = fy.clamp(r + 1.0, h - r - 1.0);
-            let d = ((fx - w / 2.0).powi(2) + (fy - cy).powi(2)).sqrt();
-            let a = ((r - d) / 1.5 + 0.5).clamp(0.0, 1.0);
-            let v = (a * 255.0).round() as u8;
-            px.extend([v, v, v, v]);
-        }
-    }
-    px
+/// A tracked hand drawn as a glove of light (see `shaders/hand.wgsl`), over
+/// everything else: a fresnel rim round its silhouette, a faint body and the
+/// pointing fingertip lit, added to what's there. With `reveal` it first
+/// wipes what's under it, colour and alpha, so passthrough shows the real
+/// hand there.
+#[derive(Clone, Debug, Default)]
+pub struct HandDraw {
+    pub vertices: Vec<HandVertex>,
+    pub indices: Vec<u16>,
+    /// The rim's linear colour, and the lit fingertip's.
+    pub tint: [f32; 3],
+    pub tip_tint: [f32; 3],
+    pub rim: f32,
+    pub fill: f32,
+    pub tip: f32,
+    pub reveal: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct HandPush {
+    view_proj: Mat4,
+    eye: [f32; 4],
+    tint: [f32; 4],
+    tip_tint: [f32; 4],
+    extra: [f32; 4],
 }
 
 /// A textured quad in world space.
@@ -156,6 +171,10 @@ struct Slot {
     video_bound: Option<(usize, u64)>,
     has_video: bool,
     quad_vb: Buffer,
+    hand_vb: Buffer,
+    hand_ib: Buffer,
+    /// The hands' depth, shared by both eyes (made when first needed).
+    hand_depth: Option<Image>,
     egui_vb: Buffer,
     egui_ib: Buffer,
     egui_vb_used: u64,
@@ -181,8 +200,11 @@ pub struct Renderer {
     quad_pipe: vk::Pipeline,
     egui_pl: vk::PipelineLayout,
     egui_pipe: vk::Pipeline,
+    hand_pl: vk::PipelineLayout,
+    /// The hands' depth and reveal, then their glow.
+    hand_mask_pipe: vk::Pipeline,
+    hand_glow_pipe: vk::Pipeline,
     white: Tex,
-    capsule: Tex,
     dummy: Image,
     panels: Vec<Option<Panel>>,
     slots: Vec<Slot>,
@@ -261,11 +283,13 @@ impl Renderer {
                 &gpu,
                 &PipelineDesc {
                     spv: crate::SCENE_SPV,
+                    fs: c"fs_main",
                     layout: scene_pl,
                     color_format,
                     vertex_stride: 0,
                     attributes: &[],
-                    blend: false,
+                    blend: Blend::Off,
+                    depth: Depth::None,
                 },
             )?;
             let tex_layout = pipeline::set_layout(
@@ -300,13 +324,55 @@ impl Renderer {
                 &gpu,
                 &PipelineDesc {
                     spv: crate::QUAD_SPV,
+                    fs: c"fs_main",
                     layout: quad_pl,
                     color_format,
                     vertex_stride: std::mem::size_of::<QuadVertex>() as u32,
                     attributes: &quad_attrs,
-                    blend: true,
+                    blend: Blend::Premultiplied,
+                    depth: Depth::None,
                 },
             )?;
+            // The hands bind no set (the layout's is the quads', unused).
+            let hand_pl =
+                pipeline::layout(&gpu, tex_layout, std::mem::size_of::<HandPush>() as u32)?;
+            let hand_attrs = [
+                vk::VertexInputAttributeDescription {
+                    location: 0,
+                    binding: 0,
+                    format: vk::Format::R32G32B32_SFLOAT,
+                    offset: 0,
+                },
+                vk::VertexInputAttributeDescription {
+                    location: 1,
+                    binding: 0,
+                    format: vk::Format::R32G32B32_SFLOAT,
+                    offset: 12,
+                },
+                vk::VertexInputAttributeDescription {
+                    location: 2,
+                    binding: 0,
+                    format: vk::Format::R32G32B32A32_SFLOAT,
+                    offset: 24,
+                },
+            ];
+            let hand_pipe = |fs, blend, depth| {
+                pipeline::create(
+                    &gpu,
+                    &PipelineDesc {
+                        spv: crate::HAND_SPV,
+                        fs,
+                        layout: hand_pl,
+                        color_format,
+                        vertex_stride: std::mem::size_of::<HandVertex>() as u32,
+                        attributes: &hand_attrs,
+                        blend,
+                        depth,
+                    },
+                )
+            };
+            let hand_mask_pipe = hand_pipe(c"fs_mask", Blend::Erase, Depth::Write)?;
+            let hand_glow_pipe = hand_pipe(c"fs_glow", Blend::Add, Depth::Test)?;
             let egui_pl = pipeline::layout(&gpu, tex_layout, 8)?;
             let egui_attrs = [
                 vk::VertexInputAttributeDescription {
@@ -332,11 +398,13 @@ impl Renderer {
                 &gpu,
                 &PipelineDesc {
                     spv: crate::EGUI_SPV,
+                    fs: c"fs_main",
                     layout: egui_pl,
                     color_format: PANEL_FORMATS[0],
                     vertex_stride: 20,
                     attributes: &egui_attrs,
-                    blend: true,
+                    blend: Blend::Premultiplied,
+                    depth: Depth::None,
                 },
             )?;
 
@@ -354,20 +422,11 @@ impl Renderer {
                 quad_pipe,
                 egui_pl,
                 egui_pipe,
+                hand_pl,
+                hand_mask_pipe,
+                hand_glow_pipe,
                 white: Tex {
                     image: Image::new(&gpu, 1, 1, &PANEL_FORMATS, usage_sampled(), 1, "white")?,
-                    set: vk::DescriptorSet::null(),
-                },
-                capsule: Tex {
-                    image: Image::new(
-                        &gpu,
-                        CAPSULE_PX[0],
-                        CAPSULE_PX[1],
-                        &PANEL_FORMATS,
-                        usage_sampled(),
-                        1,
-                        "capsule",
-                    )?,
                     set: vk::DescriptorSet::null(),
                 },
                 dummy: Image::new(
@@ -423,15 +482,6 @@ impl Renderer {
                     );
                 }
             })?;
-            // Coverage, so the linear (UNORM) view.
-            r.capsule.set = r.tex_set(r.capsule.image.views[0])?;
-            r.upload(
-                r.capsule.image.image,
-                CAPSULE_PX[0],
-                CAPSULE_PX[1],
-                &capsule_pixels(),
-                (vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, mem::SHADER_READ),
-            )?;
             for _ in 0..SLOTS {
                 let slot = r.new_slot()?;
                 r.slots.push(slot);
@@ -493,6 +543,9 @@ impl Renderer {
                 video_bound: None,
                 has_video: false,
                 quad_vb: cpu(64 << 10, vk::BufferUsageFlags::VERTEX_BUFFER, "quads")?,
+                hand_vb: cpu(64 << 10, vk::BufferUsageFlags::VERTEX_BUFFER, "hands")?,
+                hand_ib: cpu(16 << 10, vk::BufferUsageFlags::INDEX_BUFFER, "hand indices")?,
+                hand_depth: None,
                 egui_vb: cpu(
                     1 << 20,
                     vk::BufferUsageFlags::VERTEX_BUFFER,
@@ -1119,6 +1172,7 @@ impl Renderer {
         eyes: &[EyeView; 2],
         video: &VideoParams,
         quads: &[QuadDraw],
+        hands: &[HandDraw],
     ) -> Result<()> {
         self.update_scene_set();
         let inv = [
@@ -1134,7 +1188,6 @@ impl Renderer {
         for q in quads {
             let set = match q.texture {
                 QuadTexture::White => self.white.set,
-                QuadTexture::Capsule => self.capsule.set,
                 QuadTexture::Panel(id) => match self.panels.get(id).and_then(Option::as_ref) {
                     Some(p) => p.set,
                     None => continue,
@@ -1155,6 +1208,67 @@ impl Renderer {
                 });
             }
             sets.push(set);
+        }
+        // The hands, one after another: (first index, index count, first vertex).
+        let hands: Vec<&HandDraw> = hands.iter().filter(|h| !h.indices.is_empty()).collect();
+        let mut hand_verts: Vec<HandVertex> = Vec::new();
+        let mut hand_idx: Vec<u16> = Vec::new();
+        let mut hand_ranges = Vec::with_capacity(hands.len());
+        for h in &hands {
+            hand_ranges.push((
+                hand_idx.len() as u32,
+                h.indices.len() as u32,
+                hand_verts.len() as i32,
+            ));
+            hand_verts.extend_from_slice(&h.vertices);
+            hand_idx.extend_from_slice(&h.indices);
+        }
+        {
+            let slot = &mut self.slots[slot_idx];
+            for (buf, bytes, usage, name) in [
+                (
+                    &mut slot.hand_vb,
+                    bytemuck::cast_slice::<_, u8>(&hand_verts),
+                    vk::BufferUsageFlags::VERTEX_BUFFER,
+                    "hands",
+                ),
+                (
+                    &mut slot.hand_ib,
+                    bytemuck::cast_slice(&hand_idx),
+                    vk::BufferUsageFlags::INDEX_BUFFER,
+                    "hand indices",
+                ),
+            ] {
+                if bytes.len() as u64 > buf.size {
+                    let bigger = Buffer::new(
+                        &self.gpu,
+                        bytes.len() as u64 * 2,
+                        usage,
+                        MemoryLocation::CpuToGpu,
+                        name,
+                    )?;
+                    slot.garbage_buffers.push(std::mem::replace(buf, bigger));
+                }
+                buf.bytes()[..bytes.len()].copy_from_slice(bytes);
+            }
+            let extent = targets[0].extent;
+            let fits = slot.hand_depth.as_ref().is_some_and(|i| {
+                i.extent.width >= extent.width && i.extent.height >= extent.height
+            });
+            if !hands.is_empty() && !fits {
+                let depth = Image::new(
+                    &self.gpu,
+                    extent.width,
+                    extent.height,
+                    &[pipeline::DEPTH_FORMAT],
+                    vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+                    1,
+                    "hand depth",
+                )?;
+                if let Some(old) = slot.hand_depth.replace(depth) {
+                    slot.garbage.push(old);
+                }
+            }
         }
         {
             let slot = &mut self.slots[slot_idx];
@@ -1265,6 +1379,9 @@ impl Renderer {
                 }
                 d.cmd_end_rendering(cmd);
             }
+            if let (false, Some(depth)) = (hands.is_empty(), &slot.hand_depth) {
+                self.draw_hands(slot, t, &eyes[eye], depth, &hands, &hand_ranges);
+            }
             if t.final_layout != vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL {
                 let dst = if t.final_layout == vk::ImageLayout::TRANSFER_SRC_OPTIMAL {
                     mem::TRANSFER_READ
@@ -1284,6 +1401,116 @@ impl Renderer {
             }
         }
         Ok(())
+    }
+
+    /// The hands over one eye's picture, in a pass of their own with a depth
+    /// buffer: for each, its depth and reveal, then its glow where it's the
+    /// front-most surface.
+    fn draw_hands(
+        &self,
+        slot: &Slot,
+        t: &EyeTarget,
+        eye: &EyeView,
+        depth: &Image,
+        hands: &[&HandDraw],
+        ranges: &[(u32, u32, i32)],
+    ) {
+        let (gpu, cmd) = (&self.gpu, slot.cmd);
+        let d = &gpu.device;
+        mem::barrier(
+            gpu,
+            cmd,
+            t.image,
+            mem::range(0, 1),
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            mem::COLOR_WRITE,
+            mem::COLOR_BLEND,
+        );
+        // Each eye starts afresh (and waits for the other's, or the last
+        // frame's, use of it).
+        mem::barrier(
+            gpu,
+            cmd,
+            depth.image,
+            vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::DEPTH,
+                ..mem::range(0, 1)
+            },
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+            mem::DEPTH,
+            mem::DEPTH,
+        );
+        let color = [vk::RenderingAttachmentInfo::default()
+            .image_view(t.view)
+            .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::LOAD)
+            .store_op(vk::AttachmentStoreOp::STORE)];
+        let depth_att = vk::RenderingAttachmentInfo::default()
+            .image_view(depth.level0)
+            .image_layout(vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::DONT_CARE)
+            .clear_value(vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 1.0,
+                    stencil: 0,
+                },
+            });
+        let area = vk::Rect2D {
+            offset: vk::Offset2D::default(),
+            extent: t.extent,
+        };
+        let eye_pos = eye.view.inverse().w_axis;
+        // SAFETY: recording with valid pipelines and buffers; the depth image
+        // covers the target.
+        unsafe {
+            d.cmd_begin_rendering(
+                cmd,
+                &vk::RenderingInfo::default()
+                    .render_area(area)
+                    .layer_count(1)
+                    .color_attachments(&color)
+                    .depth_attachment(&depth_att),
+            );
+            d.cmd_set_viewport(
+                cmd,
+                0,
+                &[vk::Viewport {
+                    x: 0.0,
+                    y: 0.0,
+                    width: t.extent.width as f32,
+                    height: t.extent.height as f32,
+                    min_depth: 0.0,
+                    max_depth: 1.0,
+                }],
+            );
+            d.cmd_set_scissor(cmd, 0, &[area]);
+            d.cmd_bind_vertex_buffers(cmd, 0, &[slot.hand_vb.buffer], &[0]);
+            d.cmd_bind_index_buffer(cmd, slot.hand_ib.buffer, 0, vk::IndexType::UINT16);
+            for (h, &(first, count, base)) in hands.iter().zip(ranges) {
+                let push = HandPush {
+                    view_proj: eye.proj * eye.view,
+                    eye: [eye_pos.x, eye_pos.y, eye_pos.z, 1.0],
+                    tint: [h.tint[0], h.tint[1], h.tint[2], h.rim],
+                    tip_tint: [h.tip_tint[0], h.tip_tint[1], h.tip_tint[2], h.tip],
+                    extra: [h.fill, h.reveal, 0.0, 0.0],
+                };
+                d.cmd_push_constants(
+                    cmd,
+                    self.hand_pl,
+                    vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+                    0,
+                    bytemuck::bytes_of(&push),
+                );
+                for pipe in [self.hand_mask_pipe, self.hand_glow_pipe] {
+                    d.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, pipe);
+                    d.cmd_draw_indexed(cmd, count, 1, first, base, 0);
+                }
+            }
+            d.cmd_end_rendering(cmd);
+        }
     }
 
     /// Ends recording and submits the frame.
@@ -1650,8 +1877,13 @@ impl Drop for Renderer {
                 for mut b in s.garbage_buffers.drain(..) {
                     b.destroy(&gpu);
                 }
-                for mut b in [s.uniform, s.quad_vb, s.egui_vb, s.egui_ib, s.staging] {
+                for mut b in [
+                    s.uniform, s.quad_vb, s.hand_vb, s.hand_ib, s.egui_vb, s.egui_ib, s.staging,
+                ] {
                     b.destroy(&gpu);
+                }
+                if let Some(mut i) = s.hand_depth.take() {
+                    i.destroy(&gpu);
                 }
                 d.destroy_fence(s.fence, None);
             }
@@ -1663,12 +1895,17 @@ impl Drop for Renderer {
                 }
             }
             self.white.image.destroy(&gpu);
-            self.capsule.image.destroy(&gpu);
             self.dummy.destroy(&gpu);
-            for p in [self.scene_pipe, self.quad_pipe, self.egui_pipe] {
+            for p in [
+                self.scene_pipe,
+                self.quad_pipe,
+                self.egui_pipe,
+                self.hand_mask_pipe,
+                self.hand_glow_pipe,
+            ] {
                 d.destroy_pipeline(p, None);
             }
-            for l in [self.scene_pl, self.quad_pl, self.egui_pl] {
+            for l in [self.scene_pl, self.quad_pl, self.egui_pl, self.hand_pl] {
                 d.destroy_pipeline_layout(l, None);
             }
             d.destroy_descriptor_set_layout(self.scene_layout, None);

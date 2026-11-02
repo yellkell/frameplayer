@@ -87,7 +87,9 @@ fn render(
     let eyes = [ev(-0.032), ev(0.032)];
     rig.r.begin_frame().unwrap();
     rig.r.set_video(Some(frame)).unwrap();
-    rig.r.draw(&rig.eyes.targets(), &eyes, params, &[]).unwrap();
+    rig.r
+        .draw(&rig.eyes.targets(), &eyes, params, &[], &[])
+        .unwrap();
     rig.r.end_frame().unwrap();
     rig.eyes.read(&rig.r, eye).unwrap()
 }

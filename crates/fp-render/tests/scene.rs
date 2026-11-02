@@ -53,7 +53,7 @@ fn render(
 ) -> [Vec<u8>; 2] {
     r.begin_frame().unwrap();
     r.set_video(f).unwrap();
-    r.draw(&e.targets(), &eyes_at(1.6), p, quads).unwrap();
+    r.draw(&e.targets(), &eyes_at(1.6), p, quads, &[]).unwrap();
     r.end_frame().unwrap();
     [e.read(r, 0).unwrap(), e.read(r, 1).unwrap()]
 }
@@ -386,7 +386,7 @@ fn egui_panel_and_pointer_render_in_the_scene() {
     r.set_video(None).unwrap();
     r.paint_panel(panel, &prims, &out.textures_delta, out.pixels_per_point)
         .unwrap();
-    r.draw(&e.targets(), &eyes_at(1.6), &p, &[quad, ray])
+    r.draw(&e.targets(), &eyes_at(1.6), &p, &[quad, ray], &[])
         .unwrap();
     r.end_frame().unwrap();
     let img = e.read(&r, 0).unwrap();
@@ -496,7 +496,7 @@ fn forward_follows_the_way_the_video_was_centred() {
     };
     r.begin_frame().unwrap();
     r.set_video(Some(&f)).unwrap();
-    r.draw(&e.targets(), &[ev(-0.032), ev(0.032)], &p, &[])
+    r.draw(&e.targets(), &[ev(-0.032), ev(0.032)], &p, &[], &[])
         .unwrap();
     r.end_frame().unwrap();
     let l = e.read(&r, 0).unwrap();
@@ -507,5 +507,91 @@ fn forward_follows_the_way_the_video_was_centred() {
         px(&l, SIZE / 2 + 4, SIZE / 2),
     );
     assert!(is_red(left) && is_blue(right), "{left:?} {right:?}");
+    e.destroy(&r);
+}
+
+/// A tube across the view, a metre ahead: open at its ends, normals outward.
+fn tube(radius: f32) -> fp_render::HandDraw {
+    const SIDES: u16 = 24;
+    let mut vertices = Vec::new();
+    for x in [-0.5f32, 0.5] {
+        for k in 0..SIDES {
+            let a = k as f32 * std::f32::consts::TAU / SIDES as f32;
+            let n = Vec3::new(0.0, a.cos(), a.sin());
+            vertices.push(fp_render::HandVertex {
+                pos: (Vec3::new(x, 1.6, -1.0) + n * radius).to_array(),
+                normal: n.to_array(),
+                color: [0.0, 0.0, 0.0, 1.0],
+            });
+        }
+    }
+    let mut indices = Vec::new();
+    for k in 0..SIDES {
+        let k1 = (k + 1) % SIDES;
+        indices.extend([k, k1, SIDES + k1, k, SIDES + k1, SIDES + k]);
+    }
+    fp_render::HandDraw {
+        vertices,
+        indices,
+        tint: [0.2, 0.0, 0.0],
+        tip_tint: [0.0; 3],
+        rim: 1.0,
+        fill: 0.5,
+        tip: 0.0,
+        reveal: 0.0,
+    }
+}
+
+#[test]
+fn hands_glow_at_their_front_and_reveal_whats_behind() {
+    let Some((mut r, mut e)) = setup() else {
+        return;
+    };
+    // An opaque grey menu fills the view, the hand over it.
+    let menu = QuadDraw {
+        color: [0.05, 0.05, 0.05, 1.0],
+        ..QuadDraw::panel(
+            QuadTexture::White,
+            Mat4::from_translation(Vec3::new(0.0, 1.6, -2.0)),
+            10.0,
+            10.0,
+            1.0,
+        )
+    };
+    let p = VideoParams::default();
+    let mut draw = |hand: fp_render::HandDraw| {
+        r.begin_frame().unwrap();
+        r.set_video(None).unwrap();
+        r.draw(&e.targets(), &eyes_at(1.6), &p, &[menu], &[hand])
+            .unwrap();
+        r.end_frame().unwrap();
+        e.read(&r, 0).unwrap()
+    };
+    let lit = draw(tube(0.1));
+    let (c, x) = (SIZE / 2, SIZE / 2);
+    // Facing the eye: the menu, plus the body once (the tube's back face,
+    // behind it, adds nothing): linear 0.05 + 0.2 * 0.5 red ≈ 108 sRGB, where
+    // both faces would make ≈ 145.
+    let mid = px(&lit, x, c);
+    assert!((95..=120).contains(&mid[0]), "{mid:?}");
+    assert_eq!(alpha(&lit, x, c), 255);
+    // Its edge glows brighter than its middle (at this size no pixel lands
+    // right on the silhouette, where the rim is brightest).
+    let edge = (0..c).map(|y| px(&lit, x, y)[0]).max().unwrap();
+    assert!(edge > mid[0] + 8, "edge {edge}, middle {mid:?}");
+    // Off the hand, the menu as it was.
+    let off = px(&lit, x, 2);
+    assert!(off[0] < 75 && off[0] == off[2], "{off:?}");
+
+    // Revealing: the menu's gone where the hand is (alpha 0, for
+    // passthrough), with only the hand's own light there.
+    let shown = draw(fp_render::HandDraw {
+        reveal: 1.0,
+        ..tube(0.1)
+    });
+    assert_eq!(alpha(&shown, x, c), 0);
+    let mid = px(&shown, x, c);
+    assert!(mid[1] == 0 && (75..=100).contains(&mid[0]), "{mid:?}");
+    assert_eq!(alpha(&shown, x, 2), 255);
     e.destroy(&r);
 }

@@ -555,8 +555,13 @@ impl XrSession {
         }
         Some(std::array::from_fn(|i| {
             let p = locs[i].pose.position;
+            let o = locs[i].pose.orientation;
             Joint {
                 pos: Vec3::new(p.x, p.y, p.z),
+                rot: locs[i]
+                    .location_flags
+                    .contains(xr::SpaceLocationFlags::ORIENTATION_VALID)
+                    .then(|| Quat::from_xyzw(o.x, o.y, o.z, o.w).normalize()),
                 radius: locs[i].radius,
             }
         }))

@@ -45,6 +45,9 @@ pub struct Hand {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Joint {
     pub pos: Vec3,
+    /// Its orientation (+Y out of the back of the hand, +Z back along the
+    /// bone away from the tip), when the runtime gives one.
+    pub rot: Option<Quat>,
     /// Roughly the finger's thickness there (metres).
     pub radius: f32,
 }
