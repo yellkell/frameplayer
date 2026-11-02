@@ -38,6 +38,15 @@ struct VsOut {
     @location(2) color: vec4<f32>,
 };
 
+// The fragment stages' inputs: VsOut without the position. Taking VsOut
+// itself would give them an invariant FragCoord input, which is valid SPIR-V
+// but makes the Quest's Adreno driver refuse the pipeline (ERROR_UNKNOWN).
+struct FsIn {
+    @location(0) n: vec3<f32>,
+    @location(1) v: vec3<f32>,
+    @location(2) color: vec4<f32>,
+};
+
 @vertex
 fn vs_main(i: VsIn) -> VsOut {
     var o: VsOut;
@@ -49,12 +58,12 @@ fn vs_main(i: VsIn) -> VsOut {
 }
 
 @fragment
-fn fs_mask(i: VsOut) -> @location(0) vec4<f32> {
+fn fs_mask(i: FsIn) -> @location(0) vec4<f32> {
     return vec4<f32>(0.0, 0.0, 0.0, clamp(pc.extra.y * i.color.a, 0.0, 1.0));
 }
 
 @fragment
-fn fs_glow(i: VsOut) -> @location(0) vec4<f32> {
+fn fs_glow(i: FsIn) -> @location(0) vec4<f32> {
     let facing = abs(dot(normalize(i.n), normalize(i.v)));
     let rim = pow(clamp(1.0 - facing, 0.0, 1.0), 2.4);
     let c = pc.tint.rgb * (pc.extra.x + rim * pc.tint.a)

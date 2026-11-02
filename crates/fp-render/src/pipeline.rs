@@ -141,7 +141,10 @@ pub(crate) fn create(gpu: &Gpu, d: &PipelineDesc) -> Result<vk::Pipeline> {
     // SAFETY: the module is no longer needed once the pipeline exists.
     unsafe { gpu.device.destroy_shader_module(module, None) };
     result
-        .map_err(|(_, e)| e)
+        .map_err(|(_, e)| {
+            log::error!("pipeline with fragment entry {:?} failed: {e}", d.fs);
+            e
+        })
         .ctx("create pipeline")
         .map(|p| p[0])
 }
