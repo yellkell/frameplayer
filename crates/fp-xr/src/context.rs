@@ -44,6 +44,9 @@ impl XrContext {
         e.khr_composition_layer_cylinder = avail.khr_composition_layer_cylinder;
         e.khr_composition_layer_equirect2 = avail.khr_composition_layer_equirect2;
         e.khr_visibility_mask = avail.khr_visibility_mask;
+        // Meta Quest: passthrough comes from this, not from an environment
+        // blend mode.
+        e.fb_passthrough = avail.fb_passthrough;
         #[cfg(target_os = "android")]
         {
             e.khr_android_create_instance = true;

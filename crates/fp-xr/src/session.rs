@@ -75,6 +75,17 @@ pub struct XrSession {
     quads: std::collections::HashMap<u64, QuadLayer>,
     /// Hand joint tracking (Quest), for drawing the hands.
     hand_trackers: Option<[xr::HandTracker; 2]>,
+    /// Meta's passthrough (`XR_FB_passthrough`), while it is on.
+    fb_passthrough: Option<FbPassthrough>,
+}
+
+/// The room behind everything, on a Meta Quest: its runtime offers no
+/// alpha-blend environment mode, so passthrough is a layer of its own under
+/// the projection layer, whose alpha lets it through.
+struct FbPassthrough {
+    // Declared first so it is destroyed before the feature it belongs to.
+    layer: xr::PassthroughLayerFB,
+    _feature: xr::Passthrough,
 }
 
 /// One frame in progress.
@@ -161,7 +172,12 @@ impl XrSession {
             .first()
             .copied()
             .unwrap_or(xr::EnvironmentBlendMode::OPAQUE);
-        log::info!("XR session: {w}x{h} per eye, {format:?}, blend {blend_mode:?}");
+        log::info!(
+            "XR session: {w}x{h} per eye, {format:?}, blend {blend_mode:?} of {:?}, \
+             XR_FB_passthrough {}",
+            ctx.blend_modes,
+            ctx.enabled.fb_passthrough
+        );
         // The Quest draws no hands in an immersive app: we do, from these.
         let hand_trackers = if cfg!(target_os = "android") && ctx.enabled.ext_hand_tracking {
             match (
@@ -199,6 +215,7 @@ impl XrSession {
             space_origin: (Vec3::ZERO, Quat::IDENTITY),
             quads: std::collections::HashMap::new(),
             hand_trackers,
+            fb_passthrough: None,
         })
     }
 
@@ -210,19 +227,66 @@ impl XrSession {
         self.state
     }
 
-    /// Whether the runtime supports a blend mode showing the real world.
+    /// Whether the runtime can show the real world behind the app: an
+    /// alpha-blend environment mode, or Meta's passthrough layer.
     pub fn supports_passthrough_blend(&self) -> bool {
-        self.ctx
-            .blend_modes
-            .contains(&xr::EnvironmentBlendMode::ALPHA_BLEND)
+        self.ctx.enabled.fb_passthrough
+            || self
+                .ctx
+                .blend_modes
+                .contains(&xr::EnvironmentBlendMode::ALPHA_BLEND)
     }
 
     pub fn set_passthrough(&mut self, on: bool) {
+        if self.ctx.enabled.fb_passthrough {
+            // The frame stays opaque; the passthrough layer goes under it.
+            self.blend_mode = xr::EnvironmentBlendMode::OPAQUE;
+            if on && self.fb_passthrough.is_none() {
+                match self.start_fb_passthrough() {
+                    Ok(p) => {
+                        log::info!("passthrough: on (XR_FB_passthrough)");
+                        self.fb_passthrough = Some(p);
+                    }
+                    Err(e) => log::warn!("passthrough: {e}"),
+                }
+            } else if !on && self.fb_passthrough.take().is_some() {
+                log::info!("passthrough: off");
+            }
+            return;
+        }
         self.blend_mode = if on && self.supports_passthrough_blend() {
             xr::EnvironmentBlendMode::ALPHA_BLEND
         } else {
             xr::EnvironmentBlendMode::OPAQUE
         };
+    }
+
+    /// Creates Meta's passthrough already running (openxr 0.22's
+    /// `Passthrough::start` calls xrPassthroughPauseFB, so it is never
+    /// started or paused here: dropping it turns passthrough off).
+    fn start_fb_passthrough(&self) -> Result<FbPassthrough> {
+        let running = xr::PassthroughFlagsFB::IS_RUNNING_AT_CREATION;
+        let feature = self
+            .session
+            .create_passthrough(running)
+            .ctx("xrCreatePassthroughFB")?;
+        let layer = self
+            .session
+            .create_passthrough_layer(
+                &feature,
+                running,
+                xr::PassthroughLayerPurposeFB::RECONSTRUCTION,
+            )
+            .ctx("xrCreatePassthroughLayerFB")?;
+        Ok(FbPassthrough {
+            layer,
+            _feature: feature,
+        })
+    }
+
+    /// Whether this frame shows the room behind the projection layer.
+    fn passthrough_on(&self) -> bool {
+        self.blend_mode == xr::EnvironmentBlendMode::ALPHA_BLEND || self.fb_passthrough.is_some()
     }
 
     /// Asks the runtime to end the session; [`XrSession::poll`] reports
@@ -484,9 +548,22 @@ impl XrSession {
             })
             .collect();
         let mut flags = xr::CompositionLayerFlags::EMPTY;
-        if self.blend_mode == xr::EnvironmentBlendMode::ALPHA_BLEND {
+        if self.passthrough_on() {
             flags |= xr::CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA;
         }
+        // openxr 0.22 keeps its builder for this layer private: the raw
+        // struct, shown to the frame stream as a layer header (what the
+        // crate's own builders do through Deref).
+        let room = self
+            .fb_passthrough
+            .as_ref()
+            .map(|p| xr::sys::CompositionLayerPassthroughFB {
+                ty: xr::sys::CompositionLayerPassthroughFB::TYPE,
+                next: std::ptr::null(),
+                flags: xr::CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA,
+                space: xr::sys::Space::default(),
+                layer_handle: p.layer.as_raw(),
+            });
         let layer = xr::CompositionLayerProjection::new()
             .layer_flags(flags)
             .space(&self.space)
@@ -521,7 +598,17 @@ impl XrSession {
                 )
             })
             .collect();
-        let mut all: Vec<&xr::CompositionLayerBase<xr::Vulkan>> = vec![&*layer];
+        let mut all: Vec<&xr::CompositionLayerBase<xr::Vulkan>> = Vec::new();
+        if let Some(r) = &room {
+            // SAFETY: CompositionLayerBase is repr(transparent) over the
+            // layer header every composition layer struct starts with, and
+            // `room` outlives the xrEndFrame call below.
+            all.push(unsafe {
+                &*(r as *const xr::sys::CompositionLayerPassthroughFB
+                    as *const xr::CompositionLayerBase<xr::Vulkan>)
+            });
+        }
+        all.push(&*layer);
         all.extend(quad_layers.iter().map(|q| &**q));
         self.stream
             .end(time, self.blend_mode, &all)
