@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Sat, 31 Oct 2026 12:00:00 +0000
+Subject: [PATCH 19/19] gpu: don't double-close the dmabuf fd of a failed
+ Vulkan import
+
+Playing HEVC through the V4L2 hardware decoder (patch 0014) crashes the GPU
+process 1-2 minutes in, then the page's renderer with SIGSEGV
+(XRWebGLDrawingBuffer::BindAndResolveDestinationFramebuffer, after the GPU
+context is lost):
+
+  FATAL scoped_file.cc:45 Check failed: 0 == ret. : Bad file descriptor (9)
+  ScopedFDCloseTraits::Free <- NativePixmapHandle::~NativePixmapHandle
+    <- VulkanImage::InitializeFromGpuMemoryBufferHandle
+
+strace of the GPU process (close/dup only) at the abort: the decoder thread
+dups the frame's two plane fds (192->143, 194->156), then the GPU main thread
+closes 143 (by the driver, inside the import), 156 and 143 again (EBADF).
+Every earlier frame closes 143 and 156 once each.
+
+VulkanImage::InitializeFromGpuMemoryBufferHandle releases plane 0's fd from
+the handle and passes it to vkAllocateMemory, and takes it back
+(scoped_fd.reset) if the result is kFailedBeforeAllocateMemory. That result
+also covers vkAllocateMemory itself failing, and then the driver has already
+closed the fd, so the handle closes a dead fd number.
+
+Give Vulkan a dup and leave the original with the handle, which closes it
+once. A failed import may leak the dup (the driver may or may not have closed
+it); that beats aborting the GPU process.
+
+Not run on a Frame yet: it needs a Chromium rebuild.
+---
+diff --git a/gpu/vulkan/vulkan_image_linux.cc b/gpu/vulkan/vulkan_image_linux.cc
+index 2ca3580..9fb5346 100644
+--- a/gpu/vulkan/vulkan_image_linux.cc
++++ b/gpu/vulkan/vulkan_image_linux.cc
+@@ -4,10 +4,13 @@
+ 
+ #include "gpu/vulkan/vulkan_image.h"
+ 
++#include <unistd.h>
++
+ #include <tuple>
+ #include <vector>
+ 
+ #include "base/logging.h"
++#include "base/posix/eintr_wrapper.h"
+ #include "gpu/vulkan/vulkan_device_queue.h"
+ #include "gpu/vulkan/vulkan_function_pointers.h"
+ #include "gpu/vulkan/vulkan_util.h"
+@@ -87,7 +90,18 @@ bool VulkanImage::InitializeFromGpuMemoryBufferHandle(
+     external_image_create_info.pNext = &modifier_info;
+   }
+ 
+-  int memory_fd = scoped_fd.release();
++  // vkAllocateMemory() owns the imported fd from the moment it is called, and
++  // a driver may close it even when the allocation then fails (seen with
++  // Turnip importing the Steam Frame's V4L2 NV12 frames). Give Vulkan a
++  // duplicate and leave the original with |native_pixmap_handle|, which closes
++  // it exactly once. Taking the fd back from a failed import (below, before)
++  // closed an fd the driver had already closed, and ScopedFD CHECKs that
++  // close() succeeds: the GPU process aborted.
++  int memory_fd = HANDLE_EINTR(dup(scoped_fd.get()));
++  if (memory_fd < 0) {
++    DPLOG(ERROR) << "Failed to duplicate the GpuMemoryBuffer fd";
++    return false;
++  }
+   VkImportMemoryFdInfoKHR import_memory_fd_info = {
+       .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR,
+       .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+@@ -114,12 +128,10 @@ bool VulkanImage::InitializeFromGpuMemoryBufferHandle(
+   auto result = InitializeSingleOrJointPlanes(
+       device_queue, size, format, usage, flags, image_tiling,
+       &external_image_create_info, &import_memory_fd_info, requirements);
+-  // If vkAllocateMemory() returned successfully, the fd in scoped_fd should be
+-  // owned by vulkan, otherwise take the ownership of the fd back.
+-  if (result == kFailedBeforeAllocateMemory) {
+-    scoped_fd.reset(memory_fd);
+-  }
+-
++  // |memory_fd| is Vulkan's now. If the import failed, the driver may or may
++  // not have closed it, and there is no telling which, so it is left alone: at
++  // worst one fd leaks per failed import, instead of the GPU process aborting
++  // on a double close.
+   return result;
+ }
+ 
+-- 
+2.43.0
