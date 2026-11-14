@@ -1,0 +1,227 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: FramePlayer contributors <noreply@example.invalid>
+Date: Tue, 10 Nov 2026 12:00:00 +0000
+Subject: [PATCH 20/20] media: one SharedImage per V4L2 MMAP buffer; XR: survive
+ a lost context
+
+With the V4L2 stateful decoder (patch 0014) the CAPTURE queue uses
+driver-allocated MMAP buffers and every decoded frame leaves the decoder as a
+new wrapping frame. MailboxVideoFrameConverter keyed its SharedImages by the
+frame unique_id and there was no original-frame lookup without a frame pool,
+so each frame was imported anew (dmabuf fd dup + Vulkan import) and the
+SharedImage destroyed with the wrapper: a per-frame cost that held 4K120 HEVC
+at 60-80 fps, and an occasional failed import ("CreateSharedImage: could not
+create backing") that restarted the GPU process.
+
+- VideoDecoderMixin::GetOriginalOutputFrame(token): new, default nullptr.
+  V4L2StatefulVideoDecoder remembers the buffer frame behind each MMAP output
+  wrapper by tracking token (the wrapper keeps the token); after a new buffer
+  allocation the old set lives on for 64 more outputs.
+- VideoDecoderPipeline binds it as the converter's GetOriginalFrameCB when the
+  decoder allocates its own buffers (was a null callback).
+- FrameResourceConverter::GetOriginalFrame falls back to the frame itself when
+  the lookup does not know the token.
+
+After a GPU restart the WebGL context is lost and DrawingBuffer::client() is
+null; XRWebGLDrawingBuffer called it unchecked in four places (renderer
+SIGSEGV in BindAndResolveDestinationFramebuffer). Those calls are now guarded,
+as the other ones in the file already were.
+---
+--- a/third_party/blink/renderer/platform/graphics/gpu/xr_webgl_drawing_buffer.cc
++++ b/third_party/blink/renderer/platform/graphics/gpu/xr_webgl_drawing_buffer.cc
+@@ -506,6 +506,8 @@
+   }
+ 
+   DrawingBuffer::Client* client = drawing_buffer_->client();
++  if (!client)
++    return;
+   client->DrawingBufferClientRestoreRenderbufferBinding();
+   client->DrawingBufferClientRestoreFramebufferBinding();
+ }
+@@ -534,8 +536,8 @@
+   std::unique_ptr<gpu::SharedImageTexture> texture =
+       client_shared_image->CreateGLTexture(gl);
+ 
+-  DrawingBuffer::Client* client = drawing_buffer_->client();
+-  client->DrawingBufferClientRestoreTexture2DBinding();
++  if (DrawingBuffer::Client* client = drawing_buffer_->client())
++    client->DrawingBufferClientRestoreTexture2DBinding();
+ 
+   return base::MakeRefCounted<ColorBuffer>(weak_factory_.GetWeakPtr(),
+                                            std::move(client_shared_image),
+@@ -581,7 +583,8 @@
+ 
+     gl->BindFramebuffer(GL_FRAMEBUFFER, resolved_framebuffer_);
+ 
+-    client->DrawingBufferClientRestoreScissorTest();
++    if (client)
++      client->DrawingBufferClientRestoreScissorTest();
+   } else {
+     gl->BindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
+     DVLOG(3) << __func__ << ": nothing to do";
+@@ -634,7 +637,8 @@
+ 
+   ClearBoundFramebuffer();
+ 
+-  client->DrawingBufferClientRestoreFramebufferBinding();
++  if (client)
++    client->DrawingBufferClientRestoreFramebufferBinding();
+ }
+ 
+ std::unique_ptr<SharedImageHolder>
+--- a/media/gpu/chromeos/frame_resource_converter.cc
++++ b/media/gpu/chromeos/frame_resource_converter.cc
+@@ -72,7 +72,10 @@
+     FrameResource& frame) const {
+   DCHECK(parent_task_runner_->RunsTasksInCurrentSequence());
+   if (!get_original_frame_cb_.is_null()) {
+-    return get_original_frame_cb_.Run(frame.tracking_token());
++    FrameResource* original = get_original_frame_cb_.Run(frame.tracking_token());
++    // A decoder that only knows some of its frames (V4L2 stateful MMAP
++    // buffers) returns null for the rest: use the frame itself then.
++    return original ? original : &frame;
+   }
+   return &frame;
+ }
+--- a/media/gpu/chromeos/video_decoder_pipeline.h
++++ b/media/gpu/chromeos/video_decoder_pipeline.h
+@@ -146,6 +146,14 @@
+   // implementation indicates no limit.
+   virtual size_t GetMaxOutputFramePoolSize() const;
+ 
++  // For decoders that output wrapping frames of their own buffers (V4L2
++  // stateful decoders with driver-allocated MMAP buffers): returns the
++  // per-buffer frame a wrapper with |tracking_token| came from, so the
++  // MailboxVideoFrameConverter keeps one SharedImage per buffer instead of
++  // importing every frame anew. nullptr = unknown.
++  virtual FrameResource* GetOriginalOutputFrame(
++      const base::UnguessableToken& tracking_token);
++
+   // Implementers should override the other Initialize(). The decoder
+   // pipeline wants a FrameResource, not a VideoFrame.
+   void Initialize(const VideoDecoderConfig& config,
+--- a/media/gpu/chromeos/video_decoder_pipeline.cc
++++ b/media/gpu/chromeos/video_decoder_pipeline.cc
+@@ -175,6 +175,11 @@
+ 
+ void VideoDecoderMixin::ReleaseSecureBuffer(uint64_t secure_handle) {}
+ 
++FrameResource* VideoDecoderMixin::GetOriginalOutputFrame(
++    const base::UnguessableToken& tracking_token) {
++  return nullptr;
++}
++
+ size_t VideoDecoderMixin::GetMaxOutputFramePoolSize() const {
+   return std::numeric_limits<size_t>::max();
+ }
+@@ -722,7 +727,11 @@
+     } else {
+ #if BUILDFLAG(IS_LINUX) && BUILDFLAG(USE_V4L2_CODEC)
+       if (!main_frame_pool_) {
+-        get_original_frame_cb = base::NullCallback();
++        // Decoder-allocated buffers: the decoder knows its own buffers.
++        // base::Unretained() is safe as for the OOP decoder above.
++        get_original_frame_cb =
++            base::BindRepeating(&VideoDecoderMixin::GetOriginalOutputFrame,
++                                base::Unretained(decoder_.get()));
+       } else
+ #endif  // BUILDFLAG(IS_LINUX) && BUILDFLAG(USE_V4L2_CODEC)
+       {
+@@ -1203,7 +1212,16 @@
+     if (viable_candidate) {
+       // This is not compatible with VdVideoDecodeAccelerator, which expects
+       // GPU buffers in VdVideoDecodeAccelerator::GetPicture().
+-      frame_converter_->set_get_original_frame_cb(base::NullCallback());
++      if (frame_converter_->UsesGetOriginalFrameCB()) {
++        // The decoder allocates its own buffers now and knows them.
++        // base::Unretained() is safe: |frame_converter_| is reset first in
++        // the destructor, and the callback is nulled before |decoder_| goes.
++        frame_converter_->set_get_original_frame_cb(base::BindRepeating(
++            &VideoDecoderMixin::GetOriginalOutputFrame,
++            base::Unretained(decoder_.get())));
++      } else {
++        frame_converter_->set_get_original_frame_cb(base::NullCallback());
++      }
+       main_frame_pool_.reset();
+       return *viable_candidate;
+     }
+--- a/media/gpu/v4l2/v4l2_stateful_video_decoder.h
++++ b/media/gpu/v4l2/v4l2_stateful_video_decoder.h
+@@ -46,6 +46,9 @@
+ // https://www.kernel.org/doc/html/latest/userspace-api/media/v4l/dev-decoder.html
+ class MEDIA_GPU_EXPORT V4L2StatefulVideoDecoder : public VideoDecoderMixin {
+  public:
++  FrameResource* GetOriginalOutputFrame(
++      const base::UnguessableToken& tracking_token) override;
++
+   static std::unique_ptr<VideoDecoderMixin> Create(
+       std::unique_ptr<MediaLog> media_log,
+       scoped_refptr<base::SequencedTaskRunner> task_runner,
+@@ -206,6 +209,16 @@
+   std::unique_ptr<H264FrameReassembler> h264_frame_reassembler_
+       GUARDED_BY_CONTEXT(sequence_checker_);
+ 
++  // V4L2_MEMORY_MMAP: the per-buffer frames the output wrappers come from, by
++  // tracking token, for GetOriginalOutputFrame(). After a new CAPTURE buffer
++  // allocation the previous set is kept for kRetiredOutputFrames more outputs
++  // (frames already on their way) and then dropped.
++  base::flat_map<base::UnguessableToken, scoped_refptr<FrameResource>>
++      mmap_output_frames_ GUARDED_BY_CONTEXT(sequence_checker_);
++  base::flat_map<base::UnguessableToken, scoped_refptr<FrameResource>>
++      retired_mmap_output_frames_ GUARDED_BY_CONTEXT(sequence_checker_);
++  int retired_outputs_left_ GUARDED_BY_CONTEXT(sequence_checker_) = 0;
++
+   // Pegged to the construction and main work thread. Notably, |task_runner| is
+   // not used.
+   SEQUENCE_CHECKER(sequence_checker_);
+--- a/media/gpu/v4l2/v4l2_stateful_video_decoder.cc
++++ b/media/gpu/v4l2/v4l2_stateful_video_decoder.cc
+@@ -725,6 +725,20 @@
+   }
+ }
+ 
++FrameResource* V4L2StatefulVideoDecoder::GetOriginalOutputFrame(
++    const base::UnguessableToken& tracking_token) {
++  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
++  if (auto it = mmap_output_frames_.find(tracking_token);
++      it != mmap_output_frames_.end()) {
++    return it->second.get();
++  }
++  if (auto it = retired_mmap_output_frames_.find(tracking_token);
++      it != retired_mmap_output_frames_.end()) {
++    return it->second.get();
++  }
++  return nullptr;
++}
++
+ bool V4L2StatefulVideoDecoder::InitializeCAPTUREQueue() {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+   DCHECK(IsInitialized()) << "V4L2StatefulVideoDecoder must be Initialize()d";
+@@ -833,6 +847,12 @@
+     return false;
+   }
+ 
++  // New buffers: the old ones are only needed for frames already sent out.
++  if (!mmap_output_frames_.empty()) {
++    retired_mmap_output_frames_ = std::move(mmap_output_frames_);
++    mmap_output_frames_.clear();
++    retired_outputs_left_ = 64;
++  }
+   const auto allocated_buffers = CAPTURE_queue_->AllocateBuffers(
+       v4l2_num_buffers, buffer_type, /*incoherent=*/false);
+   if (allocated_buffers < v4l2_num_buffers) {
+@@ -1056,6 +1076,12 @@
+         // with hypothetical resolution changes.
+         CHECK(gfx::Rect(frame->coded_size()).Contains(visible_rect_));
+         CHECK(frame->visible_rect().Contains(visible_rect_));
++        // The wrapper keeps |frame|'s tracking token; remember the buffer
++        // frame so the converter reuses its SharedImage (patch 0020).
++        mmap_output_frames_.insert_or_assign(frame->tracking_token(), frame);
++        if (retired_outputs_left_ > 0 && --retired_outputs_left_ == 0) {
++          retired_mmap_output_frames_.clear();
++        }
+         auto wrapped_frame =
+             frame->CreateWrappingFrame(visible_rect_,
+                                        /*natural_size=*/visible_rect_.size());
+-- 
+2.43.0
